@@ -5,10 +5,11 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from pennyquant.database.repository import Repository
-from pennyquant.dashboard.app import event_health
+from pennyquant.dashboard.app import event_health, monitor_mode, quote_health
 
 APP = str(Path(__file__).resolve().parents[1] / "pennyquant/dashboard/app.py")
 T0 = "2026-11-13T14:31:00+00:00"
@@ -106,3 +107,98 @@ def test_event_health_does_not_infer_connection_and_checks_clock():
     future = event_health({"last_event": (now + timedelta(seconds=10)).isoformat()}, now)
     assert future["stale"] is True
     assert future["status"] == "이벤트 시각이 현재보다 미래임"
+
+
+def setup_monitor_db(tmp_path, monkeypatch, *, status="connected", error=None):
+    db_path = tmp_path / "monitor.db"
+    report_path = tmp_path / "unrelated-report.json"
+    monkeypatch.setenv("PQ_DB", str(db_path))
+    monkeypatch.setenv("PQ_REPORT", str(report_path))
+    now = datetime.now(timezone.utc)
+    received = now.isoformat()
+    repo = Repository(db_path)
+    repo.set_control("source", {"synthetic": False, "label": "Toss observed prices, partial venues, not NBBO"})
+    repo.set_control("runtime", {"mode": "monitor", "provider": "toss", "last_event": received})
+    repo.set_control("monitor", {"mode": "monitor", "provider": "toss", "status": status,
+        "symbols": ["AAPL", "MSFT"], "interval_seconds": 3, "last_success": received,
+        "error": error, "feed_verified": False, "trading_enabled": False,
+        "missing_symbols": ["MSFT"] if error else []})
+    aapl = {"id": "AAPL", "symbol": "AAPL", "last_price": "185.70", "currency": "USD",
+        "timestamp": (now - timedelta(minutes=5)).isoformat(), "received_at": received, "source": "toss"}
+    repo.record("stocks", aapl)
+    repo.record("stocks", {"id": "OLD", "symbol": "OLD", "last_price": "999", "currency": "USD",
+        "timestamp": received, "received_at": received, "source": "toss"})
+    repo.record("price_samples", {**aapl, "id": "AAPL-1"})
+    if not error:
+        msft = {"id": "MSFT", "symbol": "MSFT", "last_price": "351.24", "currency": "USD",
+            "timestamp": None, "received_at": received, "source": "toss"}
+        repo.record("stocks", msft)
+        repo.record("price_samples", {**msft, "id": "MSFT-1"})
+    repo.close()
+    # A monitoring DB must not display a coincidental demo/performance file.
+    report_path.write_text("not a valid report", encoding="utf-8")
+    return db_path
+
+
+def test_monitor_displays_observed_prices_without_paper_account_or_controls(tmp_path, monkeypatch):
+    db_path = setup_monitor_db(tmp_path, monkeypatch)
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception
+    assert not app.get("help_info")
+    assert len(app.tabs) == 4
+    assert not any(item.label in {"총자산", "가용 현금", "최근 세션 손익"} for item in app.metric)
+    assert not any(button.label in {"신규 진입 중지", "신규 진입 재개"} for button in app.button)
+    assert next(item for item in app.metric if item.label == "관심 종목").value == "2개"
+    assert next(item for item in app.metric if item.label == "현재가 수신 종목").value == "2개"
+    assert not app.error  # unrelated invalid report is not read in monitor mode
+    assert not app.get("download_button")
+    prices = next(item.value for item in app.dataframe if "현재가 ($)" in item.value.columns)
+    assert set(prices["종목"]) == {"AAPL", "MSFT"}
+    assert prices.loc[prices["종목"] == "AAPL", "현재가 ($)"].iloc[0] == 185.7
+    assert prices.loc[prices["종목"] == "AAPL", "제공 시각 상태"].iloc[0] == "제공 시각이 오래됨"
+    assert prices.loc[prices["종목"] == "MSFT", "제공 시각 상태"].iloc[0] == "제공 시각 미확인"
+    assert set(prices["거래 가능 여부"]) == {"미확인"}
+    assert any("조회 시점별 가격" in item.value for item in app.markdown)
+    assert any("체결 틱이나 1분봉 차트가 아닙니다" in item.value for item in app.markdown)
+    repo = Repository(db_path)
+    assert repo.load_state() is None
+    assert repo.get_control("manual_halt") is None
+    repo.close()
+
+
+@pytest.mark.parametrize("status,label", [("error", "조회 오류"), ("stopped", "수집 중지 · 오류")])
+def test_monitor_surfaces_errors_and_never_fills_unknown_price_with_zero(tmp_path, monkeypatch, status, label):
+    setup_monitor_db(tmp_path, monkeypatch, status=status,
+                     error={"code": "http_error", "http_status": 403, "message": "Provider rejected access"})
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception
+    assert next(item for item in app.metric if item.label == "수집 상태").value == label
+    assert next(item for item in app.metric if item.label == "현재가 수신 종목").value == "1개"
+    assert any("HTTP 403" in item.value for item in app.error)
+    prices = next(item.value for item in app.dataframe if "현재가 ($)" in item.value.columns)
+    assert prices.loc[prices["종목"] == "MSFT", "현재가 ($)"].isna().all()
+    assert any("MSFT" in item.value for item in app.warning)
+
+
+def test_monitor_mode_can_be_forced_before_collector_creates_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("PQ_DB", str(tmp_path / "absent.db"))
+    monkeypatch.setenv("PQ_REPORT", str(tmp_path / "absent.json"))
+    monkeypatch.setattr("sys.argv", [APP, "--mode", "monitor"])
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception
+    assert not any(button.label in {"신규 진입 중지", "신규 진입 재개"} for button in app.button)
+    assert any("토스 시세 모니터링" in item.value for item in app.markdown)
+    assert next(item for item in app.metric if item.label == "수집 상태").value == "수집 상태 미확인"
+
+
+def test_quote_health_distinguishes_missing_old_and_fresh_provider_time():
+    now = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
+    assert quote_health(None, now)["status"] == "제공 시각 미확인"
+    old = quote_health((now - timedelta(minutes=3)).isoformat(), now)
+    assert old["stale"] is True and old["status"] == "제공 시각이 오래됨"
+    fresh = quote_health((now - timedelta(seconds=1)).isoformat(), now)
+    assert fresh["stale"] is False
+    assert "실시간 권한 별도 확인" in fresh["status"]
+    assert monitor_mode({}, {}, "monitor") is True
+    assert monitor_mode({"mode": "monitor"}, {}, "paper") is True
+    assert monitor_mode({}, {}, "auto") is False

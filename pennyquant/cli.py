@@ -17,6 +17,13 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("doctor", help="Offline dependency/configuration check; no credentials printed")
     check = commands.add_parser("check-toss", help="Read-only Toss authentication and one-symbol price check; never prints credentials")
     check.add_argument("--symbol", default="AAPL", help="Symbol for a read-only price lookup")
+    run_toss = commands.add_parser("run-toss", help="Run Toss-only observed-price monitoring and its local dashboard")
+    run_toss.add_argument("--symbols", default="AAPL,MSFT", help="Comma-separated US symbols; at most 20")
+    run_toss.add_argument("--interval", type=float, default=3, help="Polling interval seconds, minimum 1")
+    run_toss.add_argument("--db", type=Path, default=Path("data/toss-monitor.db"))
+    run_toss.add_argument("--port", type=int, default=8501, help="Local dashboard port")
+    run_toss.add_argument("--no-dashboard", action="store_true", help="Collect prices without launching Streamlit")
+    run_toss.add_argument("--max-polls", type=int, help="Stop after this many polls; default runs until Ctrl+C")
     demo = commands.add_parser("demo", help="Generate synthetic tape, replay and compare four strategies")
     demo.add_argument("--out", type=Path, default=Path("data"))
     demo.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
@@ -59,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
             import asyncio
             from .connection import run_check
             return asyncio.run(run_check(args.symbol))
+        elif args.command == "run-toss":
+            import asyncio
+            from .toss_app import run_toss_app
+            return asyncio.run(run_toss_app(args))
         elif args.command == "doctor":
             packages = ("httpx", "websockets", "PyYAML", "pandas", "numpy", "streamlit", "exchange-calendars")
             print(json.dumps({"python": sys.version.split()[0], "mode": settings.mode,
@@ -102,7 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"PennyQuant: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print("Stopped; persisted paper state is retained.", file=sys.stderr)
+        message = "Toss monitoring stopped." if args.command == "run-toss" else "Stopped; persisted paper state is retained."
+        print(message, file=sys.stderr)
         return 130
 
 

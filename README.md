@@ -43,11 +43,28 @@ Windows에서는 이후 예시의 `python`을 `.\.venv\Scripts\python.exe`로 �
 
 간단한 개발 설치는 `python -m pip install -e '.[dev]'`도 가능합니다. `requirements.lock`은 이번 검증에 사용한 버전과 해시를 고정합니다. 검증 기록은 `docs/VALIDATION.md`에 있습니다. 이번 실행 환경은 Linux이며 실제 Windows OS에서의 실행 검증은 아직 수행하지 않았습니다.
 
+## 토스만 연결해서 실행
+
+토스 인증과 현재가 조회를 확인했다면 `run-toss`로 현재가 수집과 대시보드를 함께 실행할 수 있습니다. Alpaca·SEC·RSS 설정 없이 토스의 실제 현재가를 일정 간격으로 조회합니다. 이 모드는 **시세 모니터링 전용**이며, 뉴스 기반 전략의 자동 진입이나 모의주문을 실행하지 않습니다.
+
+PyCharm에서 **Ctrl+T**로 최신 코드를 받은 뒤 프로젝트 루트의 PowerShell 터미널에서 실행합니다. 아래는 가상환경 폴더 이름이 `venv`인 경우입니다. `.venv`로 만들었다면 경로의 `venv`를 `.venv`로 바꾸세요.
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.lock
+.\venv\Scripts\python.exe -m pip install --no-deps -e .
+.\venv\Scripts\python.exe -m pennyquant run-toss --symbols AAPL,MSFT
+```
+
+브라우저에서 **http://localhost:8501**을 엽니다. 현재가, 제공 시각, 수신 시각, 조회한 가격의 추이를 확인할 수 있습니다. 종료는 실행 중인 터미널에서 **Ctrl+C**를 누르면 수집기와 대시보드가 함께 종료됩니다.
+
+`TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET`이 실행 환경에 있어야 합니다. Windows 사용자 환경변수로 저장했다면 PyCharm을 완전히 종료한 뒤 다시 실행해 새 값을 반영하세요. 기본 DB는 데모와 분리한 `data/toss-monitor.db`이며, 시세 모드에서는 계좌 잔고나 손익을 만들지 않습니다. 상세 설정과 오류 확인은 [토스만 연결해 실행하기](docs/TOSS_RUN.md)에 있습니다.
+
 ## 구현 범위
 
 | 영역 | 제공 내용 | 확인할 제한 |
 |---|---|---|
 | 시세·뉴스 수집 | 토스 REST/WS, Alpaca REST/WS, SEC, RSS/Atom | 실제 키·권한 미검증. 수집 출력만으로 완전한 매매 입력은 되지 않음 |
+| 토스 시세 모니터링 | 현재가 반복 조회·제공/수신 시각·조회 가격 추이·대시보드 동시 실행 | 시세 감시 전용. 뉴스·완전한 시장 입력이 없으면 자동 진입하지 않음 |
 | 스캐너 | 가격·상승률·동시간 RVOL·거래대금·스프레드·중단·희석·기업행동 필터, 후보 20개 | 미확인 데이터로 진입하지 않음 |
 | 뉴스 | 중복 제거, 발표·수신 시간 분리, 보수적인 이벤트 규칙 | SEC 목록만으로 공시 본문을 판단하지 않음. NLP/LLM 없음 |
 | 전략 | 모멘텀, 눌림목, 갭 돌파, VWAP 회복 | 실험 규칙이며 최적화·수익성 검증을 수행하지 않음 |
@@ -56,11 +73,14 @@ Windows에서는 이후 예시의 `python`을 `.\.venv\Scripts\python.exe`로 �
 | 대시보드 | 시세·뉴스·포지션·주문·전략 성과·상태·신규 진입 중지 | 화면의 중지 해제는 다른 위험 제한을 해제하지 않음 |
 | 실거래 | 명시적 차단과 교체 가능한 어댑터 경계 | 실제 주문·OCO·계정 체결 복구는 2차 구현 및 수동 승인 필요 |
 
-처음부터 끝까지 연결된 기능 검증 경로는 `demo`와 정규화 이벤트 `replay`입니다. 실제 시세 수집은 읽기 전용으로 동작합니다. 실시간 매매 신호까지 연결하려면 신뢰할 수 있는 거래 가능 상태, 비교 가능한 과거 동시간 거래량, 당일 누적 지표, 실시간 뉴스 권한을 확보해 **완전한 정규화 이벤트 스트림**을 공급해야 합니다. 부족한 필드를 임의의 값으로 채우지 않습니다.
+데이터 입력부터 모의주문까지 연결된 기능 검증 경로는 `demo`와 정규화 이벤트 `replay`입니다. `run-toss`는 토스의 실제 현재가 수집과 대시보드를 연결하는 읽기 전용 실행 경로입니다. 실시간 매매 신호까지 연결하려면 신뢰할 수 있는 거래 가능 상태, 비교 가능한 과거 동시간 거래량, 당일 누적 지표, 실시간 뉴스 권한을 확보해 **완전한 정규화 이벤트 스트림**을 공급해야 합니다. 부족한 필드를 임의의 값으로 채우지 않습니다.
 
 ## 실행 명령
 
 ```bash
+# 토스만 연결한 시세 수집과 대시보드
+python -m pennyquant run-toss --symbols AAPL,MSFT
+
 # 설정 변경: 전역 옵션은 하위 명령 앞에 지정
 python -m pennyquant --config pennyquant/config/strategy.yaml demo --out data/configured
 
@@ -137,6 +157,7 @@ docs/           설치·API·이벤트·운영·검증 문서
 - [정규화 이벤트 규격](docs/EVENT_FORMAT.md)
 - [API 상태와 공식 근거](docs/API_STATUS.md)
 - [토스 API 연결 확인](docs/TOSS_CONNECTION.md)
+- [토스만 연결해 실행하기](docs/TOSS_RUN.md)
 - [전략의 정확한 규칙](docs/STRATEGIES.md)
 - [대시보드 사용법](docs/DASHBOARD.md)
 - [검증 기록과 미완료 범위](docs/VALIDATION.md)

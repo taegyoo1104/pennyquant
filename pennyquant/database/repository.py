@@ -10,7 +10,7 @@ from typing import Iterator
 
 from ..models import jsonable
 
-KINDS = ("stocks", "market_bars", "quote_snapshots", "news_events", "signals", "orders",
+KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_events", "signals", "orders",
          "executions", "positions", "daily_performance", "system_logs")
 
 
@@ -70,6 +70,15 @@ class Repository:
         if kind not in KINDS:
             raise ValueError(f"unknown record kind {kind}")
         return [json.loads(row[0]) for row in self.db.execute(f"SELECT payload FROM {kind} ORDER BY seq")]
+
+    def recent(self, kind: str, limit: int = 2000) -> list[dict]:
+        """Bound live charts without deleting the stored observation history."""
+        if kind not in KINDS:
+            raise ValueError(f"unknown record kind {kind}")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 10000:
+            raise ValueError("limit must be an integer between 1 and 10000")
+        rows = list(self.db.execute(f"SELECT payload FROM {kind} ORDER BY seq DESC LIMIT ?", (limit,)))
+        return [json.loads(row[0]) for row in reversed(rows)]
 
     def replace_positions(self, positions: dict) -> None:
         self.db.execute("DELETE FROM positions")

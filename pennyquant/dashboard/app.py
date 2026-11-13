@@ -37,6 +37,7 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--db", default=os.getenv("PQ_DB", "data/pennyquant.db"))
     parser.add_argument("--report", default=os.getenv("PQ_REPORT", "data/report.json"))
+    parser.add_argument("--mode", choices=("auto", "paper", "monitor"), default="auto")
     return parser.parse_known_args()[0]
 
 
@@ -95,6 +96,42 @@ def event_health(runtime: dict, now: datetime | None = None, *, max_age: float =
     return result
 
 
+def monitor_mode(runtime: dict, monitor: dict, requested_mode: str = "auto") -> bool:
+    """A stored monitoring session must never be displayed as a paper account."""
+    return requested_mode == "monitor" or runtime.get("mode") == "monitor" or monitor.get("mode") == "monitor"
+
+
+def price_value(value: Any) -> float | None:
+    try:
+        result = float(value)
+        return result if math.isfinite(result) and result > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def quote_health(value: Any, now: datetime | None = None, *, max_age: float = 5.0) -> dict:
+    """Age the provider's price time separately from this program's receipt."""
+    result = event_health({"last_event": value}, now, max_age=max_age)
+    if value is None or value == "":
+        result["status"] = "제공 시각 미확인"
+    elif result["lag_seconds"] is None:
+        result["status"] = "제공 시각 확인 필요"
+    elif result["stale"]:
+        result["status"] = "제공 시각이 오래됨"
+    else:
+        result["status"] = "최근 제공 시각 · 실시간 권한 별도 확인"
+    return result
+
+
+def monitor_status(monitor: dict, health: dict) -> str:
+    status = monitor.get("status")
+    if status == "connected":
+        return "수신 지연" if health["stale"] else "최근 조회 성공"
+    if status == "stopped" and monitor.get("error"):
+        return "수집 중지 · 오류"
+    return {"starting": "연결 확인 중", "error": "조회 오류", "stopped": "수집 중지"}.get(status, "수집 상태 미확인")
+
+
 def latest_by_symbol(rows: list[dict]) -> dict[str, dict]:
     result = {}
     for row in rows:
@@ -118,7 +155,7 @@ def read_report(path: Path) -> tuple[dict, str | None]:
 
 
 def load_database(path: Path) -> tuple[Any, dict, dict[str, list[dict]], str | None]:
-    names = ("stocks", "market_bars", "quote_snapshots", "news_events", "signals", "orders", "executions", "positions", "daily_performance", "system_logs")
+    names = ("stocks", "market_bars", "quote_snapshots", "news_events", "signals", "orders", "executions", "positions", "daily_performance", "system_logs", "price_samples")
     tables: dict[str, list[dict]] = {name: [] for name in names}
     if not path.exists():
         return None, {}, tables, None
@@ -128,7 +165,10 @@ def load_database(path: Path) -> tuple[Any, dict, dict[str, list[dict]], str | N
         repo = Repository(path)
         state = repo.load_state() or {}
         for name in names:
-            tables[name] = repo.all(name)
+            if name == "price_samples":
+                tables[name] = repo.recent(name, limit=2000) if hasattr(repo, "recent") else repo.all(name)[-2000:]
+            else:
+                tables[name] = repo.all(name)
         return repo, state, tables, None
     except Exception as exc:
         if repo:
@@ -259,6 +299,100 @@ def market_tab(tables: dict[str, list[dict]], synthetic: bool) -> None:
                 unsafe_allow_html=True,
             )
         st.caption("뉴스 분류는 규칙에 따른 후보 판정입니다. 긍정 분류만으로 주문하지 않습니다.")
+
+
+def monitor_market_tab(tables: dict[str, list[dict]], monitor: dict) -> None:
+    panel_title("TOSS / PRICE WATCH", "토스 현재가", "제공자가 보낸 마지막 가격과 프로그램이 조회한 시각을 구분합니다.")
+    stocks = latest_by_symbol([row for row in tables.get("stocks", []) if row.get("source") == "toss"])
+    symbols = sorted(set(map(str, monitor.get("symbols") or stocks.keys())))
+    rows = []
+    for symbol in symbols:
+        item = stocks.get(symbol, {})
+        provider = quote_health(item.get("timestamp"))
+        receipt = event_health({"last_event": item.get("received_at")})
+        rows.append({
+            "종목": symbol, "현재가 ($)": price_value(item.get("last_price")),
+            "제공 시각 (KST)": timestamp(item.get("timestamp")),
+            "제공 시각 경과": provider["lag_label"], "제공 시각 상태": provider["status"],
+            "수신 시각 (KST)": timestamp(item.get("received_at")), "수신 경과": receipt["lag_label"],
+            "거래 가능 여부": "미확인",
+        })
+    if rows:
+        dataframe(rows, column_config={"현재가 ($)": st.column_config.NumberColumn(format="$%.4f")})
+    else:
+        empty("토스 현재가 조회를 기다리고 있습니다.")
+    st.caption("수신 시각은 조회 응답을 받은 시각입니다. 제공 시각이 오래되거나 미확인이면 신선한 시세라고 판단하지 않습니다. 장 종료·최근 거래 부재에도 과거 가격이 반환될 수 있습니다.")
+    st.caption("미국 시세는 일부 거래소 기반이며 통합 최우선 호가(NBBO)가 아닙니다. 이 현재가 조회에는 매수·매도 호가, 거래량, 상대 거래량, 거래정지 여부가 포함되지 않습니다.")
+
+    chart_col, context_col = st.columns([1.3, 1], gap="large")
+    with chart_col:
+        panel_title("OBSERVED PRICES", "조회 시점별 가격", "프로그램이 관측한 현재가 기록입니다. 체결 틱이나 1분봉 차트가 아닙니다.")
+        samples = tables.get("price_samples", [])
+        chart_symbols = sorted({str(row.get("symbol")) for row in samples if row.get("symbol") in symbols})
+        if chart_symbols:
+            selected = st.selectbox("가격 기록을 볼 종목", chart_symbols, key="monitor_chart_symbol", label_visibility="collapsed")
+            points = [{"received_at": row.get("received_at"), "현재가 ($)": price_value(row.get("last_price"))}
+                      for row in samples if row.get("symbol") == selected]
+            frame = pd.DataFrame(points)
+            frame["조회 시각 (KST)"] = pd.to_datetime(frame["received_at"], utc=True, errors="coerce").dt.tz_convert(SEOUL)
+            frame = frame.dropna(subset=["조회 시각 (KST)", "현재가 ($)"]).sort_values("조회 시각 (KST)")
+            if not frame.empty:
+                st.line_chart(frame, x="조회 시각 (KST)", y="현재가 ($)", color="#55dec5", height=310)
+                st.caption("최근 조회 기록 최대 2,000개를 사용합니다. 같은 마지막 가격이 여러 번 관측될 수 있습니다.")
+            else:
+                empty("표시할 수 있는 가격·수신 시각 기록이 없습니다.")
+        else:
+            empty("가격 조회 기록이 쌓이면 차트가 표시됩니다.")
+    with context_col:
+        panel_title("MONITOR MODE", "현재 실행 범위")
+        st.info("토스 현재가를 읽고 기록하는 시세 감시 모드입니다.")
+        dataframe([
+            {"항목": "현재가 수집", "상태": "토스 REST 주기 조회"},
+            {"항목": "뉴스 수집", "상태": "미사용"},
+            {"항목": "모의매매 엔진", "상태": "비활성"},
+            {"항목": "실주문", "상태": "비활성"},
+            {"항목": "계좌 잔고", "상태": "조회하지 않음"},
+        ])
+        st.caption("자동 진입 판단에는 검증된 시장 입력과 뉴스가 추가로 필요합니다.")
+
+
+def monitor_system_tab(monitor: dict, tables: dict[str, list[dict]], db_path: Path, health: dict) -> None:
+    panel_title("MONITOR HEALTH", "토스 시세 수집 상태", "저장된 조회 결과와 수신 경과를 표시합니다. 최근 조회 성공만으로 실시간 권한을 확인할 수 없습니다.")
+    left, right = st.columns(2, gap="large")
+    with left:
+        dataframe([
+            {"항목": "실행 모드", "상태": "시세 감시 전용"},
+            {"항목": "토스 수집 상태", "상태": monitor_status(monitor, health)},
+            {"항목": "마지막 조회 성공 (KST)", "상태": timestamp(monitor.get("last_success"))},
+            {"항목": "응답 수신 경과", "상태": health["lag_label"]},
+            {"항목": "조회 간격", "상태": f"{number(monitor.get('interval_seconds')):g}초" if monitor.get("interval_seconds") is not None else "미확인"},
+            {"항목": "미국 시세 범위", "상태": "일부 거래소 · NBBO 아님"},
+            {"항목": "실시간 데이터 권한 검증", "상태": "미확인"},
+            {"항목": "자동매매", "상태": "비활성"},
+        ])
+    with right:
+        error = monitor.get("error") or {}
+        if isinstance(error, dict) and error:
+            status = f" · HTTP {error['http_status']}" if error.get("http_status") is not None else ""
+            st.error(f"수집기 오류: {error.get('code', 'unknown')}{status}")
+            if error.get("message"):
+                st.write(str(error["message"]))
+        elif monitor.get("status") == "stopped":
+            st.info("시세 수집이 중지되었습니다. 저장된 마지막 가격을 표시하고 있습니다.")
+        else:
+            st.caption("터미널에서 실행한 run-toss 명령이 수집 상태를 갱신합니다.")
+        missing = monitor.get("missing_symbols") or []
+        if missing:
+            st.warning("응답에서 현재가를 확인하지 못한 종목: " + ", ".join(map(str, missing)))
+        st.caption("조회 시각과 시세 제공 시각을 함께 확인하세요. 제공 시각이 없는 가격에 임의의 시각을 부여하지 않습니다.")
+    panel_title("EVENT LOG", "시스템 로그")
+    logs = tables.get("system_logs", [])[-100:][::-1]
+    if logs:
+        dataframe(logs)
+    else:
+        empty("저장된 시스템 로그가 없습니다.")
+    with st.expander("데이터 경로", expanded=False):
+        st.write("DB", str(db_path.resolve()))
 
 
 def trading_tab(account: dict, state: dict, tables: dict[str, list[dict]]) -> None:
@@ -409,62 +543,110 @@ def system_tab(state: dict, tables: dict[str, list[dict]], report: dict, db_path
         st.code("python -m pennyquant --help\nstreamlit run pennyquant/dashboard/app.py -- --db data/pennyquant.db --report data/report.json", language="bash")
 
 
-def render_dashboard(db_path: Path, report_path: Path) -> None:
+def render_dashboard(db_path: Path, report_path: Path, requested_mode: str = "auto") -> None:
     repo, state, tables, db_error = load_database(db_path)
     try:
-        report, report_error = read_report(report_path)
         account = state.get("account") or {}
         manual_halt = bool(repo.get_control("manual_halt", False)) if repo else False
         source = repo.get_control("source", {}) if repo else {}
         runtime = repo.get_control("runtime", {}) if repo else {}
+        monitor = repo.get_control("monitor", {}) if repo else {}
+        observing = monitor_mode(runtime, monitor, requested_mode)
+        report, report_error = ({}, None) if observing else read_report(report_path)
         synthetic = source.get("synthetic", report.get("synthetic")) is True
-        health = event_health(runtime)
+        if observing:
+            max_age = max(5.0, number(monitor.get("interval_seconds"), 3.0) * 2 + 2)
+            health = event_health({"last_event": runtime.get("last_event") or monitor.get("last_success")}, max_age=max_age)
+        else:
+            health = event_health(runtime)
 
-        st.markdown('<div class="hero"><div><div class="eyebrow">PENNYQUANT / OPERATIONS</div><h1>미국 저가주 모니터링</h1><p>뉴스 · 시장 · 전략 · 위험 관리</p></div><span class="pill">모의매매 전용</span></div>', unsafe_allow_html=True)
+        if observing:
+            st.markdown('<div class="hero"><div><div class="eyebrow">PENNYQUANT / TOSS WATCH</div><h1>토스 시세 모니터링</h1><p>현재가 조회 · 제공 시각 · 수신 시각</p></div><span class="pill">시세 감시 전용</span></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="hero"><div><div class="eyebrow">PENNYQUANT / OPERATIONS</div><h1>미국 저가주 모니터링</h1><p>뉴스 · 시장 · 전략 · 위험 관리</p></div><span class="pill">모의매매 전용</span></div>', unsafe_allow_html=True)
         if db_error:
             st.error(db_error)
         if report_error:
             st.error(report_error)
-        if synthetic:
+        if observing:
+            st.info("토스 현재가를 주기적으로 조회하는 읽기 전용 화면입니다. 자동매매와 계좌 조회는 비활성 상태입니다.")
+            status = monitor_status(monitor, health)
+            if monitor.get("status") == "error" or monitor.get("error"):
+                st.error(f"토스 수집 상태: {status}. 시스템 관리 탭에서 오류 내용을 확인하세요.")
+            elif monitor.get("status") == "stopped":
+                st.warning("시세 수집이 중지되었습니다. 저장된 마지막 조회 결과를 표시합니다.")
+            else:
+                st.caption(f"토스 수집 상태: {status}")
+            event_text = f"마지막 조회 응답 {health['last_event']} · 응답 수신 후 {health['lag_label']} 경과"
+            if health["stale"]:
+                st.warning(event_text)
+            else:
+                st.caption(event_text)
+        elif synthetic:
             st.info("모니터링 데이터는 합성 시나리오 데모입니다. 표시된 손익은 구현 검증용이며 실제 시장 성과가 아닙니다.", icon="🧪")
         elif report:
             st.caption("저장된 백테스트 보고서를 표시합니다. 이 화면만으로 실시간 연결 상태나 실거래 가능 여부를 판단하지 마세요.")
         else:
             st.info("데이터를 기다리고 있습니다. DB와 보고서가 생성되면 새로고침해 주세요.")
-        event_text = f"마지막 이벤트 {health['last_event']} · 경과 {health['lag_label']} · {health['status']}"
-        if synthetic:
-            st.caption(f"{event_text} · 합성·재생 기록의 시각이며 실시간 연결 상태가 아닙니다.")
-        elif health["stale"]:
-            st.warning(event_text)
-        else:
-            st.caption(event_text)
+        if not observing:
+            event_text = f"마지막 이벤트 {health['last_event']} · 경과 {health['lag_label']} · {health['status']}"
+            if synthetic:
+                st.caption(f"{event_text} · 합성·재생 기록의 시각이며 실시간 연결 상태가 아닙니다.")
+            elif health["stale"]:
+                st.warning(event_text)
+            else:
+                st.caption(event_text)
 
-        equity = number(account.get("equity"))
-        start = number(account.get("day_start_equity"), equity)
-        daily_pnl = equity - start
-        positions = account.get("positions") or {}
-        metrics = st.columns(5)
-        metrics[0].metric("총자산", usd(equity) if account else "—")
-        metrics[1].metric("최근 세션 손익", usd(daily_pnl) if account else "—", delta=f"{daily_pnl / start * 100:+.2f}%" if start else None, help="최근 거래 세션의 실현·평가손익을 합산합니다.")
-        if account:
-            metrics[2].metric("가용 현금", usd(number(account.get("cash")) - number(account.get("reserved_cash"))))
+        if observing:
+            watched = set(monitor.get("symbols") or [])
+            available = [row for row in tables.get("stocks", []) if row.get("source") == "toss"
+                         and (not watched or row.get("symbol") in watched)
+                         and price_value(row.get("last_price")) is not None]
+            metrics = st.columns(4)
+            metrics[0].metric("수집 상태", monitor_status(monitor, health))
+            metrics[1].metric("관심 종목", f"{len(monitor.get('symbols') or available)}개")
+            metrics[2].metric("현재가 수신 종목", f"{len(available)}개")
+            metrics[3].metric("자동매매", "비활성")
         else:
-            metrics[2].metric("가용 현금", "—")
-        metrics[3].metric("보유 종목", f"{len(positions)}개" if account else "—")
-        metrics[4].metric("최근 세션 신규 진입", f"{int(number(account.get('entries_today')))}회" if account else "—")
+            equity = number(account.get("equity"))
+            start = number(account.get("day_start_equity"), equity)
+            daily_pnl = equity - start
+            positions = account.get("positions") or {}
+            metrics = st.columns(5)
+            metrics[0].metric("총자산", usd(equity) if account else "—")
+            metrics[1].metric("최근 세션 손익", usd(daily_pnl) if account else "—", delta=f"{daily_pnl / start * 100:+.2f}%" if start else None, help="최근 거래 세션의 실현·평가손익을 합산합니다.")
+            if account:
+                metrics[2].metric("가용 현금", usd(number(account.get("cash")) - number(account.get("reserved_cash"))))
+            else:
+                metrics[2].metric("가용 현금", "—")
+            metrics[3].metric("보유 종목", f"{len(positions)}개" if account else "—")
+            metrics[4].metric("최근 세션 신규 진입", f"{int(number(account.get('entries_today')))}회" if account else "—")
 
         market, trading, analysis, system = st.tabs(["시장 모니터링", "주문 · 포지션", "전략 분석", "시스템 관리"])
         with market:
-            market_tab(tables, synthetic)
+            if observing:
+                monitor_market_tab(tables, monitor)
+            else:
+                market_tab(tables, synthetic)
         with trading:
-            trading_tab(account, state, tables)
+            if observing:
+                empty("현재는 시세 감시 모드입니다. 모의주문·체결·포지션 관리는 실행하지 않습니다.")
+            else:
+                trading_tab(account, state, tables)
         with analysis:
-            if report.get("synthetic"):
-                st.caption("이 성과 보고서는 합성 데이터로 생성했습니다. 실제 수익성 검증 결과가 아닙니다.")
-            analysis_tab(report)
+            if observing:
+                empty("시세 감시 모드에서는 전략 성과를 계산하지 않습니다. 모의매매 또는 백테스트를 실행한 뒤 성과를 확인할 수 있습니다.")
+            else:
+                if report.get("synthetic"):
+                    st.caption("이 성과 보고서는 합성 데이터로 생성했습니다. 실제 수익성 검증 결과가 아닙니다.")
+                analysis_tab(report)
         with system:
-            system_tab(state, tables, report, db_path, report_path, manual_halt, synthetic, health)
-        st.markdown(f'<div class="footer">PennyQuant v0.1.0 MVP · 화면 갱신 {datetime.now(timezone.utc).astimezone(SEOUL).strftime("%Y.%m.%d %H:%M:%S KST")} · 수익성을 검증하는 연구·모의매매 환경</div>', unsafe_allow_html=True)
+            if observing:
+                monitor_system_tab(monitor, tables, db_path, health)
+            else:
+                system_tab(state, tables, report, db_path, report_path, manual_halt, synthetic, health)
+        purpose = "토스 현재가를 관측하는 읽기 전용 환경" if observing else "수익성을 검증하는 연구·모의매매 환경"
+        st.markdown(f'<div class="footer">PennyQuant v0.1.0 MVP · 화면 갱신 {datetime.now(timezone.utc).astimezone(SEOUL).strftime("%Y.%m.%d %H:%M:%S KST")} · {purpose}</div>', unsafe_allow_html=True)
     finally:
         if repo:
             repo.close()
@@ -473,27 +655,37 @@ def render_dashboard(db_path: Path, report_path: Path) -> None:
 def main() -> None:
     args = arguments()
     db_path, report_path = Path(args.db), Path(args.report)
-    st.set_page_config(page_title="PennyQuant · 모의매매 모니터", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="PennyQuant · 시장 모니터", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
     style()
     repo, _, _, _ = load_database(db_path)
     try:
         manual_halt = bool(repo.get_control("manual_halt", False)) if repo else False
+        runtime = repo.get_control("runtime", {}) if repo else {}
+        monitor_state = repo.get_control("monitor", {}) if repo else {}
+        observing = monitor_mode(runtime, monitor_state, args.mode)
         with st.sidebar:
             st.markdown('<div class="brand">Penny<b>Quant</b></div><div class="brand-sub">NEWS-DRIVEN TRADING LAB</div>', unsafe_allow_html=True)
-            st.markdown('<span class="pill">PAPER ONLY</span>', unsafe_allow_html=True)
-            st.markdown("### 매매 제어")
-            st.caption("신규 진입만 제어합니다. 보유 포지션의 위험 관리는 계속됩니다.")
-            if manual_halt:
-                st.warning("신규 진입 중지 중", icon="⏸️")
-                if st.button("신규 진입 재개", width="stretch", type="primary", disabled=repo is None):
-                    repo.set_control("manual_halt", False)
-                    st.rerun()
+            if observing:
+                st.markdown('<span class="pill">MONITOR ONLY</span>', unsafe_allow_html=True)
+                st.markdown("### 시세 감시 전용")
+                st.info("자동매매 비활성")
+                st.caption("토스 현재가를 주기적으로 조회합니다. 뉴스·매매 엔진·계좌 잔고 조회는 사용하지 않습니다.")
+                st.caption("종료하려면 run-toss를 실행한 터미널에서 Ctrl+C를 누르세요.")
             else:
-                st.success("사용자 중지 해제", icon="✅")
-                if st.button("신규 진입 중지", width="stretch", disabled=repo is None):
-                    repo.set_control("manual_halt", True)
-                    st.rerun()
-            st.caption("연속 모의매매 엔진은 대기 중에도 약 0.2초 간격으로 제어값을 확인합니다. 상태 표시는 다음 갱신에 반영됩니다.")
+                st.markdown('<span class="pill">PAPER ONLY</span>', unsafe_allow_html=True)
+                st.markdown("### 매매 제어")
+                st.caption("신규 진입만 제어합니다. 보유 포지션의 위험 관리는 계속됩니다.")
+                if manual_halt:
+                    st.warning("신규 진입 중지 중", icon="⏸️")
+                    if st.button("신규 진입 재개", width="stretch", type="primary", disabled=repo is None):
+                        repo.set_control("manual_halt", False)
+                        st.rerun()
+                else:
+                    st.success("사용자 중지 해제", icon="✅")
+                    if st.button("신규 진입 중지", width="stretch", disabled=repo is None):
+                        repo.set_control("manual_halt", True)
+                        st.rerun()
+                st.caption("연속 모의매매 엔진은 대기 중에도 약 0.2초 간격으로 제어값을 확인합니다. 상태 표시는 다음 갱신에 반영됩니다.")
             st.divider()
             auto_refresh = st.toggle("자동 갱신 · 3초", value=True, key="auto_refresh")
             if st.button("데이터 새로고침", width="stretch"):
@@ -507,7 +699,7 @@ def main() -> None:
 
     @st.fragment(run_every="3s" if auto_refresh else None)
     def monitor() -> None:
-        render_dashboard(db_path, report_path)
+        render_dashboard(db_path, report_path, args.mode)
 
     monitor()
 

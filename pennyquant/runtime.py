@@ -36,7 +36,8 @@ def replay(input_path: Path, db_path: Path, settings: Settings, strategy: str, *
                 raise ValueError("database already contains engine state; use --resume or a new --db path")
             cursor = repo.get_control("replay_cursor", 0) if resume else 0
             identity = str(input_path.resolve())
-            if existing and repo.get_control("runtime_kind") != "replay":
+            runtime_kind = repo.get_control("runtime_kind")
+            if (existing is not None or runtime_kind is not None) and runtime_kind != "replay":
                 raise ValueError("database runtime mode differs; use a new DB for replay")
             if resume and repo.get_control("input_path") != identity:
                 raise ValueError("resume input path differs")
@@ -77,7 +78,8 @@ def follow(input_path: Path, db_path: Path, settings: Settings, strategy: str) -
         repo = Repository(db_path)
         try:
             existing = repo.load_state()
-            if existing and repo.get_control("runtime_kind") != "follow":
+            runtime_kind = repo.get_control("runtime_kind")
+            if (existing is not None or runtime_kind is not None) and runtime_kind != "follow":
                 raise ValueError("database runtime mode differs; use a new DB for live paper")
             engine = EventEngine(settings, strategy, repo, restore=bool(existing), live=True)
             identity = str(input_path.resolve())
