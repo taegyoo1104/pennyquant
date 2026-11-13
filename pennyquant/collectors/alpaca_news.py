@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import json
+import logging
 import os
 from typing import AsyncIterator
 
@@ -14,6 +15,30 @@ from .toss_market import symbols_parameter
 
 REST_URL = "https://data.alpaca.markets/v1beta1/news"
 STREAM_URL = "wss://stream.data.alpaca.markets/v1beta1/news"
+logger = logging.getLogger(__name__)
+
+
+def _stock_symbols(symbols) -> tuple[str, ...]:
+    """Keep exact supported tags; provider tags need not all be stock tickers."""
+    if not isinstance(symbols, list):
+        raise DataQualityError("Alpaca news requires a symbol array (field: symbols)")
+    result: dict[str, None] = {}
+    omitted = 0
+    for symbol in symbols:
+        try:
+            symbol_valid(symbol)
+        except ValueError:
+            # This also omits null/metadata tags. Never stringify them, strip
+            # punctuation or infer stock aliases from provider tags.
+            omitted += 1
+            continue
+        result[symbol] = None
+    if omitted:
+        logger.warning(
+            "Alpaca news: omitted %d unsupported ticker tag(s); retained %d exact ticker(s). "
+            "No ticker aliases were inferred.", omitted, len(result)
+        )
+    return tuple(result)
 
 
 def parse_news(item: dict, received_at, *, real_time: bool = False) -> NewsEvent:
@@ -24,18 +49,7 @@ def parse_news(item: dict, received_at, *, real_time: bool = False) -> NewsEvent
         raise DataQualityError("Alpaca news has an invalid article ID (field: id)")
     if not isinstance(item.get("headline"), str) or not item["headline"].strip():
         raise DataQualityError("Alpaca news requires a non-empty headline (field: headline)")
-    symbols = item.get("symbols", [])
-    if not isinstance(symbols, list):
-        raise DataQualityError("Alpaca news requires a symbol array (field: symbols)")
-    for index, symbol in enumerate(symbols):
-        try:
-            symbol_valid(symbol)
-        except ValueError:
-            # Do not guess stock aliases or silently turn an unverified tag into a ticker.
-            raise DataQualityError(
-                f"Alpaca news contains an unsupported ticker (field: symbols[{index}]); "
-                "expected 1-20 uppercase letters, digits, dots or hyphens"
-            ) from None
+    symbols = _stock_symbols(item.get("symbols", []))
     try:
         published_at = utc(item["created_at"])
     except (ValueError, TypeError, AttributeError, KeyError, OverflowError):
@@ -45,7 +59,7 @@ def parse_news(item: dict, received_at, *, real_time: bool = False) -> NewsEvent
     for field in ("source", "url", "content", "summary", "updated_at"):
         if item.get(field) is not None and not isinstance(item[field], str):
             raise DataQualityError(f"Alpaca news requires text or null (field: {field})")
-    return NewsEvent(id="alpaca:" + str(item["id"]), symbols=tuple(item.get("symbols", [])),
+    return NewsEvent(id="alpaca:" + str(item["id"]), symbols=symbols,
         title=item["headline"], published_at=published_at, received_at=utc(received_at),
         source=item.get("source", "alpaca") or "", url=item.get("url") or "",
         body=item.get("content") or item.get("summary") or "", verified=True, real_time=real_time)

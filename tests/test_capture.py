@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from pennyquant.capture import EventWriter, capture_file, collect
+from pennyquant.collectors.alpaca_news import AlpacaNewsClient
 from pennyquant.collectors.common import DataQualityError
 from pennyquant.events import read_events
 from pennyquant.models import NewsEvent, Quote
@@ -94,6 +95,32 @@ async def test_alpaca_parse_failure_is_not_reported_as_successful_zero_capture(t
     assert "collection did not complete" in output.err
     assert "Captured 0" not in output.err
     assert options.output.read_text() == ""
+
+
+async def test_alpaca_capture_saves_mixed_tag_article_and_following_news(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("pennyquant.collectors.alpaca_news.now_utc", lambda: NOW)
+    valid_tags = ["AAPL"] + [f"T{index}" for index in range(40)]
+    articles = [
+        {"id": 1, "headline": "Broad market update", "created_at": NOW.isoformat(),
+         "symbols": valid_tags + ["$PRIVATE"]},
+        {"id": 2, "headline": "Company launches a public offering", "created_at": NOW.isoformat(),
+         "symbols": ["MSFT"]},
+    ]
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"news": articles}),
+    )) as client:
+        alpaca = AlpacaNewsClient("key", "secret", client=client)
+        monkeypatch.setattr("pennyquant.capture.AlpacaNewsClient", lambda **kwargs: alpaca)
+        options = args(tmp_path, provider="alpaca", symbols="AAPL,MSFT")
+        await collect(options)
+    captured = read_events(options.output)
+    assert [event.data.id for event in captured] == ["alpaca:1", "alpaca:2"]
+    assert captured[0].data.symbols == tuple(valid_tags)
+    assert all(event.data.verified and not event.data.real_time for event in captured)
+    output = capsys.readouterr()
+    assert "Captured 2 normalized events." in output.err
+    assert "collection did not complete" not in output.err
+    assert "$PRIVATE" not in options.output.read_text(encoding="utf-8")
 
 
 async def test_rss_capture_does_not_attach_cli_symbol_to_broad_feed(tmp_path, monkeypatch):

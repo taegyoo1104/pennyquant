@@ -11,6 +11,10 @@ from pennyquant.collectors.rss_collector import parse_feed
 from pennyquant.collectors.sec_edgar import SecEdgarClient, parse_submissions
 from pennyquant.collectors.toss_market import TossMarketClient, parse_candles, parse_orderbook
 from pennyquant.collectors.toss_websocket import TossWebSocket, quote_from_frame, subscription_declaration
+from pennyquant.config.settings import Settings
+from pennyquant.models import NewsEvent
+from pennyquant.news.classifier import classify
+from pennyquant.news.event_filter import eligible_events, positive_event
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
 
@@ -147,7 +151,7 @@ async def test_alpaca_bad_credential_format_is_identified_without_request_or_val
 
 
 @pytest.mark.parametrize("updates,field", [
-    ({"symbols": ["AAPL", "$SECRET"]}, "symbols[1]"),
+    ({"symbols": None}, "symbols"),
     ({"symbols": "AAPL"}, "symbols"),
     ({"created_at": "PRIVATE-invalid-timestamp"}, "created_at"),
     ({"created_at": "2026-11-13T14:00:00"}, "created_at"),
@@ -169,6 +173,78 @@ def test_alpaca_news_nullable_optional_text_and_fractional_timestamp():
                        "source": None, "url": None, "content": None, "summary": None}, NOW)
     assert news.source == "" and news.url == "" and news.body == ""
     assert news.published_at.microsecond == 123456 and not news.real_time
+
+
+def test_alpaca_unsupported_string_tags_preserve_exact_tickers_and_order(caplog):
+    news = parse_news({"id": 1, "headline": "Market update", "created_at": NOW.isoformat(),
+                       "symbols": ["MSFT", "AAPL", "$PRIVATE", "BRK/B", "MSFT", "aapl", " AAPL",
+                                   "BRK.B", "BRK-B", "AAPL"], "source": "verified-wire"}, NOW)
+    assert news.symbols == ("MSFT", "AAPL", "BRK.B", "BRK-B")
+    assert news.verified and not news.real_time
+    assert caplog.records
+    assert "$PRIVATE" not in caplog.text and "BRK/B" not in caplog.text
+
+
+def test_alpaca_individually_malformed_tags_are_omitted_without_coercion(caplog):
+    news = parse_news({"id": 1, "headline": "Market update", "created_at": NOW.isoformat(),
+                       "symbols": ["AAPL", None, 123, {"PRIVATE": "MSFT"}, ["MSFT"], "MSFT", True]}, NOW)
+    assert news.symbols == ("AAPL", "MSFT") and news.verified
+    assert "PRIVATE" not in caplog.text
+
+
+@pytest.mark.parametrize("symbols", [[], ["$AAPL", "aapl", " AAPL", "AAPL "]])
+def test_alpaca_unresolved_tags_do_not_fabricate_a_trading_ticker(symbols):
+    news = parse_news({"id": 1, "headline": "Company receives FDA approval",
+                       "created_at": NOW.isoformat(), "symbols": symbols}, NOW, real_time=True)
+    assert news.symbols == ()
+    assert eligible_events([news], "AAPL", NOW, Settings()) == []
+    assert positive_event([news], "AAPL", NOW, Settings()) is None
+
+
+def test_alpaca_unsupported_extra_tags_do_not_hide_known_negative_news():
+    negative = parse_news({"id": 1, "headline": "Company launches a public offering",
+                           "created_at": NOW.isoformat(), "symbols": ["AAPL", "^PRIVATE"]}, NOW)
+    positive = parse_news({"id": 2, "headline": "Company receives FDA approval",
+                           "created_at": NOW.isoformat(), "symbols": ["AAPL"]}, NOW, real_time=True)
+    assert negative.symbols == ("AAPL",) and negative.verified
+    assert classify(negative).sentiment == "negative"
+    assert positive_event([positive, negative], "AAPL", NOW, Settings()) is None
+
+
+def test_news_domain_model_still_rejects_unsupported_tickers():
+    with pytest.raises(ValueError, match="invalid symbol"):
+        NewsEvent("n1", ("$AAPL",), "Headline", NOW, NOW, "verified-wire")
+
+
+async def test_alpaca_rest_collects_article_with_unsupported_42nd_tag_and_later_news(monkeypatch):
+    monkeypatch.setattr("pennyquant.collectors.alpaca_news.now_utc", lambda: NOW)
+    valid_tags = ["AAPL"] + [f"T{index}" for index in range(40)]
+    broad = {"id": 1, "headline": "Broad market update", "created_at": NOW.isoformat(),
+             "symbols": valid_tags + ["$PRIVATE", "MSFT"]}
+    later = {"id": 2, "headline": "Company launches public offering", "created_at": NOW.isoformat(),
+             "symbols": ["AAPL"]}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"news": [broad, later]}),
+    )) as client:
+        alpaca = AlpacaNewsClient("key", "secret", client=client)
+        alpaca.limiter.interval = 0
+        news = await alpaca.fetch(["AAPL", "MSFT"])
+        assert [item.id for item in news] == ["alpaca:1", "alpaca:2"]
+        assert news[0].symbols == tuple(valid_tags + ["MSFT"])
+        assert news[0].verified and not news[0].real_time
+        assert classify(news[1]).sentiment == "negative"
+        assert await alpaca.fetch(["AAPL", "MSFT"]) == []
+
+
+async def test_alpaca_rest_does_not_assign_query_ticker_missing_from_provider_tags():
+    article = {"id": 1, "headline": "Company receives FDA approval", "created_at": NOW.isoformat(),
+               "symbols": ["$AAPL", "MSFT"]}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"news": [article]}),
+    )) as client:
+        alpaca = AlpacaNewsClient("key", "secret", client=client)
+        news = await alpaca.fetch(["AAPL"])
+    assert news[0].symbols == ("MSFT",) and "AAPL" not in news[0].symbols
 
 
 @pytest.mark.parametrize("body,field", [
