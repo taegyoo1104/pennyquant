@@ -1,12 +1,27 @@
 # PennyQuant · Python MVP
 
-미국 저가주 뉴스·시세 연구, 네 전략 비교, 위험 관리를 적용한 모의매매 프로젝트입니다. Python 3.12 이상, Linux/macOS 또는 Windows의 WSL2에서 실행합니다. 대시보드는 한국어이며 시간은 KST로 표시하고, 거래 세션은 미국 동부시간과 XNYS 휴장·단축장을 사용합니다.
+미국 저가주 뉴스·시세 연구, 네 전략 비교, 위험 관리를 적용한 모의매매 프로젝트입니다. Python 3.12 이상으로 Windows, Linux, macOS의 로컬 PC에서 실행합니다. Windows에서는 일반 Windows용 Python을 사용할 수 있으며 WSL2는 선택 사항입니다. 대시보드는 한국어이며 시간은 KST로 표시하고, 거래 세션은 미국 동부시간과 XNYS 휴장·단축장을 사용합니다.
 
 **실주문은 비활성화되어 있습니다.** 토스 API 경로는 공식 명세로 구현했지만 실제 계정 인증·뉴스 권한·OCO 동작은 검증하지 않았습니다. API 키 없이 실행하는 데모와 보고서는 합성 데이터로 만든 기능 검증입니다.
 
 ## 빠른 실행
 
-압축을 풀고 `pennyquant/` 디렉터리에서 실행하세요.
+압축을 풀고 `pyproject.toml`, `README.md`, `main.py`가 보이는 프로젝트 루트에서 실행하세요. GitHub ZIP의 폴더 이름은 보통 `pennyquant-main`입니다. Python 3.12를 권장합니다.
+
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install --no-deps -e .
+.\.venv\Scripts\python.exe -m pennyquant doctor
+.\.venv\Scripts\python.exe -m pennyquant demo --out data
+.\.venv\Scripts\python.exe -m streamlit run pennyquant/dashboard/app.py
+```
+
+`py` 명령이 없다면 첫 줄을 `& "C:\Python312\python.exe" -m venv .venv`처럼 본인의 Python 설치 경로로 바꾸세요. PyCharm에서 이미 `.venv`를 생성했다면 첫 줄은 생략합니다. 위 명령은 가상환경의 Python을 직접 사용하므로 `Activate.ps1` 실행이나 PowerShell 실행 정책 변경이 필요하지 않습니다. [Windows·PyCharm 설정 안내](docs/WINDOWS_PYCHARM.md)를 참고하세요.
+
+Linux/macOS 또는 WSL 터미널:
 
 ```bash
 python3.12 -m venv .venv
@@ -15,16 +30,18 @@ python -m pip install -r requirements.lock
 python -m pip install --no-deps -e .
 python -m pennyquant doctor
 python -m pennyquant demo --out data
-streamlit run pennyquant/dashboard/app.py
+python -m streamlit run pennyquant/dashboard/app.py
 ```
 
 브라우저에서 `http://localhost:8501`을 엽니다. `demo`는 열흘의 가상 세션을 처리해 DB·테이프·네 전략 보고서를 생성합니다. 이미 `data/pennyquant.db`가 있으면 덮어쓰지 않습니다. 재실행은 `--out data/new-demo`처럼 새 디렉터리를 지정하고 대시보드에 해당 경로를 넘기세요.
 
 ```bash
-streamlit run pennyquant/dashboard/app.py -- --db data/new-demo/pennyquant.db --report data/new-demo/report.json
+python -m streamlit run pennyquant/dashboard/app.py -- --db data/new-demo/pennyquant.db --report data/new-demo/report.json
 ```
 
-간단한 개발 설치는 `python -m pip install -e '.[dev]'`도 가능합니다. `requirements.lock`은 이번 검증에 사용한 버전과 해시를 고정합니다. 검증 기록은 `docs/VALIDATION.md`에 있습니다.
+Windows에서는 이후 예시의 `python`을 `.\.venv\Scripts\python.exe`로 바꾸거나 PyCharm에서 프로젝트 `.venv` 인터프리터를 사용하세요. Linux/macOS에서는 위처럼 활성화한 가상환경의 `python`을 사용합니다.
+
+간단한 개발 설치는 `python -m pip install -e '.[dev]'`도 가능합니다. `requirements.lock`은 이번 검증에 사용한 버전과 해시를 고정합니다. 검증 기록은 `docs/VALIDATION.md`에 있습니다. 이번 실행 환경은 Linux이며 실제 Windows OS에서의 실행 검증은 아직 수행하지 않았습니다.
 
 ## 구현 범위
 
@@ -114,6 +131,7 @@ docs/           설치·API·이벤트·운영·검증 문서
 ```
 
 - [운영·배포 매뉴얼](docs/OPERATIONS.md)
+- [Windows·PyCharm 실행 안내](docs/WINDOWS_PYCHARM.md)
 - [정규화 이벤트 규격](docs/EVENT_FORMAT.md)
 - [API 상태와 공식 근거](docs/API_STATUS.md)
 - [전략의 정확한 규칙](docs/STRATEGIES.md)

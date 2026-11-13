@@ -4,7 +4,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-import fcntl
 import hashlib
 import json
 import time
@@ -13,21 +12,14 @@ from .config.settings import Settings
 from .database.repository import Repository
 from .engine import EventEngine
 from .events import parse_event, read_events
+from .locking import exclusive_lock
 
 
 @contextmanager
 def engine_lease(db_path: str | Path):
     path = Path(str(db_path) + ".engine.lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+") as lock:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("another engine is already using this database") from exc
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    with exclusive_lock(path, message="another engine is already using this database"):
+        yield
 
 
 def replay(input_path: Path, db_path: Path, settings: Settings, strategy: str, *,

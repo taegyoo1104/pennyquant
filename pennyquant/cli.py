@@ -46,7 +46,7 @@ def parser() -> argparse.ArgumentParser:
 
 def metadata(path: Path) -> dict:
     manifest = path.with_suffix(".meta.json")
-    return json.loads(manifest.read_text()) if manifest.exists() else {}
+    return json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
 
 
 def main(argv: list[str] | None = None) -> int:

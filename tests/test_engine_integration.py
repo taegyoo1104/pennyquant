@@ -32,8 +32,8 @@ def test_synthetic_end_to_end_all_strategies_and_report(tmp_path):
     assert any(m["net_pnl"] < 0 for m in report["strategies"].values())
     assert any(m["net_pnl"] > 0 for m in report["strategies"].values())
     write_report(report, tmp_path / "report.json")
-    assert json.loads((tmp_path / "report.json").read_text())["synthetic"] is True
-    assert "합성 데이터" in (tmp_path / "report.md").read_text()
+    assert json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))["synthetic"] is True
+    assert "합성 데이터" in (tmp_path / "report.md").read_text(encoding="utf-8")
 
 
 def test_news_received_late_cannot_create_historical_entries():

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-import fcntl
 import json
 import math
 import os
@@ -20,24 +19,20 @@ from .collectors.toss_market import TossMarketClient, symbols_parameter
 from .collectors.toss_websocket import TossWebSocket, quote_from_frame
 from .events import Event
 from .models import jsonable
+from .locking import exclusive_lock
 
 
 @contextmanager
 def capture_file(path: Path):
     """Allow a follower's empty file, but reject previous data and other writers."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    stream = os.fdopen(fd, "a", encoding="utf-8")
-    try:
-        try:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ValueError("Another collector is already writing this output file") from None
-        if os.fstat(stream.fileno()).st_size:
-            raise ValueError("Capture output already contains data; choose a fresh --output")
-        yield stream
-    finally:
-        stream.close()
+    with exclusive_lock(str(path) + ".writer.lock", message="Another collector is already writing this output file",
+                        error_type=ValueError):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as stream:
+            if os.fstat(stream.fileno()).st_size:
+                raise ValueError("Capture output already contains data; choose a fresh --output")
+            yield stream
 
 
 class EventWriter:
@@ -103,7 +98,7 @@ async def collect(args) -> None:
         else:
             raise ValueError("unknown provider")
 
-        print(f"Read-only {args.provider} capture → {output}. No live orders.")
+        print(f"Read-only {args.provider} capture -> {output}. No live orders.")
         if args.provider == "toss":
             print("Monitor-only quotes: tradable=false and exchange=UNKNOWN; scanner snapshots, RVOL and eligibility are not fabricated.")
         elif args.provider in {"sec", "rss"} or not streaming:

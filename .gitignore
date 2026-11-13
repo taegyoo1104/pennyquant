@@ -1,4 +1,5 @@
 .venv/
+.idea/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
@@ -8,4 +9,6 @@ dist/
 .env
 data/
 *.db*
+*.engine.lock
+*.writer.lock
 playwright-report/
