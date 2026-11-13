@@ -18,7 +18,9 @@ REST 주소는 `https://openapi.tossinvest.com`입니다. `POST /oauth2/token`�
 
 구현한 GET 경로는 `/api/v1/prices`, `/api/v1/orderbook`, `/api/v1/candles`, `/api/v1/stocks`, `/api/v1/stocks/{symbol}/warnings`, `/api/v1/rankings`, `/api/v1/accounts`, `/api/v1/holdings`, `/api/v1/orders`, `/api/v1/market-calendar/US`입니다. `candles()`는 USD 1분봉만 정규화하며 timestamp는 공식 정의대로 봉 종료 시각입니다. 아직 끝나지 않은 봉은 제외합니다. 원자료를 읽은 시각은 `received_at`에 남습니다. 과거 봉을 처음 내려받은 시각을 과거 실시간 수신 시각으로 바꾸지 마세요.
 
-`quote()`와 `get_quote()`는 호가만으로 주문 가능 여부를 확정하지 않습니다. 기본 `tradable=False`, `exchange="UNKNOWN"`이며, 현재 거래정지·주문 가능 여부를 확인한 별도 입력이 있어야 거래용으로 설정할 수 있습니다. 종목 마스터 `status=ACTIVE`는 상장 상태이고 실시간 주문 가능성의 증거가 아닙니다. 1일 시장 랭킹의 `price.basePrice`·`tradingVolume`·`tradingAmount`는 참고할 수 있지만 동일 시간 과거 거래량은 제공되지 않습니다. RVOL은 별도 누적 이력이 없으면 `None`으로 유지하고 진입을 차단하세요. `TOP_GAINERS`의 `duration=1d`를 유지해야 전일 기준가 의미가 바뀌지 않습니다.
+`quote()`와 `get_quote()`는 호가만으로 주문 가능 여부를 확정하지 않습니다. 기본 `tradable=False`, `exchange="UNKNOWN"`이며, 현재 거래정지·주문 가능 여부를 확인한 별도 입력이 있어야 거래용으로 설정할 수 있습니다. 종목 마스터 `status=ACTIVE`는 상장 상태이고 실시간 주문 가능성의 증거가 아닙니다. 미국 종목에는 실시간 정지·주문 가능 여부를 확정할 필드가 없고, 유의사항 목록이 비어 있어도 정지가 없다는 증거로 삼지 않습니다. 1일 시장 랭킹의 `price.basePrice`는 참조 기준가이며 공식 전일 종가로 단정하지 않습니다. `tradingVolume`·`tradingAmount`는 참고할 수 있지만 동일 시간 과거 거래량은 제공되지 않습니다. RVOL은 별도 비교 가능한 누적 이력이 없으면 `None`으로 유지하고 진입을 차단하세요.
+
+공식 [FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md)는 미국 현재가·체결·호가·봉·WebSocket이 일부 거래소 기반이고 NBBO가 아님을 명시합니다. 호가 timestamp는 마지막 호가 갱신 시각이므로 값이 변하지 않으면 오래될 수 있습니다. 미국 1분봉은 거래 없는 분을 생략하고 일부 거래소 거래량을 사용하지만 일봉 거래량은 통합 집계이므로 서로 합산·비교할 때 기준을 맞춰야 합니다. 지연 체결 보고로 과거 1분봉이 바뀔 수 있고 정정·취소가 완전히 반영되지는 않습니다. 기업행동 유형·분할 비율을 제공하지 않으며 `adjusted=false`만으로 과거 데이터 전체가 미조정임을 증명할 수 없습니다. 현재 토스 수집만으로 완전하게 검증된 미국 종목 스캐너 입력이 채워진다고 보지 않습니다.
 
 실시간 주소는 `wss://openapi-ws.tossinvest.com/ws/v1`이며 헤더 인증 후 JSON 배열을 보냅니다. `[{"type":"trade:us","codes":["AAPL"]},{"type":"orderbook:us","codes":["AAPL"]}]`처럼 전체 구독을 한 번에 교체합니다. 계정당 연결 2개, 연결당 채널×종목 합계 100개를 관리해야 합니다. 어댑터 기본 후보 상한은 20개이며 두 시세 채널이면 40개 구독입니다. 60초마다 텍스트 `PING`을 보내고 부분 거절 ack·인증 오류·종료는 예외로 전달합니다. 체결 스트림은 유실 가능하므로 체결 메시지를 더해 당일 누적 거래량을 만들지 않습니다. 재접속 후 주문·조건주문 이벤트는 과거 누락분을 재전송하지 않으므로 REST 재확인이 필요합니다.
 
@@ -41,6 +43,8 @@ WebSocket은 `realtime_verified=True`를 명시하고 계정의 실시간 뉴스
 GET만 최대 3번 재시도하고 429·일부 5xx는 Retry-After를 따릅니다. 60초보다 긴 서버 지연 요청은 대기를 줄여 재시도하지 않고 오류로 반환합니다. 인증/권한 오류를 자동 키 재발급이나 다른 주소로 우회하지 않습니다. 수집기 예외가 나면 상위 운용 루프가 신규 진입을 중단하고 보유 포지션 상태를 확인해야 합니다. 실제 계정 권한·고정 IP 등록·무료 데이터 조건은 사용자 계정에서 별도로 확인할 항목입니다.
 
 ## 수집 CLI
+
+`python -m pennyquant check-toss --symbol AAPL`은 인증과 한 종목의 현재가 조회만 확인합니다. Windows·PyCharm 키 설정과 단계별 실패 안내는 [토스 연결 확인](TOSS_CONNECTION.md)을 참고하세요. 이 검사는 계좌·주문을 호출하지 않으며 성공해도 실제 시세 기반 모의매매 전체의 준비가 끝났다는 뜻이 아닙니다.
 
 프로젝트를 설치하고 환경변수를 셸에 주입한 다음 실행합니다. 출력은 `Event` JSONL이며 매 이벤트마다 flush하므로 별도 `paper --input ...` 소비자가 읽을 수 있습니다. 기존 기록과 혼합하지 않도록 비어 있지 않은 출력은 거절하고 파일 잠금으로 동시에 두 수집기가 쓰지 못하게 합니다. 새로운 파일명을 사용하세요. HTTP 오류는 상태 코드만 표시하며 인증 헤더·응답 원문·RSS URL의 쿼리 문자열은 출력하지 않습니다.
 

@@ -15,6 +15,8 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--config", type=Path, help="YAML settings")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="Offline dependency/configuration check; no credentials printed")
+    check = commands.add_parser("check-toss", help="Read-only Toss authentication and one-symbol price check; never prints credentials")
+    check.add_argument("--symbol", default="AAPL", help="Symbol for a read-only price lookup")
     demo = commands.add_parser("demo", help="Generate synthetic tape, replay and compare four strategies")
     demo.add_argument("--out", type=Path, default=Path("data"))
     demo.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
@@ -53,7 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         settings = load_settings(args.config)
-        if args.command == "doctor":
+        if args.command == "check-toss":
+            import asyncio
+            from .connection import run_check
+            return asyncio.run(run_check(args.symbol))
+        elif args.command == "doctor":
             packages = ("httpx", "websockets", "PyYAML", "pandas", "numpy", "streamlit", "exchange-calendars")
             print(json.dumps({"python": sys.version.split()[0], "mode": settings.mode,
                 "live_orders_enabled": False, "packages": {p: importlib.metadata.version(p) for p in packages}}, indent=2))

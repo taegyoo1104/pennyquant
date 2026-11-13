@@ -37,6 +37,8 @@ PyCharm 하단 **Terminal**을 열고 PowerShell을 사용합니다. 작업 위�
 
 ## PyCharm의 Run 버튼 설정
 
+토스 Client ID와 Client Secret을 발급받았다면 [토스 연결 확인](TOSS_CONNECTION.md)의 읽기 전용 `check-toss` 명령을 먼저 실행할 수 있습니다. 키는 사용자 PC의 환경변수에 입력합니다.
+
 터미널 명령 대신 **Run → Edit Configurations**에서 Python 구성을 추가할 수도 있습니다. 인터프리터는 프로젝트 `.venv\Scripts\python.exe`, Working directory는 프로젝트 루트로 지정합니다.
 
 | 구성 이름 | 실행 방식 | Module name | Parameters |

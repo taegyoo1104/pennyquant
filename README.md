@@ -81,6 +81,8 @@ python -m pennyquant paper --input data/live-events.jsonl --db data/live-paper.d
 
 키는 `.env.example`의 이름을 참고해 환경변수 또는 비밀 저장소로 주입합니다. 파일을 자동으로 읽지 않으며, 키를 소스나 채팅에 넣지 마세요. 실제 계정에 연결하는 명령은 사용자가 자신의 환경에서 실행합니다.
 
+토스 Client ID·Client Secret을 발급받았다면 먼저 `python -m pennyquant check-toss --symbol AAPL`로 인증과 현재가 조회를 확인하세요. 토큰·키를 출력하지 않는 읽기 전용 검사이며 주문이나 모의매매를 시작하지 않습니다. Windows의 대화식 키 입력과 PyCharm Run 설정은 [토스 연결 확인 안내](docs/TOSS_CONNECTION.md)에 있습니다.
+
 ```bash
 # 토스: 시세 한 번 조회. TOSS_CLIENT_ID / TOSS_CLIENT_SECRET 필요
 python -m pennyquant collect toss --symbols AAPL --output data/toss-quotes.jsonl
@@ -134,6 +136,7 @@ docs/           설치·API·이벤트·운영·검증 문서
 - [Windows·PyCharm 실행 안내](docs/WINDOWS_PYCHARM.md)
 - [정규화 이벤트 규격](docs/EVENT_FORMAT.md)
 - [API 상태와 공식 근거](docs/API_STATUS.md)
+- [토스 API 연결 확인](docs/TOSS_CONNECTION.md)
 - [전략의 정확한 규칙](docs/STRATEGIES.md)
 - [대시보드 사용법](docs/DASHBOARD.md)
 - [검증 기록과 미완료 범위](docs/VALIDATION.md)
