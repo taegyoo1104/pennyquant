@@ -185,7 +185,9 @@ async def run_system(config: PipelineConfig, repository: Repository, *, engine=N
               "interval_seconds": config.poll_seconds, "cycles": 0, "analysis_count": 0, "error": None}
     status["llm_model"] = getattr(getattr(news_service, "analyzer", None), "model", "")
     status["fee_summary"] = (f"{settings.fee_model} · 순손익 손절 {settings.stop_pct:.1%} / "
-                             f"익절 {settings.take_profit_pct:.1%} · 예상 슬리피지 {settings.slippage_bps:g}bps")
+                             f"기본 익절 목표 {settings.take_profit_pct:.1%} · "
+                             f"조기 청산 {'사용' if settings.early_exit_enabled else '중지'} · "
+                             f"예상 슬리피지 {settings.slippage_bps:g}bps")
     repository.set_control("pipeline_status", status)
     next_rankings = next_news = None
     news_task = None

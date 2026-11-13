@@ -385,3 +385,50 @@ async def test_real_strategy_signal_id_and_price_reach_broker_with_valid_units(b
     assert await manager.synchronize()
     assert manager.account.positions["AAPL"].qty == order.qty
     assert manager.account.positions["AAPL"].avg_price == pytest.approx(2.08)
+
+
+async def test_live_early_exit_waits_for_target_cancel_and_sells_only_actual_holdings(broker, api):
+    manager = await prepared_manager(broker)
+    current = current_quote()
+    manager.on_quote(current, current.received_at)
+    manager.orders["pq-entry"] = Order("pq-entry", "AAPL", "buy", 2, 2.01, current.timestamp, OrderStatus.OPEN)
+    await manager.drain()
+    api.detail("order-1", status="FILLED", filled=2)
+    api.holdings["AAPL"] = 2
+    assert await manager.synchronize()
+
+    at = datetime.now(timezone.utc)
+    target_quote = Quote("AAPL", at, at, 2.25, 2.254, 100, 100)
+    manager.on_quote(target_quote, at)
+    target = manager.check_exits(target_quote, at)
+    assert target.reason == "take_profit"
+    await manager.drain()
+    assert broker.orders[target.client_id]["order_id"] == "order-2"
+
+    at = datetime.now(timezone.utc)
+    fallen = Quote("AAPL", at, at, 2.06, 2.064, 100, 100)
+    manager.on_quote(fallen, at)
+    manager.request_exit("AAPL", "adverse_news_risk_exit", at)
+    assert manager.check_exits(fallen, at) is target
+    await manager.drain()
+    assert target.status != OrderStatus.CANCELLED
+    assert len([order for order in manager.orders.values() if order.side == "sell"]) == 1
+
+    api.detail("order-2", status="CANCELED", filled=0)
+    assert await manager.synchronize()
+    at = datetime.now(timezone.utc)
+    fallen = Quote("AAPL", at, at, 2.06, 2.064, 100, 100)
+    manager.on_quote(fallen, at)
+    protective = manager.check_exits(fallen, at)
+    assert protective.reason == "adverse_news_risk_exit" and protective.qty == 2
+    await manager.drain()
+    assert broker.orders[protective.client_id]["order_id"] == "order-3"
+    api.detail("order-3", status="PARTIAL_FILLED", filled=1, price="2.06")
+    api.holdings["AAPL"] = 1
+    assert await manager.synchronize()
+    assert manager.account.positions["AAPL"].qty == 1 and "AAPL" in manager.exit_intents
+    api.detail("order-3", status="FILLED", filled=2, price="2.06")
+    api.holdings.clear()
+    assert await manager.synchronize()
+    assert not manager.account.positions and not manager.exit_intents
+    assert sum(fill.qty for fill in manager.fills if fill.side == "sell") == 2

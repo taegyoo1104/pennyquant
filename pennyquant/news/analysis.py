@@ -179,9 +179,13 @@ class NewsAnalyzer:
             is_primary = is_primary and event.id.startswith("rss:")
         baseline = replace(baseline, primary_verified=is_primary)
         rules = classify(event)
-        if rules.sentiment == "negative" or rules.dilution_risk:
-            return replace(baseline, sentiment="NEGATIVE", requires_verification=False,
-                           dilution_risk=rules.dilution_risk, reason=rules.reason, model="rules-v2")
+        rule_hazard = rules.sentiment == "negative" or rules.dilution_risk
+        if rule_hazard and not self.api_key:
+            # Keywords can include negated/planned events and filing boilerplate.
+            # They may block new exposure, but never prove a forced liquidation.
+            return replace(baseline, sentiment="NEGATIVE",
+                           dilution_risk=rules.dilution_risk, reason=rules.reason + "; 사건 확정성 검증 필요",
+                           requires_verification=True, model="rules-v2")
         if rules.event_type in {"rumor", "negated_claim", "prospective_claim"}:
             return replace(baseline, error="unconfirmed_catalyst", reason=rules.reason, model="rules-v2")
         if not event.body.strip() or event.body.startswith("Filing metadata only;"):
@@ -225,6 +229,11 @@ class NewsAnalyzer:
             if choice.get("finish_reason") != "stop" or choice["message"].get("refusal"):
                 raise ValueError("incomplete response")
             result = self._validate(json.loads(choice["message"]["content"]), article_text, baseline)
+            if rule_hazard:
+                # Preserve conservative entry blocking, while only the validated
+                # extracted events can qualify a subsequent protective sell.
+                result = replace(result, sentiment="NEGATIVE", entry_eligible=False,
+                                 dilution_risk=result.dilution_risk or rules.dilution_risk)
             usage = data.get("usage", {})
             token_counts = (usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
             if any(type(value) is not int or value < 0 for value in token_counts):

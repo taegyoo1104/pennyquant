@@ -34,6 +34,11 @@ STATUS_NAMES = {
     "pending": "접수 대기", "open": "미체결", "partial": "부분 체결",
     "filled": "체결 완료", "cancelled": "취소", "rejected": "거절", "unknown": "확인 필요",
 }
+EXIT_REASON_NAMES = {
+    "stop_loss": "손절 기준 도달", "take_profit": "익절 목표 도달",
+    "bearish_profit_exit": "하락 신호 · 이익 보호 청산",
+    "adverse_news_risk_exit": "검증된 악재 · 위험 청산",
+}
 
 
 def arguments() -> argparse.Namespace:
@@ -438,6 +443,8 @@ def trading_tab(account: dict, state: dict, tables: dict[str, list[dict]]) -> No
         dataframe(rows)
         if costs:
             st.caption("평가손익과 손익분기가는 매수 비용·예상 매도 수수료·가격 불리함을 반영한 추정치입니다. 실제 체결·청구 금액은 달라질 수 있습니다.")
+            if costs.settings.early_exit_enabled:
+                st.caption(f"익절가 {costs.settings.take_profit_pct:.0%}는 기본 목표입니다. 하락 신호·검증된 악재에 따른 조기 청산도 적용합니다.")
         else:
             st.caption("평가손익은 최근 매도 호가 기준이며 향후 매도 비용은 별도입니다.")
     else:
@@ -454,6 +461,7 @@ def trading_tab(account: dict, state: dict, tables: dict[str, list[dict]]) -> No
             "주문 수량": row.get("qty"), "체결 수량": row.get("filled_qty", 0),
             "지정가 ($)": row.get("limit_price"), "평균 체결가 ($)": row.get("avg_fill_price"),
             "상태": STATUS_NAMES.get(str(row.get("status")), str(row.get("status"))),
+            "주문 사유": EXIT_REASON_NAMES.get(row.get("reason"), row.get("reason") or "—"),
             "주문 ID": row.get("client_id"),
         } for row in list(orders)[-100:][::-1]])
     else:

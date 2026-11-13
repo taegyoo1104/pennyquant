@@ -82,6 +82,8 @@ companies:
 
 매매·비용 기본값은 `pennyquant/config/strategy.yaml`입니다. 최대 보유 5개, 하루 승인 진입 10회, 순손실 손절 5%, 순이익 익절 10%, 전략 자금의 일일 손실 한도 2%입니다. 최적화한 수익 목표가 아닌 변경 가능한 초기값입니다. [수수료·위험 안내](FEES_AND_RISK.md)를 참고하세요.
 
+10%는 고정 익절 목표이며, 조기 청산도 기본 활성화되어 있습니다. 순이익이 양수인 상태에서 완성 분봉의 VWAP·직전 저가 이탈·거래량 증가가 함께 확인되면 10% 전에도 이익 보호 매도를 요청합니다. 충분히 검증된 중대한 악재는 손실 상태에서도 위험 청산을 요청할 수 있습니다. `early_exit_enabled`, `bearish_exit_volume_ratio`, `early_exit_max_signal_age_seconds`로 조정하며, 실제 손익은 체결 결과로 기록합니다.
+
 ```powershell
 .\venv\Scripts\python.exe -m pennyquant --config pennyquant/config/strategy.yaml run-system --pipeline-config config/pipeline.local.yaml
 ```

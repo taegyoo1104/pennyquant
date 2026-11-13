@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from .config.settings import Settings
@@ -9,11 +10,13 @@ from .database.repository import Repository
 from .events import Event
 from .models import Account, Bar, NewsEvent, Quote, StockSnapshot, jsonable, utc
 from .news.classifier import classify
+from .news.analysis import event_digest
 from .scanners.stock_scanner import scan
 from .strategies.base import StrategyContext
 from .strategies import STRATEGIES
 from .trading.order_manager import PaperOrderManager
 from .trading.order_manager import KNOWN_ACTIVE
+from .trading.exit_signals import bearish_reversal
 
 NY = ZoneInfo("America/New_York")
 
@@ -79,7 +82,7 @@ class EventEngine:
                     and broker is not None and broker.live_enabled and broker.acknowledge_live_orders
                     and broker.reconciled and not broker.halt_reasons and not self.manager.halt_reasons)
 
-    def register_analysis(self, analysis) -> None:
+    def register_analysis(self, analysis, *, now: datetime | None = None) -> None:
         """Make completed analysis available without backdating provider receipts.
 
         News arrives before an asynchronous LLM result. Registering its original
@@ -97,15 +100,20 @@ class EventEngine:
         self.analyses[f"{event.id}:{ticker}"] = payload
         self.news[f"{event.id}:{event.received_at.isoformat()}"] = event
         rule = classify(event)
+        evaluation_time = utc(now or (datetime.now(timezone.utc) if self.live
+                                     else self.last_time or analysis.analyzed_at or datetime.now(timezone.utc)))
+        risk_exit = self._request_adverse_news_exit(analysis, evaluation_time)
         if (analysis.sentiment in {"NEGATIVE", "MIXED"} or analysis.dilution_risk
                 or rule.sentiment == "negative" or rule.dilution_risk):
             available = analysis.analyzed_at or datetime.now(timezone.utc)
             for order in list(self.manager.orders.values()):
                 if order.symbol == ticker and order.side == "buy" and order.status in KNOWN_ACTIVE:
                     self.manager.cancel(order.client_id, available)
-            alert = {"id": f"news-risk:{payload['id']}", "type": "news_risk", "code": "news_risk",
+            alert_identity = f"{event.id}:{ticker}:{analysis.input_digest or payload['id']}:{'exit' if risk_exit else 'entry'}"
+            alert = {"id": f"news-risk:{alert_identity}", "type": "news_risk", "code": "news_risk",
                 "level": "WARNING", "symbol": ticker, "timestamp": available,
-                "message": f"{ticker}: 악재·혼합 사건 또는 희석 위험이 확인되어 신규 매수를 제한합니다."}
+                "message": f"{ticker}: 악재·혼합 사건 또는 희석 위험이 확인되어 신규 매수를 제한합니다."
+                           + (" 보유 종목의 위험 청산을 요청했습니다." if risk_exit else "")}
             alerts = getattr(self.manager, "alerts", None)
             if alerts is not None and not any(item["id"] == alert["id"] for item in alerts):
                 alerts.append(jsonable(alert))
@@ -124,6 +132,37 @@ class EventEngine:
                 "reason": analysis.reason, "exclude": not analysis.entry_eligible,
                 "dilution_risk": analysis.dilution_risk}})
         self.persist()
+
+    def _request_adverse_news_exit(self, analysis, now: datetime) -> bool:
+        """A verified fact can invalidate a holding before its price stop."""
+        event = analysis.event
+        if (not self.settings.early_exit_enabled or analysis.ticker not in self.manager.account.positions
+                or analysis.sentiment != "NEGATIVE" or analysis.requires_verification is not False
+                or analysis.error or analysis.missing_information or not event.verified
+                or not event.source.strip() or analysis.ticker not in event.symbols
+                or analysis.input_digest != event_digest(event, analysis.ticker)):
+            return False
+        try:
+            published, received, completed = utc(event.published_at), utc(event.received_at), utc(analysis.analyzed_at)
+            if (not published <= received <= completed <= now
+                    or (now - published).total_seconds() > self.settings.max_news_age_hours * 3600):
+                return False
+        except (ValueError, TypeError, AttributeError):
+            return False
+        primary = (analysis.primary_verified and analysis.source_kind in {"sec", "rss"}
+                   and event.id.startswith(analysis.source_kind + ":"))
+        if analysis.source_kind == "sec":
+            primary = primary and urlsplit(event.url).hostname == "www.sec.gov"
+        known_source = primary or (analysis.source_kind == "alpaca" and event.id.startswith("alpaca:"))
+        confirmed = (analysis.confidence >= 0.75 and any(item.status == "CONFIRMED" and item.importance == "HIGH"
+            and (item.shareholder_impact == "NEGATIVE" or item.dilution_risk) for item in analysis.events))
+        if not known_source or not confirmed:
+            return False
+        requested = self.manager.request_exit(analysis.ticker, "adverse_news_risk_exit", now)
+        quote = self.quotes.get(analysis.ticker) or self.manager._latest_quotes.get(analysis.ticker)
+        if requested and quote is not None:
+            self.manager.check_exits(quote, now)
+        return requested
 
     def apply_runtime_controls(self, now: datetime) -> None:
         """Apply an idle stop before broker dispatch, even without a new tick."""
@@ -185,6 +224,12 @@ class EventEngine:
             del history[:-400]
             if self.repository:
                 self.repository.record("market_bars", data)
+            position = self.manager.account.positions.get(data.symbol)
+            if position and bearish_reversal(history, data.symbol, position.opened_at, now, self.settings):
+                self.manager.request_exit(data.symbol, "bearish_profit_exit", now, profitable_only=True)
+                quote = self.quotes.get(data.symbol)
+                if quote is not None:
+                    self.manager.check_exits(quote, now)
             snapshot = self.snapshots.get(data.symbol)
             if snapshot:
                 accepted, reasons = scan(snapshot, now, self.settings)

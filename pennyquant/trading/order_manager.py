@@ -47,6 +47,7 @@ class PaperOrderManager:
         self._quote_liquidity: dict[str, dict[str, int]] = {}
         self._latest_quotes: dict[str, Quote] = {}
         self._trade_totals: dict[str, dict[str, Any]] = {}
+        self.exit_intents: dict[str, dict[str, Any]] = {}
 
     def _refresh_reservations(self) -> None:
         self.account.reserved_cash = sum(
@@ -329,6 +330,7 @@ class PaperOrderManager:
             trade["net_pnl"] += pnl
             if position.qty == 0:
                 del self.account.positions[fill.symbol]
+                self.exit_intents.pop(fill.symbol, None)
                 completed = self._trade_totals.pop(fill.symbol)
                 completed.update({
                     "exit_time": utc(fill.timestamp).isoformat(),
@@ -358,6 +360,26 @@ class PaperOrderManager:
         if self.account.consecutive_losses >= self.settings.max_consecutive_losses:
             self.halt("consecutive_losses")
 
+    def request_exit(self, symbol: str, reason: str, now: datetime, *, profitable_only: bool = False) -> bool:
+        """Persist a position-bound request; only fresh quotes can dispatch it."""
+        now = utc(now)
+        position = self.account.positions.get(symbol)
+        if not self.settings.early_exit_enabled or position is None or now < utc(position.opened_at):
+            return False
+        opened = utc(position.opened_at).isoformat()
+        previous = self.exit_intents.get(symbol)
+        if previous and previous.get("position_opened_at") == opened:
+            expired = (not previous.get("qualified") and previous.get("profitable_only")
+                       and (now - utc(previous["requested_at"])).total_seconds() > self.settings.early_exit_max_signal_age_seconds)
+            if not expired and (not previous.get("profitable_only") or profitable_only):
+                return True
+        self.exit_intents[symbol] = {"symbol": symbol, "reason": reason, "requested_at": now.isoformat(),
+            "position_opened_at": opened, "profitable_only": profitable_only, "qualified": not profitable_only}
+        for order in list(self.orders.values()):
+            if order.symbol == symbol and order.side == "buy" and order.status in KNOWN_ACTIVE:
+                self.cancel(order.client_id, now)
+        return True
+
     def check_exits(self, quote: Quote, now: datetime) -> Order | None:
         now = utc(now)
         if not self._valid_quote(quote, now):
@@ -365,10 +387,33 @@ class PaperOrderManager:
         position = self.account.positions.get(quote.symbol)
         if position is None:
             return None
-        for order in self.orders.values():
+        intent = self.exit_intents.get(quote.symbol)
+        if intent:
+            if (intent.get("position_opened_at") != utc(position.opened_at).isoformat()
+                    or utc(intent["requested_at"]) > now):
+                self.exit_intents.pop(quote.symbol, None)
+                intent = None
+            elif (intent.get("profitable_only") and not intent.get("qualified")
+                  and (now - utc(intent["requested_at"])).total_seconds() > self.settings.early_exit_max_signal_age_seconds):
+                self.exit_intents.pop(quote.symbol, None)
+                intent = None
+            elif intent.get("profitable_only") and not intent.get("qualified"):
+                basis = position.avg_price * position.qty + position.entry_fee
+                if self.costs.proceeds(quote.bid, position.qty) > basis + 1e-9:
+                    intent["qualified"] = True
+        protected = intent if intent and intent.get("qualified") else None
+        reason = ("stop_loss" if quote.bid <= position.stop_price
+                  else protected["reason"] if protected and not protected.get("profitable_only")
+                  else "take_profit" if quote.bid >= position.target_price
+                  else protected["reason"] if protected else None)
+        for order in list(self.orders.values()):
             if order.symbol == quote.symbol and order.side == "sell" and order.status in ACTIVE:
-                return order
-        reason = "stop_loss" if quote.bid <= position.stop_price else "take_profit" if quote.bid >= position.target_price else None
+                # A higher-priced target must not trap a new protective exit.
+                if (reason in {"stop_loss", "adverse_news_risk_exit", "bearish_profit_exit"}
+                        and order.reason == "take_profit" and order.status in KNOWN_ACTIVE):
+                    self.cancel(order.client_id, now)
+                if order.status in ACTIVE:
+                    return order
         if reason is None:
             return None
         # Prevent an unfilled remainder from reopening exposure after exit.
@@ -408,6 +453,7 @@ class PaperOrderManager:
             "quote_liquidity": self._quote_liquidity, "latest_quotes": self._latest_quotes,
             "trade_totals": self._trade_totals,
             "charged_order_fees": self._charged_order_fees, "alerts": self.alerts,
+            "exit_intents": self.exit_intents,
         })
 
     def restore_state(self, state: dict[str, Any]) -> None:
@@ -415,7 +461,10 @@ class PaperOrderManager:
             raise ValueError("unsupported order state version")
         if state.get("execution_mode", "paper") != self.execution_mode:
             raise ValueError("persisted execution mode differs; paper and live ledgers cannot be interchanged")
-        if state.get("settings") != asdict(self.settings):
+        saved_settings = dict(state.get("settings") or {})
+        for name in ("early_exit_enabled", "bearish_exit_volume_ratio", "early_exit_max_signal_age_seconds"):
+            saved_settings.setdefault(name, Settings.__dataclass_fields__[name].default)
+        if saved_settings != asdict(self.settings):
             raise ValueError("persisted settings differ; use a fresh database for new parameters")
         raw_account = dict(state["account"])
         positions: dict[str, Position] = {}
@@ -463,6 +512,15 @@ class PaperOrderManager:
             for fill in fills:
                 self._charged_order_fees[fill.client_id] = self._charged_order_fees.get(fill.client_id, 0) + fill.fee
         self.alerts = list(state.get("alerts", []))
+        self.exit_intents = {}
+        for symbol, raw in state.get("exit_intents", {}).items():
+            value = dict(raw)
+            if (value.get("symbol") != symbol or type(value.get("profitable_only")) is not bool
+                    or type(value.get("qualified")) is not bool or not isinstance(value.get("reason"), str)):
+                raise ValueError("invalid restored exit intent")
+            utc(value["requested_at"]); utc(value["position_opened_at"])
+            if symbol in positions and value["position_opened_at"] == utc(positions[symbol].opened_at).isoformat():
+                self.exit_intents[symbol] = value
         self._latest_quotes = {}
         for symbol, raw_quote in state.get("latest_quotes", {}).items():
             item = dict(raw_quote)

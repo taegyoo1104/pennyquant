@@ -4,6 +4,9 @@ mode: paper
 risk_per_trade: 0.01
 stop_pct: 0.05
 take_profit_pct: 0.10
+early_exit_enabled: true
+bearish_exit_volume_ratio: 1.2
+early_exit_max_signal_age_seconds: 120
 daily_loss_pct: 0.02
 max_entries: 10
 max_positions: 5

@@ -12,6 +12,9 @@ class Settings:
     risk_per_trade: float = 0.01
     stop_pct: float = 0.05
     take_profit_pct: float = 0.10
+    early_exit_enabled: bool = True
+    bearish_exit_volume_ratio: float = 1.2
+    early_exit_max_signal_age_seconds: int = 120
     daily_loss_pct: float = 0.02
     max_entries: int = 10
     max_positions: int = 5
@@ -72,6 +75,8 @@ class Settings:
             raise ValueError("news_policy must be realtime or primary")
         if self.primary_news_max_age_hours <= 0:
             raise ValueError("primary_news_max_age_hours must be positive")
+        if self.bearish_exit_volume_ratio < 1 or self.early_exit_max_signal_age_seconds < 1:
+            raise ValueError("bearish exit volume ratio must be >=1 and signal age must be positive")
         if self.max_positions > 5:
             raise ValueError("max_positions cannot exceed the five-symbol exposure limit")
         if self.slippage_bps >= 10000 or self.commission_sell_bps + self.sell_regulatory_bps >= 10000:
