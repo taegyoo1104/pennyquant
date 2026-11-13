@@ -103,6 +103,7 @@ async def collect(args) -> None:
             print("Monitor-only quotes: tradable=false and exchange=UNKNOWN; scanner snapshots, RVOL and eligibility are not fabricated.")
         elif args.provider in {"sec", "rss"} or not streaming:
             print("Collected news is auxiliary data (real_time=false).")
+        completed = False
         try:
             if streaming:
                 if args.provider == "toss":
@@ -143,6 +144,7 @@ async def collect(args) -> None:
                     if not poll:
                         break
                     await asyncio.sleep(poll)
+            completed = True
         except (CapabilityUnavailable, DataQualityError):
             raise
         except httpx.HTTPStatusError as exc:
@@ -156,4 +158,7 @@ async def collect(args) -> None:
             raise RuntimeError(f"{args.provider} collector stopped ({type(exc).__name__}); verify stream permissions and connection") from None
         finally:
             await client.aclose()
-            print(f"Captured {writer.count} normalized events.", file=sys.stderr)
+            if completed:
+                print(f"Captured {writer.count} normalized events.", file=sys.stderr)
+            else:
+                print(f"Capture stopped after saving {writer.count} normalized events; collection did not complete.", file=sys.stderr)

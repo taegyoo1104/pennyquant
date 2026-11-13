@@ -78,6 +78,24 @@ async def test_capture_http_error_does_not_expose_provider_url_or_auth(tmp_path,
     assert "403" in str(exc.value) and "SECRET" not in str(exc.value) and "feed.test" not in str(exc.value)
 
 
+async def test_alpaca_parse_failure_is_not_reported_as_successful_zero_capture(tmp_path, monkeypatch, capsys):
+    class FakeAlpaca:
+        def __init__(self, **kwargs):
+            pass
+        async def fetch(self, symbols):
+            raise DataQualityError("Alpaca news requires a timezone-aware ISO timestamp (field: created_at)")
+        async def aclose(self):
+            pass
+    monkeypatch.setattr("pennyquant.capture.AlpacaNewsClient", FakeAlpaca)
+    options = args(tmp_path, provider="alpaca")
+    with pytest.raises(DataQualityError, match="field: created_at"):
+        await collect(options)
+    output = capsys.readouterr()
+    assert "collection did not complete" in output.err
+    assert "Captured 0" not in output.err
+    assert options.output.read_text() == ""
+
+
 async def test_rss_capture_does_not_attach_cli_symbol_to_broad_feed(tmp_path, monkeypatch):
     class FakeRSS:
         async def fetch(self, url, **kwargs):

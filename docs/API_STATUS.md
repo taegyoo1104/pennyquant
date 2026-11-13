@@ -32,6 +32,28 @@ REST 주소는 `https://openapi.tossinvest.com`입니다. `POST /oauth2/token`�
 
 WebSocket은 `realtime_verified=True`를 명시하고 계정의 실시간 뉴스 권한을 별도로 확인한 경우에만 시작합니다. 서버의 authenticated와 요청 심볼 subscription ack까지 확인한 WS 기사만 `real_time=True`입니다. 그래도 기사 생성 시각 대비 수신 지연은 전략 필터에서 따로 검사합니다. 업데이트는 원래 기사 ID를 유지하며 중복 버전 수신을 제한합니다. API 접근 성공이 수익성이나 저지연 체결을 뜻하지는 않습니다.
 
+### Alpaca 수집 오류 확인
+
+구버전의 `alpaca response could not be normalized (ValueError)`만으로는 원인을 확정할 수 없습니다. 키에 한글 등이 포함되어 HTTP 요청 전에 실패한 경우와 기사 필드 변환 실패가 같은 문구로 표시될 수 있습니다. 최신 코드는 키·시크릿의 입력 형식을 요청 전에 검사하고, 응답 오류는 고정된 필드명으로 구분합니다.
+
+| 최신 오류에 표시되는 항목 | 확인할 내용 |
+|---|---|
+| `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`의 `invalid characters` | 안내 문구 대신 발급받은 값만 입력했는지 확인합니다. 공백·줄바꿈·한글 등 비ASCII 문자는 허용하지 않습니다. |
+| `field: response` / `field: news` | 유효한 JSON 또는 뉴스 배열이 없는 응답입니다. 응답 원문 대신 정제된 오류 문구만 공유합니다. |
+| `field: created_at` | 기사 발표 시각이 없거나 시간대를 포함한 ISO 형식이 아닙니다. 현재 시각으로 대체하지 않습니다. |
+| `field: symbols` / `field: symbols[...]` | 종목 배열 또는 내부에서 지원하는 티커 형식과 맞지 않습니다. 별칭을 추측해 바꾸지 않고 수집을 중단합니다. |
+
+REST 수집은 모든 페이지를 변환한 뒤 파일에 기록하므로, `0`건 저장 후 오류가 났다고 해서 API가 뉴스를 0건 반환했다는 뜻은 아닙니다. 한 기사나 후속 페이지의 오류로 저장 전 중단될 수 있습니다. 실패한 실행은 `collection did not complete`로 표시합니다. 잘못된 기사를 임의로 정상 처리하거나 거래 입력으로 사용하지 않습니다.
+
+PyCharm에서 **Ctrl+T**로 갱신한 뒤 프로젝트 루트의 PowerShell에서 새로운 파일명으로 다시 실행합니다. `venv` 대신 `.venv`를 사용한다면 경로를 바꾸세요.
+
+```powershell
+$newsFile = "data/alpaca-news-$(Get-Date -Format yyyyMMdd-HHmmss).jsonl"
+.\venv\Scripts\python.exe -m pennyquant collect alpaca --symbols AAPL,MSFT --output $newsFile
+```
+
+오류가 계속되면 `PennyQuant:`로 시작하는 최신 오류 문구만 확인합니다. API 키·시크릿·환경변수 값·인증 헤더·원본 응답은 채팅이나 GitHub에 올리지 마세요. `real_time=false` 안내는 REST 보조 뉴스의 정상 표시이며 변환 오류의 원인이 아닙니다.
+
 ## SEC·RSS
 
 [SEC 데이터 API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)와 [개발자 Fair Access 지침](https://www.sec.gov/about/developer-resources)을 기준으로 `SEC_USER_AGENT="PennyQuant 본인연락처"`를 요구하고, 프로세스 내 모든 SEC 클라이언트와 재시도를 하나의 초당 5회 제한기로 묶습니다. SEC는 사용자 전체 합산 한도를 두므로 여러 프로세스·장비를 동시에 운용하면 별도 중앙 제한기가 필요합니다. acceptanceDateTime에 정확한 시간대가 없으면 `published_at=None`으로 보존하며 거래용 뉴스로 변환하지 않습니다. 공시 목록은 증자·계약의 내용을 판정하지 않습니다.

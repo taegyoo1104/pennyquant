@@ -130,6 +130,79 @@ async def test_alpaca_stream_requires_explicit_entitlement():
         await alpaca.aclose()
 
 
+@pytest.mark.parametrize("field,value", [
+    ("key", "잘못입력한키"), ("key", "key\n"), ("secret", "secret value"),
+    ("secret", "secret\x7f"),
+])
+async def test_alpaca_bad_credential_format_is_identified_without_request_or_value(field, value):
+    def handle(request):
+        pytest.fail("Invalid credentials must be rejected before sending an HTTP request")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        alpaca = AlpacaNewsClient(value if field == "key" else "valid-key",
+                                  value if field == "secret" else "valid-secret", client=client)
+        with pytest.raises(CapabilityUnavailable) as exc:
+            await alpaca.fetch(["AAPL"])
+    assert ("APCA_API_KEY_ID" if field == "key" else "APCA_API_SECRET_KEY") in str(exc.value)
+    assert value not in str(exc.value) and "invalid characters" in str(exc.value)
+
+
+@pytest.mark.parametrize("updates,field", [
+    ({"symbols": ["AAPL", "$SECRET"]}, "symbols[1]"),
+    ({"symbols": "AAPL"}, "symbols"),
+    ({"created_at": "PRIVATE-invalid-timestamp"}, "created_at"),
+    ({"created_at": "2026-11-13T14:00:00"}, "created_at"),
+    ({"headline": None}, "headline"),
+    ({"content": {"PRIVATE": "invalid"}}, "content"),
+])
+def test_alpaca_news_field_diagnostics_do_not_echo_provider_values(updates, field):
+    article = {"id": 1, "headline": "Valid headline", "symbols": ["AAPL"],
+               "created_at": "2026-11-13T14:00:00Z", **updates}
+    with pytest.raises(DataQualityError) as exc:
+        parse_news(article, NOW)
+    assert f"field: {field}" in str(exc.value)
+    assert "SECRET" not in str(exc.value) and "PRIVATE" not in str(exc.value)
+
+
+def test_alpaca_news_nullable_optional_text_and_fractional_timestamp():
+    news = parse_news({"id": 1, "headline": "AAPL news", "symbols": ["AAPL"],
+                       "created_at": "2026-11-13T14:00:00.123456789Z",
+                       "source": None, "url": None, "content": None, "summary": None}, NOW)
+    assert news.source == "" and news.url == "" and news.body == ""
+    assert news.published_at.microsecond == 123456 and not news.real_time
+
+
+@pytest.mark.parametrize("body,field", [
+    (b"<html>PRIVATE-response</html>", "response"),
+    (b'{"news":null}', "news"),
+    (b'{"news":[],"next_page_token":[]}', "next_page_token"),
+])
+async def test_alpaca_bad_response_has_fixed_field_diagnostic(body, field):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=body))) as client:
+        alpaca = AlpacaNewsClient("key", "secret", client=client)
+        with pytest.raises(DataQualityError) as exc:
+            await alpaca.fetch(["AAPL"])
+    assert f"field: {field}" in str(exc.value) and "PRIVATE" not in str(exc.value)
+
+
+async def test_alpaca_failed_later_page_does_not_consume_unwritten_articles():
+    article = {"id": 1, "headline": "AAPL news", "symbols": ["AAPL"],
+               "created_at": "2026-11-13T14:00:00Z"}
+    invalid_page = True
+    def handle(request):
+        if request.url.params.get("page_token"):
+            return httpx.Response(200, json={"news": [{**article, "id": 2, "created_at": "invalid"}]
+                                             if invalid_page else [], "next_page_token": None})
+        return httpx.Response(200, json={"news": [article], "next_page_token": "page2"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        alpaca = AlpacaNewsClient("key", "secret", client=client)
+        alpaca.limiter.interval = 0
+        with pytest.raises(DataQualityError, match="created_at"):
+            await alpaca.fetch(["AAPL"])
+        assert not alpaca._seen
+        invalid_page = False
+        assert [news.id for news in await alpaca.fetch(["AAPL"])] == ["alpaca:1"]
+
+
 def test_sec_keeps_missing_acceptance_unknown_and_form_neutral():
     data = {"tickers": ["TEST"], "filings": {"recent": {
         "form": ["S-3", "8-K", "4"], "accessionNumber": ["0000000001-26-000001", "0000000001-26-000002", "0000000001-26-000003"],

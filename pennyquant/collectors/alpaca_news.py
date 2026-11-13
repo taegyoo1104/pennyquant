@@ -8,8 +8,8 @@ from typing import AsyncIterator
 
 import httpx
 
-from ..models import NewsEvent, utc
-from .common import CapabilityUnavailable, RateLimiter, get_readonly, now_utc
+from ..models import NewsEvent, symbol_valid, utc
+from .common import CapabilityUnavailable, DataQualityError, RateLimiter, get_readonly, now_utc
 from .toss_market import symbols_parameter
 
 REST_URL = "https://data.alpaca.markets/v1beta1/news"
@@ -17,10 +17,38 @@ STREAM_URL = "wss://stream.data.alpaca.markets/v1beta1/news"
 
 
 def parse_news(item: dict, received_at, *, real_time: bool = False) -> NewsEvent:
+    # Fixed field diagnostics must not echo provider values, article bodies or keys.
+    if not isinstance(item, dict):
+        raise DataQualityError("Alpaca news item must be an object (field: news[])")
+    if not isinstance(item.get("id"), (str, int)) or isinstance(item.get("id"), bool) or not str(item["id"]).strip():
+        raise DataQualityError("Alpaca news has an invalid article ID (field: id)")
+    if not isinstance(item.get("headline"), str) or not item["headline"].strip():
+        raise DataQualityError("Alpaca news requires a non-empty headline (field: headline)")
+    symbols = item.get("symbols", [])
+    if not isinstance(symbols, list):
+        raise DataQualityError("Alpaca news requires a symbol array (field: symbols)")
+    for index, symbol in enumerate(symbols):
+        try:
+            symbol_valid(symbol)
+        except ValueError:
+            # Do not guess stock aliases or silently turn an unverified tag into a ticker.
+            raise DataQualityError(
+                f"Alpaca news contains an unsupported ticker (field: symbols[{index}]); "
+                "expected 1-20 uppercase letters, digits, dots or hyphens"
+            ) from None
+    try:
+        published_at = utc(item["created_at"])
+    except (ValueError, TypeError, AttributeError, KeyError, OverflowError):
+        raise DataQualityError(
+            "Alpaca news requires a timezone-aware ISO timestamp (field: created_at)"
+        ) from None
+    for field in ("source", "url", "content", "summary", "updated_at"):
+        if item.get(field) is not None and not isinstance(item[field], str):
+            raise DataQualityError(f"Alpaca news requires text or null (field: {field})")
     return NewsEvent(id="alpaca:" + str(item["id"]), symbols=tuple(item.get("symbols", [])),
-        title=item["headline"], published_at=utc(item["created_at"]), received_at=utc(received_at),
-        source=item.get("source", "alpaca"), url=item.get("url", ""),
-        body=item.get("content") or item.get("summary", ""), verified=True, real_time=real_time)
+        title=item["headline"], published_at=published_at, received_at=utc(received_at),
+        source=item.get("source", "alpaca") or "", url=item.get("url") or "",
+        body=item.get("content") or item.get("summary") or "", verified=True, real_time=real_time)
 
 
 class AlpacaNewsClient:
@@ -37,6 +65,12 @@ class AlpacaNewsClient:
     def _headers(self):
         if not self._key or not self._secret:
             raise CapabilityUnavailable("Set APCA_API_KEY_ID and APCA_API_SECRET_KEY")
+        for name, value in (("APCA_API_KEY_ID", self._key), ("APCA_API_SECRET_KEY", self._secret)):
+            if not isinstance(value, str) or any(not 33 <= ord(char) <= 126 for char in value):
+                raise CapabilityUnavailable(
+                    f"{name} has invalid characters; enter only the issued key, "
+                    "without spaces, line breaks or non-ASCII characters"
+                )
         return {"APCA-API-KEY-ID": self._key, "APCA-API-SECRET-KEY": self._secret}
 
     def _new(self, item: dict) -> bool:
@@ -51,6 +85,7 @@ class AlpacaNewsClient:
 
     async def fetch(self, symbols: list[str], *, start=None, end=None,
                     max_pages: int = 10) -> list[NewsEvent]:
+        headers = self._headers()  # Validate credentials before opening a request.
         if not 1 <= max_pages <= 100:
             raise ValueError("max_pages must be 1..100")
         params = {"symbols": symbols_parameter(symbols), "limit": 50,
@@ -63,18 +98,27 @@ class AlpacaNewsClient:
         tokens = set()
         for _ in range(max_pages):
             response = await get_readonly(self.client, REST_URL, limiter=self.limiter,
-                                          headers=self._headers(), params=params)
-            data, received = response.json(), now_utc()
-            for item in data.get("news", []):
-                if self._new(item):
-                    # REST/historical responses cannot prove original live availability.
-                    result.append(parse_news(item, received, real_time=False))
+                                          headers=headers, params=params)
+            try:
+                data = response.json()
+            except ValueError:
+                raise DataQualityError("Alpaca returned invalid JSON (field: response)") from None
+            if not isinstance(data, dict) or not isinstance(data.get("news"), list):
+                raise DataQualityError("Alpaca response requires a news array (field: news)")
             token = data.get("next_page_token")
+            if token is not None and not isinstance(token, str):
+                raise DataQualityError("Alpaca response requires a text page token (field: next_page_token)")
+            received = now_utc()
+            for item in data["news"]:
+                article = parse_news(item, received, real_time=False)
+                # Commit deduplication only when the whole fetch can be returned.
+                # A later bad item/page must not consume earlier unwritten articles.
+                result.append((item, article))
             if not token or token in tokens:
                 break
             tokens.add(token)
             params["page_token"] = token
-        return result
+        return [article for item, article in result if self._new(item)]
 
     async def stream(self, symbols: list[str]) -> AsyncIterator[NewsEvent]:
         from websockets.asyncio.client import connect
@@ -105,8 +149,9 @@ class AlpacaNewsClient:
                     if kind == "n":
                         if not authenticated or not subscribed:
                             raise CapabilityUnavailable("Alpaca news arrived before entitlement/subscription confirmation")
+                        article = parse_news(item, now_utc(), real_time=True)
                         if self._new(item):
-                            yield parse_news(item, now_utc(), real_time=True)
+                            yield article
             raise CapabilityUnavailable("Alpaca news stream closed; halt new entries before reconnect")
 
     async def aclose(self):
