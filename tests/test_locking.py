@@ -9,16 +9,16 @@ import sys
 
 import pytest
 
-from pennyquant.capture import capture_file
-from pennyquant.cli import metadata
-from pennyquant.runtime import engine_lease
+from sessionquant.capture import capture_file
+from sessionquant.cli import metadata
+from sessionquant.runtime import engine_lease
 
 ROOT = Path(__file__).resolve().parents[1]
 CHILD = """
 import json, sys
 from pathlib import Path
-from pennyquant.capture import capture_file
-from pennyquant.runtime import engine_lease
+from sessionquant.capture import capture_file
+from sessionquant.runtime import engine_lease
 manager = engine_lease if sys.argv[1] == 'engine' else capture_file
 try:
     with manager(Path(sys.argv[2])):
@@ -71,7 +71,7 @@ def test_exception_releases_engine_lease(tmp_path):
 
 def test_abrupt_process_exit_releases_engine_lease(tmp_path):
     path = tmp_path / "paper.db"
-    child("from pennyquant.runtime import engine_lease; import os, sys\nwith engine_lease(sys.argv[1]):\n    os._exit(0)\n", str(path))
+    child("from sessionquant.runtime import engine_lease; import os, sys\nwith engine_lease(sys.argv[1]):\n    os._exit(0)\n", str(path))
     with engine_lease(path):
         pass
 

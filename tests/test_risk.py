@@ -3,9 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.models import Account, Position, Quote, Signal
-from pennyquant.trading.risk_manager import RiskManager, is_regular_session
+from sessionquant.config.settings import Settings
+from sessionquant.models import Account, Position, Quote, Signal
+from sessionquant.trading.risk_manager import RiskManager, is_regular_session
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
 

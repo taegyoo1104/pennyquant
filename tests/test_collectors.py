@@ -5,16 +5,16 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from pennyquant.collectors.alpaca_news import AlpacaNewsClient, parse_news
-from pennyquant.collectors.common import CapabilityUnavailable, DataQualityError, RateLimiter, get_readonly
-from pennyquant.collectors.rss_collector import parse_feed
-from pennyquant.collectors.sec_edgar import SecEdgarClient, parse_submissions
-from pennyquant.collectors.toss_market import TossMarketClient, parse_candles, parse_orderbook
-from pennyquant.collectors.toss_websocket import TossWebSocket, quote_from_frame, subscription_declaration
-from pennyquant.config.settings import Settings
-from pennyquant.models import NewsEvent
-from pennyquant.news.classifier import classify
-from pennyquant.news.event_filter import eligible_events, positive_event
+from sessionquant.collectors.alpaca_news import AlpacaNewsClient, parse_news
+from sessionquant.collectors.common import CapabilityUnavailable, DataQualityError, RateLimiter, get_readonly
+from sessionquant.collectors.rss_collector import parse_feed
+from sessionquant.collectors.sec_edgar import SecEdgarClient, parse_submissions
+from sessionquant.collectors.toss_market import TossMarketClient, parse_candles, parse_orderbook
+from sessionquant.collectors.toss_websocket import TossWebSocket, quote_from_frame, subscription_declaration
+from sessionquant.config.settings import Settings
+from sessionquant.models import NewsEvent
+from sessionquant.news.classifier import classify
+from sessionquant.news.event_filter import eligible_events, positive_event
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
 
@@ -100,7 +100,7 @@ async def test_retry_honors_readonly_429_and_bounds_attempts(monkeypatch):
     waits, calls = [], []
     async def sleep(delay):
         waits.append(delay)
-    monkeypatch.setattr("pennyquant.collectors.common.asyncio.sleep", sleep)
+    monkeypatch.setattr("sessionquant.collectors.common.asyncio.sleep", sleep)
     def handle(request):
         calls.append(request.method)
         return httpx.Response(429, headers={"Retry-After": "0.7"}) if len(calls) < 3 else httpx.Response(200, json={})
@@ -110,7 +110,7 @@ async def test_retry_honors_readonly_429_and_bounds_attempts(monkeypatch):
 
 
 async def test_alpaca_rest_paginates_deduplicates_but_is_never_marked_live(monkeypatch):
-    monkeypatch.setattr("pennyquant.collectors.alpaca_news.now_utc", lambda: NOW)
+    monkeypatch.setattr("sessionquant.collectors.alpaca_news.now_utc", lambda: NOW)
     article = {"id": 1, "headline": "FDA approval", "symbols": ["TEST"],
                "created_at": "2026-11-13T14:00:00Z", "source": "verified-wire"}
     def handle(request):
@@ -217,7 +217,7 @@ def test_news_domain_model_still_rejects_unsupported_tickers():
 
 
 async def test_alpaca_rest_collects_article_with_unsupported_42nd_tag_and_later_news(monkeypatch):
-    monkeypatch.setattr("pennyquant.collectors.alpaca_news.now_utc", lambda: NOW)
+    monkeypatch.setattr("sessionquant.collectors.alpaca_news.now_utc", lambda: NOW)
     valid_tags = ["AAPL"] + [f"T{index}" for index in range(40)]
     broad = {"id": 1, "headline": "Broad market update", "created_at": NOW.isoformat(),
              "symbols": valid_tags + ["$PRIVATE", "MSFT"]}

@@ -3,11 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from pennyquant.cli import main
-from pennyquant.config.settings import Settings
-from pennyquant.database.repository import Repository
-from pennyquant.system_app import account_commission_settings, bind_system_database, run_system_app
-from pennyquant.system_demo import write_system_demo
+from sessionquant.cli import main
+from sessionquant.config.settings import Settings
+from sessionquant.database.repository import Repository
+from sessionquant.system_app import account_commission_settings, bind_system_database, run_system_app
+from sessionquant.system_demo import write_system_demo
 
 
 def test_broker_commission_uses_current_account_period():
@@ -36,7 +36,7 @@ def test_system_database_cannot_change_execution_mode_or_reuse_monitor(tmp_path)
 async def test_live_flags_are_checked_before_any_network(tmp_path, monkeypatch, live, acknowledge):
     path = tmp_path / "pipeline.yaml"
     path.write_text("companies: {}\n", encoding="utf-8")
-    monkeypatch.setattr("pennyquant.system_app.TossMarketClient", lambda: pytest.fail("No client should be created"))
+    monkeypatch.setattr("sessionquant.system_app.TossMarketClient", lambda: pytest.fail("No client should be created"))
     args = SimpleNamespace(pipeline_config=path, live=live, acknowledge_live_orders=acknowledge,
                            no_dashboard=True, port=8501, no_desktop_notifications=True, max_cycles=1)
     with pytest.raises(ValueError, match="requires|require"):

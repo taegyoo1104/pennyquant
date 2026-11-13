@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pennyquant.models import Bar
-from pennyquant.scanners.relative_volume import relative_volume
+from sessionquant.models import Bar
+from sessionquant.scanners.relative_volume import relative_volume
 
 
 UTC = timezone.utc

@@ -5,8 +5,8 @@ import json
 import httpx
 import pytest
 
-from pennyquant.collectors.toss_market import TossMarketClient
-from pennyquant.connection import check_toss, run_check
+from sessionquant.collectors.toss_market import TossMarketClient
+from sessionquant.connection import check_toss, run_check
 
 
 CLIENT_ID = "private-client-id-should-not-appear"
@@ -126,7 +126,7 @@ async def test_missing_credentials_are_checked_locally(monkeypatch):
     monkeypatch.delenv("TOSS_CLIENT_SECRET", raising=False)
     def forbidden_constructor():
         pytest.fail("missing credentials must not open a client or contact provider")
-    monkeypatch.setattr("pennyquant.connection.TossMarketClient", forbidden_constructor)
+    monkeypatch.setattr("sessionquant.connection.TossMarketClient", forbidden_constructor)
     result = await check_toss()
     assert not result["success"] and result["error"]["code"] == "missing_credentials"
     assert result["missing_environment_variables"] == ["TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET"]
@@ -143,7 +143,7 @@ async def test_owned_client_is_closed_and_cli_returns_nonzero_without_printing_s
         async def aclose(self):
             self.closed = True
     adapter = FailingAdapter()
-    monkeypatch.setattr("pennyquant.connection.TossMarketClient", lambda: adapter)
+    monkeypatch.setattr("sessionquant.connection.TossMarketClient", lambda: adapter)
     assert await run_check() == 2
     assert adapter.closed
     result = json.loads(capsys.readouterr().out)

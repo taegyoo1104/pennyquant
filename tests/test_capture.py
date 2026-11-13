@@ -6,11 +6,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from pennyquant.capture import EventWriter, capture_file, collect
-from pennyquant.collectors.alpaca_news import AlpacaNewsClient
-from pennyquant.collectors.common import DataQualityError
-from pennyquant.events import read_events
-from pennyquant.models import NewsEvent, Quote
+from sessionquant.capture import EventWriter, capture_file, collect
+from sessionquant.collectors.alpaca_news import AlpacaNewsClient
+from sessionquant.collectors.common import DataQualityError
+from sessionquant.events import read_events
+from sessionquant.models import NewsEvent, Quote
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
 
@@ -55,7 +55,7 @@ async def test_toss_capture_writes_monitor_only_normalized_quote(tmp_path, monke
             return quote()
         async def aclose(self):
             pass
-    monkeypatch.setattr("pennyquant.capture.TossMarketClient", FakeToss)
+    monkeypatch.setattr("sessionquant.capture.TossMarketClient", FakeToss)
     options = args(tmp_path)
     await collect(options)
     captured = read_events(options.output)
@@ -73,7 +73,7 @@ async def test_capture_http_error_does_not_expose_provider_url_or_auth(tmp_path,
             raise httpx.HTTPStatusError("SECRET", request=request, response=response)
         async def aclose(self):
             pass
-    monkeypatch.setattr("pennyquant.capture.TossMarketClient", FakeToss)
+    monkeypatch.setattr("sessionquant.capture.TossMarketClient", FakeToss)
     with pytest.raises(RuntimeError) as exc:
         await collect(args(tmp_path))
     assert "403" in str(exc.value) and "SECRET" not in str(exc.value) and "feed.test" not in str(exc.value)
@@ -87,7 +87,7 @@ async def test_alpaca_parse_failure_is_not_reported_as_successful_zero_capture(t
             raise DataQualityError("Alpaca news requires a timezone-aware ISO timestamp (field: created_at)")
         async def aclose(self):
             pass
-    monkeypatch.setattr("pennyquant.capture.AlpacaNewsClient", FakeAlpaca)
+    monkeypatch.setattr("sessionquant.capture.AlpacaNewsClient", FakeAlpaca)
     options = args(tmp_path, provider="alpaca")
     with pytest.raises(DataQualityError, match="field: created_at"):
         await collect(options)
@@ -98,7 +98,7 @@ async def test_alpaca_parse_failure_is_not_reported_as_successful_zero_capture(t
 
 
 async def test_alpaca_capture_saves_mixed_tag_article_and_following_news(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("pennyquant.collectors.alpaca_news.now_utc", lambda: NOW)
+    monkeypatch.setattr("sessionquant.collectors.alpaca_news.now_utc", lambda: NOW)
     valid_tags = ["AAPL"] + [f"T{index}" for index in range(40)]
     articles = [
         {"id": 1, "headline": "Broad market update", "created_at": NOW.isoformat(),
@@ -110,7 +110,7 @@ async def test_alpaca_capture_saves_mixed_tag_article_and_following_news(tmp_pat
         lambda request: httpx.Response(200, json={"news": articles}),
     )) as client:
         alpaca = AlpacaNewsClient("key", "secret", client=client)
-        monkeypatch.setattr("pennyquant.capture.AlpacaNewsClient", lambda **kwargs: alpaca)
+        monkeypatch.setattr("sessionquant.capture.AlpacaNewsClient", lambda **kwargs: alpaca)
         options = args(tmp_path, provider="alpaca", symbols="AAPL,MSFT")
         await collect(options)
     captured = read_events(options.output)
@@ -130,7 +130,7 @@ async def test_rss_capture_does_not_attach_cli_symbol_to_broad_feed(tmp_path, mo
             return [NewsEvent("rss:one", (), "A company story", NOW, NOW, "RSS", real_time=False, verified=False)]
         async def aclose(self):
             pass
-    monkeypatch.setattr("pennyquant.capture.RSSCollector", FakeRSS)
+    monkeypatch.setattr("sessionquant.capture.RSSCollector", FakeRSS)
     options = args(tmp_path, provider="rss", url="https://wire.test/feed")
     await collect(options)
     assert read_events(options.output)[0].data.symbols == ()

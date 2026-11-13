@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, timezone
 import json
 import pytest
-from pennyquant.config.settings import Settings
-from pennyquant.models import Account, OrderStatus, Quote, Signal
-from pennyquant.trading.order_manager import PaperOrderManager
+from sessionquant.config.settings import Settings
+from sessionquant.models import Account, OrderStatus, Quote, Signal
+from sessionquant.trading.order_manager import PaperOrderManager
 
 T = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
 

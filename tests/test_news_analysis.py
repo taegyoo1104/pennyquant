@@ -5,10 +5,10 @@ import json
 import httpx
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.models import NewsEvent
-from pennyquant.news.analysis import NewsAnalyzer, event_digest
-from pennyquant.news.event_filter import eligible_events, positive_event
+from sessionquant.config.settings import Settings
+from sessionquant.models import NewsEvent
+from sessionquant.news.analysis import NewsAnalyzer, event_digest
+from sessionquant.news.event_filter import eligible_events, positive_event
 
 
 NOW = datetime(2026, 11, 13, 16, 0, tzinfo=timezone.utc)
@@ -46,7 +46,7 @@ async def test_llm_missing_key_never_silently_authorizes_rule_positive():
 
 async def test_verified_primary_evidence_is_structured_and_completion_is_available_time(monkeypatch):
     times = iter([100.0, 102.5])
-    monkeypatch.setattr("pennyquant.news.analysis.monotonic", lambda: next(times))
+    monkeypatch.setattr("sessionquant.news.analysis.monotonic", lambda: next(times))
     def handle(request):
         payload = json.loads(request.content)
         assert payload["response_format"]["json_schema"]["strict"] is True

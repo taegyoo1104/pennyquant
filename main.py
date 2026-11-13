@@ -1,4 +1,4 @@
-from pennyquant.cli import main
+from sessionquant.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

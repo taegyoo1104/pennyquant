@@ -1,6 +1,6 @@
 import base64
 
-from pennyquant.notifications import DesktopNotifier, dashboard_environment
+from sessionquant.notifications import DesktopNotifier, dashboard_environment
 
 
 def test_dashboard_environment_removes_broker_news_llm_credentials(monkeypatch):
@@ -23,8 +23,8 @@ def test_notification_is_local_and_deduplicated(capsys):
 
 def test_windows_notification_message_cannot_escape_script(monkeypatch):
     calls = []
-    monkeypatch.setattr("pennyquant.notifications.sys.platform", "win32")
-    monkeypatch.setattr("pennyquant.notifications.subprocess.Popen", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr("sessionquant.notifications.sys.platform", "win32")
+    monkeypatch.setattr("sessionquant.notifications.subprocess.Popen", lambda *args, **kwargs: calls.append((args, kwargs)))
     DesktopNotifier()({"id": "one", "message": "가격';$(PRIVATE)"})
     command = calls[0][0][0]
     script = base64.b64decode(command[-1]).decode("utf-16-le")

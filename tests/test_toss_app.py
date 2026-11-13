@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from pennyquant.database.repository import Repository
-from pennyquant.toss_app import dashboard_command, run_toss_app
+from sessionquant.database.repository import Repository
+from sessionquant.toss_app import dashboard_command, run_toss_app
 
 
 def options(tmp_path, **updates):
@@ -31,11 +31,11 @@ async def test_no_dashboard_monitor_starts_with_normalized_symbols(tmp_path, mon
         calls.append((symbols, db, kwargs["interval_seconds"], kwargs["max_cycles"]))
         kwargs["on_ready"]()
         return 0
-    monkeypatch.setattr("pennyquant.toss_app.monitor_toss", monitor)
+    monkeypatch.setattr("sessionquant.toss_app.monitor_toss", monitor)
     def forbidden(*args, **kwargs):
         pytest.fail("collector-only mode must not start Streamlit or reserve a dashboard port")
-    monkeypatch.setattr("pennyquant.toss_app.subprocess.Popen", forbidden)
-    monkeypatch.setattr("pennyquant.toss_app._port_available", forbidden)
+    monkeypatch.setattr("sessionquant.toss_app.subprocess.Popen", forbidden)
+    monkeypatch.setattr("sessionquant.toss_app._port_available", forbidden)
     assert await run_toss_app(options(tmp_path, no_dashboard=True)) == 0
     assert calls == [(["AAPL", "MSFT"], tmp_path / "monitor.db", 3.0, 1)]
 
@@ -52,13 +52,13 @@ async def test_dashboard_ends_when_finite_monitor_ends(tmp_path, monkeypatch):
     async def monitor(*args, **kwargs):
         kwargs["on_ready"]()
         return 0
-    monkeypatch.setattr("pennyquant.toss_app.monitor_toss", monitor)
-    monkeypatch.setattr("pennyquant.toss_app._port_available", lambda port: None)
+    monkeypatch.setattr("sessionquant.toss_app.monitor_toss", monitor)
+    monkeypatch.setattr("sessionquant.toss_app._port_available", lambda port: None)
     def start(*args, **kwargs):
         assert "TOSS_CLIENT_SECRET" not in kwargs["env"]
         assert "GH_TOKEN" not in kwargs["env"]
         return child
-    monkeypatch.setattr("pennyquant.toss_app.subprocess.Popen", start)
+    monkeypatch.setattr("sessionquant.toss_app.subprocess.Popen", start)
     assert await run_toss_app(options(tmp_path)) == 0
     assert child.stopped
 
@@ -79,9 +79,9 @@ async def test_cancel_stops_collector_and_dashboard(tmp_path, monkeypatch):
             await asyncio.Future()
         finally:
             collector_stopped.set()
-    monkeypatch.setattr("pennyquant.toss_app.monitor_toss", monitor)
-    monkeypatch.setattr("pennyquant.toss_app._port_available", lambda port: None)
-    monkeypatch.setattr("pennyquant.toss_app.subprocess.Popen", lambda *args, **kwargs: child)
+    monkeypatch.setattr("sessionquant.toss_app.monitor_toss", monitor)
+    monkeypatch.setattr("sessionquant.toss_app._port_available", lambda port: None)
+    monkeypatch.setattr("sessionquant.toss_app.subprocess.Popen", lambda *args, **kwargs: child)
     task = asyncio.create_task(run_toss_app(options(tmp_path)))
     await asyncio.wait_for(ready.wait(), 5)
     task.cancel()
@@ -100,9 +100,9 @@ async def test_dashboard_failure_stops_collector(tmp_path, monkeypatch):
             await asyncio.Future()
         finally:
             stopped.set()
-    monkeypatch.setattr("pennyquant.toss_app.monitor_toss", monitor)
-    monkeypatch.setattr("pennyquant.toss_app._port_available", lambda port: None)
-    monkeypatch.setattr("pennyquant.toss_app.subprocess.Popen", lambda *args, **kwargs: Child())
+    monkeypatch.setattr("sessionquant.toss_app.monitor_toss", monitor)
+    monkeypatch.setattr("sessionquant.toss_app._port_available", lambda port: None)
+    monkeypatch.setattr("sessionquant.toss_app.subprocess.Popen", lambda *args, **kwargs: Child())
     with pytest.raises(RuntimeError, match="Dashboard exited"):
         await run_toss_app(options(tmp_path))
     assert stopped.is_set()
@@ -121,10 +121,10 @@ def test_recent_price_samples_are_bounded_and_chronological(tmp_path):
 
 @pytest.mark.parametrize("mode", ["replay", "follow"])
 def test_paper_runtime_cannot_take_over_price_monitor_database(tmp_path, mode):
-    from pennyquant.config.settings import Settings
-    from pennyquant.demo import demo_events
-    from pennyquant.events import write_events
-    from pennyquant.runtime import follow, replay
+    from sessionquant.config.settings import Settings
+    from sessionquant.demo import demo_events
+    from sessionquant.events import write_events
+    from sessionquant.runtime import follow, replay
     db = tmp_path / "monitor.db"
     repo = Repository(db)
     repo.set_control("runtime_kind", "toss_monitor")

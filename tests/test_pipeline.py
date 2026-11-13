@@ -5,16 +5,16 @@ import json
 import httpx
 import pytest
 
-from pennyquant.collectors.common import CapabilityUnavailable, DataQualityError
-from pennyquant.config.settings import Settings
-from pennyquant.database.repository import Repository
-from pennyquant.engine import EventEngine
-from pennyquant.events import Event, write_events
-from pennyquant.models import NewsEvent, Position, Quote, StockSnapshot
-from pennyquant.news.analysis import NewsAnalysis, event_digest
-from pennyquant.pipeline import EventTail, _candidate_readiness, run_system
-from pennyquant.collectors.market_scanner import Candidate
-from pennyquant.pipeline_config import PipelineConfig
+from sessionquant.collectors.common import CapabilityUnavailable, DataQualityError
+from sessionquant.config.settings import Settings
+from sessionquant.database.repository import Repository
+from sessionquant.engine import EventEngine
+from sessionquant.events import Event, write_events
+from sessionquant.models import NewsEvent, Position, Quote, StockSnapshot
+from sessionquant.news.analysis import NewsAnalysis, event_digest
+from sessionquant.pipeline import EventTail, _candidate_readiness, run_system
+from sessionquant.collectors.market_scanner import Candidate
+from sessionquant.pipeline_config import PipelineConfig
 
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)

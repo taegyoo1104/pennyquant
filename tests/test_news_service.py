@@ -5,13 +5,13 @@ import json
 import httpx
 import pytest
 
-from pennyquant.collectors.common import DataQualityError
-from pennyquant.collectors.sec_company import SecCompany, SecCompanyResolver
-from pennyquant.collectors.sec_documents import SecDocumentClient
-from pennyquant.collectors.sec_edgar import Filing
-from pennyquant.models import NewsEvent
-from pennyquant.news.analysis import NewsAnalyzer
-from pennyquant.news.service import CompanySource, NewsService
+from sessionquant.collectors.common import DataQualityError
+from sessionquant.collectors.sec_company import SecCompany, SecCompanyResolver
+from sessionquant.collectors.sec_documents import SecDocumentClient
+from sessionquant.collectors.sec_edgar import Filing
+from sessionquant.models import NewsEvent
+from sessionquant.news.analysis import NewsAnalyzer
+from sessionquant.news.service import CompanySource, NewsService
 
 
 NOW = datetime(2026, 11, 13, 16, 0, tzinfo=timezone.utc)

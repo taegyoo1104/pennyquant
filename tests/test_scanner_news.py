@@ -3,11 +3,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.models import NewsEvent, Quote, StockSnapshot
-from pennyquant.news.classifier import classify
-from pennyquant.news.event_filter import eligible_events, positive_event
-from pennyquant.scanners.stock_scanner import rank_candidates, scan
+from sessionquant.config.settings import Settings
+from sessionquant.models import NewsEvent, Quote, StockSnapshot
+from sessionquant.news.classifier import classify
+from sessionquant.news.event_filter import eligible_events, positive_event
+from sessionquant.scanners.stock_scanner import rank_candidates, scan
 
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)

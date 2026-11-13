@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.models import Bar, NewsEvent, Quote, StockSnapshot
-from pennyquant.strategies import STRATEGIES
-from pennyquant.strategies.base import StrategyContext, session_vwap
+from sessionquant.config.settings import Settings
+from sessionquant.models import Bar, NewsEvent, Quote, StockSnapshot
+from sessionquant.strategies import STRATEGIES
+from sessionquant.strategies.base import StrategyContext, session_vwap
 
 
 UTC = timezone.utc

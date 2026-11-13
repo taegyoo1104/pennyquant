@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from pennyquant.backtest.engine import compare, write_report
-from pennyquant.config.settings import Settings, load_settings
-from pennyquant.database.repository import Repository
-from pennyquant.demo import demo_events
-from pennyquant.engine import EventEngine
-from pennyquant.events import read_events, write_events
-from pennyquant.models import Quote
-from pennyquant.strategies import STRATEGIES
+from sessionquant.backtest.engine import compare, write_report
+from sessionquant.config.settings import Settings, load_settings
+from sessionquant.database.repository import Repository
+from sessionquant.demo import demo_events
+from sessionquant.engine import EventEngine
+from sessionquant.events import read_events, write_events
+from sessionquant.models import Quote
+from sessionquant.strategies import STRATEGIES
 
 
 def test_synthetic_end_to_end_all_strategies_and_report(tmp_path):
@@ -40,7 +40,7 @@ def test_news_received_late_cannot_create_historical_entries():
     events = demo_events()[:81]  # one session
     news = events[0]
     late = replace(news.data, received_at=events[-1].available_at + timedelta(seconds=1))
-    from pennyquant.events import Event
+    from sessionquant.events import Event
     ordered = sorted([Event("news", late), *events[1:]], key=lambda e: e.available_at)
     for name in STRATEGIES:
         engine = EventEngine(Settings(), name)
@@ -72,7 +72,7 @@ def test_tape_rejects_out_of_order_and_future_market_event(tmp_path):
     with pytest.raises(ValueError, match="sorted"):
         read_events(path)
     quote = events[1].data.quote
-    from pennyquant.events import Event
+    from sessionquant.events import Event
     write_events(path, [Event("quote", replace(quote, timestamp=quote.received_at + timedelta(seconds=1)))])
     with pytest.raises(ValueError, match="after receipt"):
         read_events(path)
@@ -96,8 +96,8 @@ def test_quote_rejects_truthy_string_eligibility_and_fractional_depth():
 
 
 def test_external_quote_missing_status_never_inherits_tradable_defaults():
-    from pennyquant.events import parse_event
-    from pennyquant.models import jsonable
+    from sessionquant.events import parse_event
+    from sessionquant.models import jsonable
     quote = jsonable(demo_events()[1].data.quote)
     del quote["halted"]
     parsed = parse_event({"kind": "quote", "data": quote})

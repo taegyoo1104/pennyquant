@@ -3,27 +3,28 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pennyquant"
-version = "0.2.1"
-description = "Market-first penny stock research, primary-news analysis and controlled broker execution"
+name = "sessionquant"
+version = "2.0.0"
+description = "S&P 500 장중 매매 연구·모의투자·위험 관리 시스템"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28,<1", "websockets>=15,<17", "PyYAML>=6,<7",
   "pandas>=2.2,<4", "numpy>=2,<3", "streamlit>=1.41,<2",
-  "exchange-calendars>=4.7,<5", "filelock>=3.16,<4"
+  "exchange-calendars>=4.7,<5", "filelock>=3.16,<4", "PyMySQL[rsa]>=1.1,<2"
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
 
 [project.scripts]
-pennyquant = "pennyquant.cli:main"
+sessionquant = "sessionquant.cli:main"
+pennyquant = "sessionquant.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["pennyquant*"]
+include = ["sessionquant*", "pennyquant*"]
 
 [tool.setuptools.package-data]
-pennyquant = ["config/*.yaml", "data/*.jsonl"]
+sessionquant = ["config/*.yaml", "data/*.jsonl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

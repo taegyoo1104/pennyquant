@@ -8,12 +8,12 @@ import json
 import httpx
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.engine import EventEngine
-from pennyquant.events import Event
-from pennyquant.models import Account, Bar, NewsEvent, Order, OrderStatus, Position, Quote, StockSnapshot
-from pennyquant.news.analysis import ExtractedEvent, NewsAnalysis, NewsAnalyzer, event_digest
-from pennyquant.trading.order_manager import PaperOrderManager
+from sessionquant.config.settings import Settings
+from sessionquant.engine import EventEngine
+from sessionquant.events import Event
+from sessionquant.models import Account, Bar, NewsEvent, Order, OrderStatus, Position, Quote, StockSnapshot
+from sessionquant.news.analysis import ExtractedEvent, NewsAnalysis, NewsAnalyzer, event_digest
+from sessionquant.trading.order_manager import PaperOrderManager
 
 
 T = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
@@ -172,7 +172,7 @@ def test_old_position_exit_intent_cannot_liquidate_a_new_holding():
 
 
 def test_bearish_reversal_requires_closed_consecutive_bars_and_volume():
-    from pennyquant.trading.exit_signals import bearish_reversal
+    from sessionquant.trading.exit_signals import bearish_reversal
     bars = reversal_bars()
     config = settings()
     opened = T - timedelta(minutes=5)

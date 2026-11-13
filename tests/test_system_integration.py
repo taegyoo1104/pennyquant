@@ -12,14 +12,14 @@ import json
 import httpx
 import pytest
 
-from pennyquant.collectors.market_scanner import parse_rankings
-from pennyquant.config.settings import Settings
-from pennyquant.database.repository import Repository
-from pennyquant.engine import EventEngine
-from pennyquant.events import Event
-from pennyquant.models import Bar, NewsEvent, Quote, Signal, StockSnapshot
-from pennyquant.news.analysis import NewsAnalyzer, event_digest
-from pennyquant.pipeline_config import PipelineConfig
+from sessionquant.collectors.market_scanner import parse_rankings
+from sessionquant.config.settings import Settings
+from sessionquant.database.repository import Repository
+from sessionquant.engine import EventEngine
+from sessionquant.events import Event
+from sessionquant.models import Bar, NewsEvent, Quote, Signal, StockSnapshot
+from sessionquant.news.analysis import NewsAnalyzer, event_digest
+from sessionquant.pipeline_config import PipelineConfig
 
 
 UTC = timezone.utc

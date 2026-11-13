@@ -7,10 +7,10 @@ import json
 import httpx
 import pytest
 
-from pennyquant.collectors.toss_market import TossMarketClient
-from pennyquant.database.repository import KINDS, Repository
-from pennyquant.locking import exclusive_lock
-from pennyquant.monitor import monitor_toss
+from sessionquant.collectors.toss_market import TossMarketClient
+from sessionquant.database.repository import KINDS, Repository
+from sessionquant.locking import exclusive_lock
+from sessionquant.monitor import monitor_toss
 
 
 CLIENT_ID = "monitor-private-client-id"
@@ -256,7 +256,7 @@ async def test_cancellation_closes_owned_adapter_records_stop_and_releases_lease
     adapter = OwnedAdapter()
     monkeypatch.setenv("TOSS_CLIENT_ID", CLIENT_ID)
     monkeypatch.setenv("TOSS_CLIENT_SECRET", CLIENT_SECRET)
-    monkeypatch.setattr("pennyquant.monitor.TossMarketClient", lambda: adapter)
+    monkeypatch.setattr("sessionquant.monitor.TossMarketClient", lambda: adapter)
     task = asyncio.create_task(monitor_toss(["AAPL"], path, interval_seconds=20))
     await asyncio.wait_for(observed.wait(), timeout=2)
     task.cancel()
@@ -297,7 +297,7 @@ async def test_latest_rows_history_and_success_status_roll_back_together(tmp_pat
 async def test_missing_local_credentials_produces_safe_error_without_client(tmp_path, monkeypatch):
     monkeypatch.delenv("TOSS_CLIENT_ID", raising=False)
     monkeypatch.delenv("TOSS_CLIENT_SECRET", raising=False)
-    monkeypatch.setattr("pennyquant.monitor.TossMarketClient", lambda: pytest.fail("no credentials must not open a client"))
+    monkeypatch.setattr("sessionquant.monitor.TossMarketClient", lambda: pytest.fail("no credentials must not open a client"))
     path = tmp_path / "missing.db"
     assert await monitor_toss(["AAPL"], path, max_cycles=1) == 2
     assert snapshot(path)["controls"]["monitor"]["error"]["code"] == "missing_credentials"

@@ -7,12 +7,12 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
-from pennyquant.config.settings import Settings
-from pennyquant.database.repository import Repository
-from pennyquant.dashboard.app import alert_sound, pipeline_candidate_rows, pipeline_mode
+from sessionquant.config.settings import Settings
+from sessionquant.database.repository import Repository
+from sessionquant.dashboard.app import alert_sound, pipeline_candidate_rows, pipeline_mode
 
 
-APP = str(Path(__file__).resolve().parents[1] / "pennyquant/dashboard/app.py")
+APP = str(Path(__file__).resolve().parents[1] / "sessionquant/dashboard/app.py")
 
 
 def system_db(tmp_path, monkeypatch, *, mode="paper", daily_halt=False):

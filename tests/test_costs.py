@@ -1,7 +1,7 @@
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.trading.costs import FeeSchedule
+from sessionquant.config.settings import Settings
+from sessionquant.trading.costs import FeeSchedule
 
 
 def schedule(**kwargs):
@@ -55,9 +55,9 @@ def test_unsafe_or_unknown_cost_settings_are_rejected(kwargs):
 
 
 def test_pipeline_example_settings_enable_toss_net_costs_and_five_positions():
-    from pennyquant.config.settings import load_settings
+    from sessionquant.config.settings import load_settings
     from pathlib import Path
-    settings = load_settings(Path(__file__).parents[1] / "pennyquant/config/strategy.yaml")
+    settings = load_settings(Path(__file__).parents[1] / "sessionquant/config/strategy.yaml")
     assert settings.max_positions == 5 and settings.max_entries >= 5
     assert settings.fee_model == "toss_us" and settings.exit_price_policy == "net"
     assert settings.news_policy == "primary"

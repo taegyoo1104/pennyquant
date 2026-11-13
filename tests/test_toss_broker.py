@@ -5,13 +5,13 @@ import json
 import httpx
 import pytest
 
-from pennyquant.collectors.common import CapabilityUnavailable
-from pennyquant.collectors.toss_market import TossMarketClient
-from pennyquant.database.repository import Repository
-from pennyquant.config.settings import Settings
-from pennyquant.models import Account, Order, OrderStatus, Quote, Signal
-from pennyquant.trading.live_manager import LiveOrderManager
-from pennyquant.trading.toss_broker import LimitOrderRequest, TossBroker
+from sessionquant.collectors.common import CapabilityUnavailable
+from sessionquant.collectors.toss_market import TossMarketClient
+from sessionquant.database.repository import Repository
+from sessionquant.config.settings import Settings
+from sessionquant.models import Account, Order, OrderStatus, Quote, Signal
+from sessionquant.trading.live_manager import LiveOrderManager
+from sessionquant.trading.toss_broker import LimitOrderRequest, TossBroker
 
 
 def current_quote(symbol="AAPL"):

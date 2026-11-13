@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pennyquant.collectors.market_scanner import MarketScanner, candle_observation, parse_rankings
-from pennyquant.models import Bar
-from pennyquant.pipeline_config import PipelineConfig, load_pipeline_config
+from sessionquant.collectors.market_scanner import MarketScanner, candle_observation, parse_rankings
+from sessionquant.models import Bar
+from sessionquant.pipeline_config import PipelineConfig, load_pipeline_config
 
 
 NOW = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)

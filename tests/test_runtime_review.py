@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from pennyquant.config.settings import Settings
-from pennyquant.database.repository import Repository
-from pennyquant.engine import EventEngine
-from pennyquant.events import Event, write_events
-from pennyquant.models import Account, OrderStatus, Quote, Signal, StockSnapshot
-from pennyquant.runtime import follow, replay
-from pennyquant.trading.order_manager import PaperOrderManager
+from sessionquant.config.settings import Settings
+from sessionquant.database.repository import Repository
+from sessionquant.engine import EventEngine
+from sessionquant.events import Event, write_events
+from sessionquant.models import Account, OrderStatus, Quote, Signal, StockSnapshot
+from sessionquant.runtime import follow, replay
+from sessionquant.trading.order_manager import PaperOrderManager
 
 T = datetime(2026, 11, 13, 15, 0, tzinfo=timezone.utc)
 
@@ -54,7 +54,7 @@ def test_follow_refuses_synthetic_replay_state(tmp_path, monkeypatch):
     def stop_unexpected_loop(_seconds):
         raise RuntimeError("follow incorrectly entered loop using replay state")
 
-    monkeypatch.setattr("pennyquant.runtime.time.sleep", stop_unexpected_loop)
+    monkeypatch.setattr("sessionquant.runtime.time.sleep", stop_unexpected_loop)
     with pytest.raises(ValueError, match="(?i)(mode|runtime|replay|source)"):
         follow(empty, db, Settings(), "pullback")
 
@@ -88,8 +88,8 @@ def test_idle_manual_halt_persists_cancelled_entry(tmp_path, monkeypatch):
         if count > 1:
             raise KeyboardInterrupt
 
-    monkeypatch.setattr("pennyquant.runtime.EventEngine", FakeEngine)
-    monkeypatch.setattr("pennyquant.runtime.time.sleep", interrupted_poll)
+    monkeypatch.setattr("sessionquant.runtime.EventEngine", FakeEngine)
+    monkeypatch.setattr("sessionquant.runtime.time.sleep", interrupted_poll)
     follow(tape, db, Settings(), "pullback")
     repo = Repository(db)
     state = repo.load_state()
@@ -143,6 +143,6 @@ def test_follow_resume_requires_unchanged_consumed_prefix(tmp_path, monkeypatch)
     def stop_unexpected_loop(_seconds):
         raise RuntimeError("follow resumed into modified consumed history")
 
-    monkeypatch.setattr("pennyquant.runtime.time.sleep", stop_unexpected_loop)
+    monkeypatch.setattr("sessionquant.runtime.time.sleep", stop_unexpected_loop)
     with pytest.raises(ValueError, match="(?i)(prefix|changed|content|identity|differs)"):
         follow(tape, db, Settings(), "pullback")

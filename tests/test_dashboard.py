@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from pennyquant.database.repository import Repository
-from pennyquant.dashboard.app import event_health, monitor_mode, quote_health
+from sessionquant.database.repository import Repository
+from sessionquant.dashboard.app import event_health, monitor_mode, quote_health
 
-APP = str(Path(__file__).resolve().parents[1] / "pennyquant/dashboard/app.py")
+APP = str(Path(__file__).resolve().parents[1] / "sessionquant/dashboard/app.py")
 T0 = "2026-11-13T14:31:00+00:00"
 
 
