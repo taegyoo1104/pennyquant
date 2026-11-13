@@ -13,8 +13,8 @@ class Settings:
     stop_pct: float = 0.05
     take_profit_pct: float = 0.10
     daily_loss_pct: float = 0.02
-    max_entries: int = 2
-    max_positions: int = 1
+    max_entries: int = 10
+    max_positions: int = 5
     max_consecutive_losses: int = 2
     max_spread_pct: float = 0.005
     max_quote_age_seconds: int = 5
@@ -28,9 +28,20 @@ class Settings:
     min_dollar_volume: float = 2_000_000.0
     max_drawdown_from_high: float = 0.12
     fee_bps: float = 10.0
+    fee_model: str = "legacy"
+    commission_buy_bps: float = 10.0
+    commission_sell_bps: float = 10.0
+    commission_free_notional: float = 10.0
+    sell_regulatory_bps: float = 0.206
+    sell_regulatory_min: float = 0.01
+    sell_per_share_fee: float = 0.0
+    sell_per_share_max: float = 0.0
+    exit_price_policy: str = "gross"
     slippage_bps: float = 10.0
     order_ttl_seconds: int = 30
     require_realtime_news: bool = True
+    news_policy: str = "realtime"
+    primary_news_max_age_hours: float = 4.0
     regular_hours_only: bool = True
     mode: str = "paper"
 
@@ -53,6 +64,20 @@ class Settings:
                 raise ValueError(f"{name} must be between 0 and 1")
         if self.initial_cash <= 0 or self.min_price <= 0 or self.max_price < self.min_price:
             raise ValueError("invalid capital or price range")
+        if self.fee_model not in {"legacy", "toss_us"}:
+            raise ValueError("fee_model must be legacy or toss_us")
+        if self.exit_price_policy not in {"gross", "net"}:
+            raise ValueError("exit_price_policy must be gross or net")
+        if self.news_policy not in {"realtime", "primary"}:
+            raise ValueError("news_policy must be realtime or primary")
+        if self.primary_news_max_age_hours <= 0:
+            raise ValueError("primary_news_max_age_hours must be positive")
+        if self.max_positions > 5:
+            raise ValueError("max_positions cannot exceed the five-symbol exposure limit")
+        if self.slippage_bps >= 10000 or self.commission_sell_bps + self.sell_regulatory_bps >= 10000:
+            raise ValueError("sell costs and slippage must be below sale proceeds")
+        if self.commission_buy_bps >= 10000:
+            raise ValueError("buy commission must be below 100 percent")
         if any(getattr(self, name) <= 0 for name in ("max_entries", "max_positions", "max_candidates", "order_ttl_seconds", "max_quote_age_seconds")):
             raise ValueError("entry, position, candidate, TTL and freshness limits must be positive")
         if self.mode != "paper":

@@ -185,6 +185,96 @@ def test_daily_equity_loss_halts_entries_but_keeps_position():
     assert m.account.positions
     assert m.check_exits(quote(t, bid=1.7, ask=1.704), t) is not None
 
+
+def test_five_pending_or_held_symbols_are_allowed_but_sixth_is_rejected():
+    m = manager(initial_cash=1000, risk_per_trade=0.005)
+    for index in range(5):
+        symbol = f"S{index}"
+        assert m.submit(signal(id=symbol, symbol=symbol), quote(symbol=symbol), T) is not None
+    assert len(m.orders) == 5
+    assert m.submit(signal(id="six", symbol="S5"), quote(symbol="S5"), T) is None
+    assert m.last_rejection == "position_limit"
+    for index in range(5):
+        tick = T + timedelta(seconds=1)
+        m.on_quote(quote(tick, symbol=f"S{index}"), tick)
+    assert len(m.account.positions) == 5
+    assert m.account.cash >= m.account.reserved_cash >= 0
+
+
+def test_toss_commission_waiver_applies_to_total_order_after_partial_fills_and_restart():
+    m = manager(fee_model="toss_us", exit_price_policy="net", slippage_bps=0)
+    order = m.submit(signal(), quote(bid=1.998, ask=2.0), T)
+    assert order.qty == 6
+    for second in (1, 2):
+        tick = T + timedelta(seconds=second)
+        m.on_quote(quote(tick, bid=1.998, ask=2.0, size=2), tick)
+    assert [fill.fee for fill in m.fills] == [0, 0]
+    n = manager(fee_model="toss_us", exit_price_policy="net", slippage_bps=0)
+    n.restore_state(json.loads(json.dumps(m.export_state())))
+    tick = T + timedelta(seconds=3)
+    n.on_quote(quote(tick, bid=1.998, ask=2.0, size=2), tick)
+    assert n.orders[order.client_id].status == OrderStatus.FILLED
+    assert sum(fill.fee for fill in n.fills) == 0.02
+    assert n.account.cash == pytest.approx(57.98)
+
+
+def test_toss_take_profit_requires_net_target_after_fees():
+    m = manager(fee_model="toss_us", exit_price_policy="net", slippage_bps=0)
+    m.submit(signal(), quote(bid=1.998, ask=2.0), T)
+    tick = T + timedelta(seconds=1)
+    m.on_quote(quote(tick, bid=1.998, ask=2.0), tick)
+    position = m.account.positions["DEMO"]
+    assert position.target_price > 2.2
+    tick += timedelta(seconds=1)
+    assert m.check_exits(quote(tick, bid=2.20, ask=2.204), tick) is None
+    assert m.check_exits(quote(tick, bid=position.target_price, ask=position.target_price + .004), tick)
+
+
+def test_daily_halt_is_latched_notified_once_and_preserved_after_restart():
+    alerts = []
+    m = manager()
+    m.on_alert = alerts.append
+    enter(m)
+    tick = T + timedelta(seconds=2)
+    m.mark_to_market({"DEMO": quote(tick, bid=1.7, ask=1.704)})
+    assert "daily_loss" in m.halt_reasons
+    assert not m.resume("daily_loss")
+    assert len(alerts) == len(m.alerts) == 1
+    assert alerts[0]["type"] == "risk_halt" and alerts[0]["details"]["drawdown_pct"] >= .02
+    m.mark_to_market({"DEMO": quote(tick, bid=2.1, ask=2.104)})
+    assert "daily_loss" in m.halt_reasons
+    n = manager()
+    n.restore_state(json.loads(json.dumps(m.export_state())))
+    assert not n.resume("daily_loss") and len(n.alerts) == 1
+    n.mark_to_market({"DEMO": quote(tick, bid=1.7, ask=1.704)})
+    assert len(n.alerts) == 1
+    assert n.check_exits(quote(tick, bid=1.7, ask=1.704), tick)
+    n.roll_day(T + timedelta(days=1))  # Saturday is not a new trading day.
+    assert "daily_loss" in n.halt_reasons
+    n.roll_day(T + timedelta(days=3))
+    assert "daily_loss" not in n.halt_reasons
+
+
+def test_notification_delivery_failure_does_not_resume_trading():
+    m = manager()
+    enter(m)
+    def broken(alert):
+        raise OSError("delivery failure")
+    m.on_alert = broken
+    tick = T + timedelta(seconds=2)
+    m.mark_to_market({"DEMO": quote(tick, bid=1.7, ask=1.704)})
+    assert "daily_loss" in m.halt_reasons and len(m.alerts) == 1
+
+
+def test_fresh_drawdown_cancels_partial_entry_before_adding_more_exposure():
+    m = manager(initial_cash=1000, risk_per_trade=.02, daily_loss_pct=.001)
+    order = enter(m, size=2)
+    assert order.status == OrderStatus.PARTIAL
+    tick = T + timedelta(seconds=2)
+    fills = m.on_quote(quote(tick, bid=1.4, ask=1.404), tick)
+    assert fills == [] and order.status == OrderStatus.CANCELLED
+    assert "daily_loss" in m.halt_reasons and m.account.positions["DEMO"].qty == 2
+
 def test_stale_future_halted_and_out_of_order_quotes_cannot_fill():
     m = manager()
     order = m.submit(signal(), quote(), T)
@@ -200,6 +290,19 @@ def test_restored_invalid_cash_or_position_rejected():
     state["account"]["cash"] = -1
     with pytest.raises(ValueError):
         manager().restore_state(state)
+
+
+def test_paper_restore_rejects_live_ledger_but_accepts_legacy_paper_state():
+    m = manager()
+    state = m.export_state()
+    assert state["execution_mode"] == "paper"
+    state["execution_mode"] = "live"
+    with pytest.raises(ValueError, match="execution mode"):
+        manager().restore_state(state)
+    state.pop("execution_mode")
+    n = manager()
+    n.restore_state(state)
+    assert n.export_state()["execution_mode"] == "paper"
 
 
 def test_liquidity_budget_bounded_after_100_quotes_and_latest_replay_after_restart():

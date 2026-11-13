@@ -1,0 +1,33 @@
+# Paths are relative to this file. Secrets belong in environment variables.
+db_path: ../data/system.db
+mode: paper
+strategy: pullback
+poll_seconds: 10
+rankings_refresh_seconds: 60
+news_refresh_seconds: 60
+max_candidates: 20
+ranking_count: 50
+candle_symbols_per_cycle: 2
+quote_candidates_per_cycle: 2
+price_min: 1
+price_max: 5
+min_abs_change: 0.05
+min_market_volume: 100000
+min_market_amount: 2000000
+volume_spike_ratio: 3
+ranking_types: [TOP_GAINERS, TOP_LOSERS, MARKET_TRADING_VOLUME, MARKET_TRADING_AMOUNT]
+symbols: []
+include_alpaca: true
+discover_with_toss: true
+# Toss rankings/quotes alone lack verified tradability, halt state and same-time
+# historical RVOL. Until a verified producer supplies complete snapshot/bar/
+# quote events, candidates remain WATCH and no entries are fabricated.
+input_event_path: null
+# Exact company-specific primary-source mappings; add your watch companies.
+# Do not mark a broad news feed as a company-specific verified feed.
+companies:
+  AAPL:
+    cik: '320193'
+    company_name: Apple Inc.
+    rss_urls: []
+    rss_verified: false

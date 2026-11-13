@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from ..config.settings import Settings
 from ..models import Account, Quote, RiskDecision, Signal, utc
+from .costs import FeeSchedule
 
 NY = ZoneInfo("America/New_York")
 ALLOWED_EXCHANGES = {"NASDAQ", "NYSE", "AMEX", "NYSEAMERICAN", "NYSE AMERICAN", "ARCA", "NYSEARCA"}
@@ -44,6 +45,7 @@ def buy_limit(ask: float, slippage_bps: float) -> float:
 class RiskManager:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.costs = FeeSchedule(settings)
 
     def evaluate(self, signal: Signal, quote: Quote, account: Account, now: datetime, *, halted: bool = False) -> RiskDecision:
         def reject(reason: str) -> RiskDecision:
@@ -92,12 +94,21 @@ class RiskManager:
             return reject("position_limit")
         available = account.cash - account.reserved_cash
         limit = buy_limit(quote.ask, s.slippage_bps)
-        fee = s.fee_bps / 10_000
+        fee = (s.fee_bps if s.fee_model == "legacy" else s.commission_buy_bps) / 10_000
         # Stop distance plus round-trip fees, an extra adverse exit movement,
         # and the observed spread. The limit already budgets entry slippage.
         risk_per_share = limit * (s.stop_pct + 2 * fee + s.slippage_bps / 10_000) + quote.ask - quote.bid
         risk_budget = min(account.equity, account.day_start_equity) * s.risk_per_trade
         quantity = min(math.floor((available + 1e-10) / (limit * (1 + fee))), math.floor((risk_budget + 1e-10) / risk_per_share))
+        if s.fee_model != "legacy" or s.exit_price_policy == "net":
+            while quantity > 0:
+                entry_fee = self.costs.charge("buy", quantity * limit, quantity)
+                stop, target = self.costs.exit_levels(limit, quantity, entry_fee)
+                modeled_loss = quantity * limit + entry_fee - self.costs.proceeds(stop, quantity)
+                modeled_loss += quantity * (quote.ask - quote.bid)
+                if quantity * limit + entry_fee <= available + 1e-10 and modeled_loss <= risk_budget + 1e-10:
+                    return RiskDecision(True, "approved", quantity, limit, stop, target)
+                quantity -= 1
         if quantity <= 0:
             return reject("insufficient_cash_or_risk_budget")
         return RiskDecision(True, "approved", quantity, limit, limit * (1 - s.stop_pct), limit * (1 + s.take_profit_pct))

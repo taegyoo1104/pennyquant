@@ -46,14 +46,14 @@ def test_quote_rejections(change, reason):
 def test_daily_limits_include_unrealized_loss_and_stop_on_boundary():
     manager = RiskManager(Settings())
     assert manager.evaluate(signal(), quote(), Account(equity=68.6), NOW).reason == "daily_loss_limit"
-    assert manager.evaluate(signal(), quote(), Account(entries_today=2), NOW).reason == "daily_entry_limit"
+    assert manager.evaluate(signal(), quote(), Account(entries_today=10), NOW).reason == "daily_entry_limit"
     assert manager.evaluate(signal(), quote(), Account(consecutive_losses=2), NOW).reason == "consecutive_loss_limit"
 
 
 def test_no_averaging_and_no_second_position():
     position = Position("TEST", 1, 2.0, 0.002, 1.9, 2.2, NOW)
     account = Account(positions={"TEST": position})
-    manager = RiskManager(Settings())
+    manager = RiskManager(Settings(max_positions=1))
     assert manager.evaluate(signal(), quote(), account, NOW).reason == "averaging_prohibited"
     assert manager.evaluate(signal(symbol="OTHER"), quote(symbol="OTHER"), account, NOW).reason == "position_limit"
 

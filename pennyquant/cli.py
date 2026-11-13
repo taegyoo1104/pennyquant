@@ -11,7 +11,7 @@ from .config.settings import load_settings
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="PennyQuant research and paper trading (live orders disabled)")
+    root = argparse.ArgumentParser(description="PennyQuant research and market-first trading; paper by default")
     root.add_argument("--config", type=Path, help="YAML settings")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="Offline dependency/configuration check; no credentials printed")
@@ -24,6 +24,17 @@ def parser() -> argparse.ArgumentParser:
     run_toss.add_argument("--port", type=int, default=8501, help="Local dashboard port")
     run_toss.add_argument("--no-dashboard", action="store_true", help="Collect prices without launching Streamlit")
     run_toss.add_argument("--max-polls", type=int, help="Stop after this many polls; default runs until Ctrl+C")
+    system = commands.add_parser("run-system", help="Market candidates -> SEC/RSS -> LLM -> strategies and risk management")
+    system.add_argument("--pipeline-config", type=Path, default=Path("config/pipeline.example.yaml"))
+    system.add_argument("--port", type=int, default=8501)
+    system.add_argument("--no-dashboard", action="store_true")
+    system.add_argument("--max-cycles", type=int)
+    system.add_argument("--no-desktop-notifications", action="store_true")
+    system.add_argument("--live", action="store_true", help="Use actual broker orders; requires verified market input and explicit acknowledgement")
+    system.add_argument("--acknowledge-live-orders", action="store_true", help="Acknowledge that --live submits actual orders")
+    system_demo = commands.add_parser("demo-system", help="Offline synthetic system fixture; no network, LLM charges or actual orders")
+    system_demo.add_argument("--out", type=Path, default=Path("data/system-demo"))
+    system_demo.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
     demo = commands.add_parser("demo", help="Generate synthetic tape, replay and compare four strategies")
     demo.add_argument("--out", type=Path, default=Path("data"))
     demo.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
@@ -70,6 +81,18 @@ def main(argv: list[str] | None = None) -> int:
             import asyncio
             from .toss_app import run_toss_app
             return asyncio.run(run_toss_app(args))
+        elif args.command == "run-system":
+            import asyncio
+            from .system_app import run_system_app
+            if args.config is None:
+                settings = load_settings(Path(__file__).parent / "config" / "strategy.yaml")
+            return asyncio.run(run_system_app(args, settings))
+        elif args.command == "demo-system":
+            from .system_demo import write_system_demo
+            if args.config is None:
+                settings = load_settings(Path(__file__).parent / "config" / "strategy.yaml")
+            db = write_system_demo(args.out, settings, args.strategy)
+            print(f"Synthetic offline system demo: {db}. Fixed analysis fixtures, no actual news, LLM calls or live orders.")
         elif args.command == "doctor":
             packages = ("httpx", "websockets", "PyYAML", "pandas", "numpy", "streamlit", "exchange-calendars")
             print(json.dumps({"python": sys.version.split()[0], "mode": settings.mode,
@@ -113,7 +136,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"PennyQuant: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        message = "Toss monitoring stopped." if args.command == "run-toss" else "Stopped; persisted paper state is retained."
+        if args.command == "run-toss":
+            message = "Toss monitoring stopped."
+        elif args.command == "run-system":
+            message = "System stopped; persisted system state and alerts are retained."
+        else:
+            message = "Stopped; persisted paper state is retained."
         print(message, file=sys.stderr)
         return 130
 

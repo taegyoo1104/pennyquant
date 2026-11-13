@@ -11,7 +11,8 @@ from typing import Iterator
 from ..models import jsonable
 
 KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_events", "signals", "orders",
-         "executions", "positions", "daily_performance", "system_logs")
+         "executions", "positions", "daily_performance", "system_logs", "candidates", "news_analysis",
+         "alerts", "pipeline_status", "order_intents", "broker_state")
 
 
 class Repository:

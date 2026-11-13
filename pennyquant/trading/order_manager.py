@@ -8,7 +8,7 @@ atomically with its event records after each event.
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import math
 from typing import Any
@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 
 from ..config.settings import Settings
 from ..models import Account, Fill, Order, OrderStatus, Position, Quote, Signal, jsonable, utc
-from .risk_manager import RiskManager, is_regular_session
+from .risk_manager import RiskManager, is_regular_session, _calendar
+from .costs import FeeSchedule
 
 ACTIVE = {OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIAL, OrderStatus.UNKNOWN}
 KNOWN_ACTIVE = ACTIVE - {OrderStatus.UNKNOWN}
@@ -25,11 +26,17 @@ NY = ZoneInfo("America/New_York")
 
 
 class PaperOrderManager:
-    def __init__(self, settings: Settings, account: Account, repository=None):
+    execution_mode = "paper"
+
+    def __init__(self, settings: Settings, account: Account, repository=None, *, on_alert=None):
         self.settings = settings
         self.account = account
         self.repository = repository  # caller owns transaction boundaries
         self.risk = RiskManager(settings)
+        self.costs = FeeSchedule(settings)
+        self.on_alert = on_alert
+        self.alerts: list[dict[str, Any]] = []
+        self._charged_order_fees: dict[str, float] = {}
         self.orders: dict[str, Order] = {}
         self.fills: list[Fill] = []
         self.closed_trades: list[dict[str, Any]] = []
@@ -43,12 +50,16 @@ class PaperOrderManager:
 
     def _refresh_reservations(self) -> None:
         self.account.reserved_cash = sum(
-            (order.qty - order.filled_qty) * order.limit_price * (1 + self.settings.fee_bps / 10_000)
+            (order.qty - order.filled_qty) * order.limit_price
+            + max(0, self.costs.charge("buy", order.avg_fill_price * order.filled_qty
+                                      + (order.qty - order.filled_qty) * order.limit_price, order.qty)
+                  - self._charged_order_fees.get(order.client_id, 0))
             for order in self.orders.values()
             if order.side == "buy" and order.status in ACTIVE
         )
 
     def halt(self, reason: str) -> None:
+        newly_halted = reason not in self.halt_reasons
         self.halt_reasons.add(reason)
         # Cancelling known resting buys also prevents new fills after the stop.
         # UNKNOWN cannot safely be cancelled without reconciliation.
@@ -56,8 +67,36 @@ class PaperOrderManager:
             if order.side == "buy" and order.status in KNOWN_ACTIVE:
                 order.status = OrderStatus.CANCELLED
         self._refresh_reservations()
+        if newly_halted and reason in {"daily_loss", "consecutive_losses"}:
+            latest = max((quote.received_at for quote in self._latest_quotes.values()), default=datetime.now(timezone.utc))
+            day = self._day or utc(latest).astimezone(NY).date().isoformat()
+            alert = {"id": f"risk:{day}:{reason}", "timestamp": utc(latest).isoformat(),
+                     "level": "CRITICAL", "code": reason, "type": "risk_halt", "trading_day": day,
+                     "message": "일일 손실 한도에 도달해 오늘 신규 매매를 중단했습니다. 보유 포지션의 청산 관리는 계속됩니다."
+                                if reason == "daily_loss" else "연속 손실 한도에 도달해 오늘 신규 매매를 중단했습니다.",
+                     "equity": self.account.equity, "day_start_equity": self.account.day_start_equity,
+                     "day_pnl": self.account.equity - self.account.day_start_equity,
+                     "daily_loss_pct": self.settings.daily_loss_pct,
+                     "details": {"reason": reason, "equity": self.account.equity,
+                                 "day_start_equity": self.account.day_start_equity,
+                                 "drawdown_pct": max(0, 1 - self.account.equity / self.account.day_start_equity)
+                                     if self.account.day_start_equity > 0 else None}}
+            if not any(item["id"] == alert["id"] for item in self.alerts):
+                self.alerts.append(alert)
+                del self.alerts[:-1000]
+                if self.repository:
+                    self.repository.log("CRITICAL", alert["message"], alert=alert)
+                if self.on_alert:
+                    try:
+                        self.on_alert(dict(alert))
+                    except Exception:
+                        # Delivery failure cannot undo the already-latched risk halt.
+                        if self.repository:
+                            self.repository.log("ERROR", "Risk notification delivery failed; entries remain halted")
 
     def resume(self, reason: str) -> bool:
+        if reason in DAILY_HALTS and reason in self.halt_reasons:
+            return False
         if reason == "unknown_order" and any(o.status == OrderStatus.UNKNOWN for o in self.orders.values()):
             return False
         self.halt_reasons.discard(reason)
@@ -70,6 +109,11 @@ class PaperOrderManager:
             return
         if day == self._day:
             return
+        try:
+            if not _calendar(utc(now).astimezone(NY).year).is_session(day):
+                return
+        except (ValueError, TypeError, ImportError, KeyError, OverflowError):
+            return  # A missing calendar must not reset a latched daily halt.
         self._day = day
         self.account.day_start_equity = self.account.equity
         self.account.realized_pnl = 0.0
@@ -98,8 +142,13 @@ class PaperOrderManager:
             return self.orders[client_id]
         if any(order.status == OrderStatus.UNKNOWN for order in self.orders.values()):
             self.halt("unknown_order")
-        if any(order.side == "buy" and order.status in ACTIVE for order in self.orders.values()):
+        if any(order.side == "buy" and order.symbol == signal.symbol and order.status in ACTIVE for order in self.orders.values()):
             self.last_rejection = "pending_buy"
+            return None
+        exposed = set(self.account.positions) | {order.symbol for order in self.orders.values()
+                                                if order.side == "buy" and order.status in ACTIVE}
+        if signal.symbol not in exposed and len(exposed) >= self.settings.max_positions:
+            self.last_rejection = "position_limit"
             return None
         decision = self.risk.evaluate(signal, quote, self.account, now, halted=bool(self.halt_reasons))
         if not decision.approved:
@@ -159,6 +208,9 @@ class PaperOrderManager:
         if not self._valid_quote(quote, now):
             return []
         self._latest_quotes[quote.symbol] = quote
+        # A fresh adverse quote must trip daily risk before any pending entry
+        # can fill, including a remainder for an already partially held stock.
+        self.mark_to_market(self._latest_quotes)
         # Same market timestamp is one depth budget, even after reconnect/replay.
         key = quote.symbol + "|" + utc(quote.timestamp).isoformat()
         # Older market timestamps are rejected by _valid_quote. Only the newest
@@ -173,7 +225,6 @@ class PaperOrderManager:
             "ask_size": quote.ask_size, "bid_size": quote.bid_size,
         })
         made: list[Fill] = []
-        fee_rate = self.settings.fee_bps / 10_000
         slip = self.settings.slippage_bps / 10_000
         for order in sorted(self.orders.values(), key=lambda o: (o.created_at, o.client_id)):
             if order.symbol != quote.symbol or order.status not in KNOWN_ACTIVE:
@@ -189,8 +240,17 @@ class PaperOrderManager:
                 if price > order.limit_price + 1e-9:
                     continue
                 depth = max(0, min(capacity["ask_size"], quote.ask_size) - capacity["buy_used"])
+                fee_rate = (self.settings.fee_bps if self.settings.fee_model == "legacy"
+                            else self.settings.commission_buy_bps) / 10_000
                 affordable = math.floor((self.account.cash + 1e-9) / (price * (1 + fee_rate)))
                 qty = min(order.qty - order.filled_qty, depth, affordable)
+                while qty > 0:
+                    total_fee = self.costs.charge("buy", order.avg_fill_price * order.filled_qty + price * qty,
+                                                 order.filled_qty + qty)
+                    additional_fee = max(0, total_fee - self._charged_order_fees.get(order.client_id, 0))
+                    if qty * price + additional_fee <= self.account.cash + 1e-9:
+                        break
+                    qty -= 1
             else:
                 price = round(quote.bid * (1 - slip), 8)
                 if price + 1e-9 < order.limit_price:
@@ -203,7 +263,9 @@ class PaperOrderManager:
                 qty = min(order.qty - order.filled_qty, depth, position.qty)
             if qty <= 0:
                 continue
-            fee = round(price * qty * fee_rate, 10)
+            total_fee = self.costs.charge(order.side, order.avg_fill_price * order.filled_qty + price * qty,
+                                         order.filled_qty + qty)
+            fee = round(max(0, total_fee - self._charged_order_fees.get(order.client_id, 0)), 10)
             fill = Fill(f"{order.client_id}-{order.filled_qty + qty}", order.client_id,
                         order.symbol, order.side, qty, price, fee, now)
             self._book(order, fill)
@@ -214,6 +276,7 @@ class PaperOrderManager:
         return made
 
     def _book(self, order: Order, fill: Fill) -> None:
+        self._charged_order_fees[order.client_id] = round(self._charged_order_fees.get(order.client_id, 0) + fill.fee, 10)
         before = order.filled_qty
         order.filled_qty += fill.qty
         order.avg_fill_price = ((order.avg_fill_price * before + fill.price * fill.qty) / order.filled_qty)
@@ -223,9 +286,9 @@ class PaperOrderManager:
             self.account.cash = round(self.account.cash - fill.price * fill.qty - fill.fee, 10)
             position = self.account.positions.get(fill.symbol)
             if position is None:
+                stop, target = self.costs.exit_levels(fill.price, fill.qty, fill.fee)
                 position = Position(fill.symbol, fill.qty, fill.price, fill.fee,
-                                    fill.price * (1 - self.settings.stop_pct),
-                                    fill.price * (1 + self.settings.take_profit_pct), fill.timestamp, order.strategy)
+                                    stop, target, fill.timestamp, order.strategy)
                 self.account.positions[fill.symbol] = position
                 self._trade_totals[fill.symbol] = {
                     "symbol": fill.symbol, "strategy": order.strategy,
@@ -238,8 +301,8 @@ class PaperOrderManager:
                 position.avg_price = (position.avg_price * position.qty + fill.price * fill.qty) / total
                 position.qty = total
                 position.entry_fee += fill.fee
-                position.stop_price = position.avg_price * (1 - self.settings.stop_pct)
-                position.target_price = position.avg_price * (1 + self.settings.take_profit_pct)
+                position.stop_price, position.target_price = self.costs.exit_levels(position.avg_price, position.qty,
+                                                                                  position.entry_fee)
             trade = self._trade_totals[fill.symbol]
             trade["entry_qty"] += fill.qty
             trade["entry_notional"] += fill.qty * fill.price
@@ -284,9 +347,10 @@ class PaperOrderManager:
     def mark_to_market(self, quotes: dict[str, Quote]) -> None:
         self._latest_quotes.update(quotes)
         self.account.equity = self.account.cash + sum(
-            position.qty * (quotes.get(symbol) or self._latest_quotes.get(symbol)).bid
-            if (quotes.get(symbol) or self._latest_quotes.get(symbol)) is not None
-            else position.qty * position.avg_price
+            self.costs.proceeds((quotes.get(symbol) or self._latest_quotes.get(symbol)).bid, position.qty)
+            if self.settings.fee_model != "legacy" and (quotes.get(symbol) or self._latest_quotes.get(symbol)) is not None
+            else position.qty * (quotes.get(symbol) or self._latest_quotes.get(symbol)).bid
+            if (quotes.get(symbol) or self._latest_quotes.get(symbol)) is not None else position.qty * position.avg_price
             for symbol, position in self.account.positions.items()
         )
         if self.account.day_start_equity > 0 and self.account.equity <= self.account.day_start_equity * (1 - self.settings.daily_loss_pct) + 1e-10:
@@ -336,17 +400,21 @@ class PaperOrderManager:
 
     def export_state(self) -> dict[str, Any]:
         return jsonable({
-            "version": 1, "settings": self.settings, "account": self.account, "orders": list(self.orders.values()),
+            "version": 1, "execution_mode": self.execution_mode,
+            "settings": self.settings, "account": self.account, "orders": list(self.orders.values()),
             "fills": self.fills, "closed_trades": self.closed_trades,
             "halt_reasons": sorted(self.halt_reasons), "last_rejection": self.last_rejection,
             "day": self._day, "signal_fingerprints": self._signal_fingerprints,
             "quote_liquidity": self._quote_liquidity, "latest_quotes": self._latest_quotes,
             "trade_totals": self._trade_totals,
+            "charged_order_fees": self._charged_order_fees, "alerts": self.alerts,
         })
 
     def restore_state(self, state: dict[str, Any]) -> None:
         if state.get("version") != 1:
             raise ValueError("unsupported order state version")
+        if state.get("execution_mode", "paper") != self.execution_mode:
+            raise ValueError("persisted execution mode differs; paper and live ledgers cannot be interchanged")
         if state.get("settings") != asdict(self.settings):
             raise ValueError("persisted settings differ; use a fresh database for new parameters")
         raw_account = dict(state["account"])
@@ -390,6 +458,11 @@ class PaperOrderManager:
         self._signal_fingerprints = dict(state.get("signal_fingerprints", {}))
         self._quote_liquidity = dict(state.get("quote_liquidity", {}))
         self._trade_totals = dict(state.get("trade_totals", {}))
+        self._charged_order_fees = dict(state.get("charged_order_fees", {}))
+        if not self._charged_order_fees:
+            for fill in fills:
+                self._charged_order_fees[fill.client_id] = self._charged_order_fees.get(fill.client_id, 0) + fill.fee
+        self.alerts = list(state.get("alerts", []))
         self._latest_quotes = {}
         for symbol, raw_quote in state.get("latest_quotes", {}).items():
             item = dict(raw_quote)

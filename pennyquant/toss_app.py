@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 import json
-import os
 from pathlib import Path
 import socket
 import subprocess
@@ -12,6 +11,7 @@ import sys
 
 from .database.repository import Repository
 from .monitor import monitor_toss
+from .notifications import dashboard_environment
 
 
 def dashboard_command(db_path: Path, port: int) -> list[str]:
@@ -55,10 +55,7 @@ async def run_toss_app(args) -> int:
     def start_dashboard():
         nonlocal child
         if not args.no_dashboard:
-            dashboard_env = dict(os.environ)
-            for name in ("TOSS_CLIENT_ID", "TOSS_CLIENT_SECRET", "TOSS_ACCOUNT_SEQ",
-                         "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "GH_TOKEN", "GITHUB_TOKEN"):
-                dashboard_env.pop(name, None)
+            dashboard_env = dashboard_environment()
             child = subprocess.Popen(dashboard_command(db, args.port), cwd=Path(__file__).resolve().parents[1],
                                      env=dashboard_env)
             print(f"Toss observed-price dashboard: http://localhost:{args.port}", flush=True)

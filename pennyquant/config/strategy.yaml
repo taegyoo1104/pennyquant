@@ -5,8 +5,8 @@ risk_per_trade: 0.01
 stop_pct: 0.05
 take_profit_pct: 0.10
 daily_loss_pct: 0.02
-max_entries: 2
-max_positions: 1
+max_entries: 10
+max_positions: 5
 max_consecutive_losses: 2
 max_spread_pct: 0.005
 max_quote_age_seconds: 5
@@ -20,7 +20,20 @@ min_relative_volume: 3.0
 min_dollar_volume: 2000000
 max_drawdown_from_high: 0.12
 fee_bps: 10.0
+# Standard API commission estimate, not stock-collection promotions.
+# Confirm the current account fee schedule before real orders.
+fee_model: toss_us
+commission_buy_bps: 10.0
+commission_sell_bps: 10.0
+commission_free_notional: 10.0
+sell_regulatory_bps: 0.206
+sell_regulatory_min: 0.01
+sell_per_share_fee: 0.0
+sell_per_share_max: 0.0
+exit_price_policy: net
 slippage_bps: 10.0
 order_ttl_seconds: 30
 require_realtime_news: true
+news_policy: primary
+primary_news_max_age_hours: 4.0
 regular_hours_only: true

@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import argparse
+from array import array
 from datetime import datetime, timezone
 import html
+from io import BytesIO
 import json
 import math
 import os
 from pathlib import Path
 import sys
 from typing import Any
+import wave
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -37,7 +40,7 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--db", default=os.getenv("PQ_DB", "data/pennyquant.db"))
     parser.add_argument("--report", default=os.getenv("PQ_REPORT", "data/report.json"))
-    parser.add_argument("--mode", choices=("auto", "paper", "monitor"), default="auto")
+    parser.add_argument("--mode", choices=("auto", "paper", "monitor", "system"), default="auto")
     return parser.parse_known_args()[0]
 
 
@@ -101,6 +104,11 @@ def monitor_mode(runtime: dict, monitor: dict, requested_mode: str = "auto") -> 
     return requested_mode == "monitor" or runtime.get("mode") == "monitor" or monitor.get("mode") == "monitor"
 
 
+def pipeline_mode(runtime: dict, pipeline: dict, requested_mode: str = "auto", runtime_kind: Any = None) -> bool:
+    return (requested_mode == "system" or runtime.get("mode") == "system"
+            or runtime_kind in {"market_pipeline", "pipeline", "system"} or bool(pipeline))
+
+
 def price_value(value: Any) -> float | None:
     try:
         result = float(value)
@@ -155,17 +163,19 @@ def read_report(path: Path) -> tuple[dict, str | None]:
 
 
 def load_database(path: Path) -> tuple[Any, dict, dict[str, list[dict]], str | None]:
-    names = ("stocks", "market_bars", "quote_snapshots", "news_events", "signals", "orders", "executions", "positions", "daily_performance", "system_logs", "price_samples")
+    names = ("stocks", "market_bars", "quote_snapshots", "news_events", "signals", "orders", "executions", "positions", "daily_performance", "system_logs", "price_samples", "candidates", "news_analysis", "alerts", "pipeline_status", "order_intents", "broker_state")
     tables: dict[str, list[dict]] = {name: [] for name in names}
     if not path.exists():
         return None, {}, tables, None
     repo = None
     try:
-        from pennyquant.database.repository import Repository
+        from pennyquant.database.repository import KINDS, Repository
         repo = Repository(path)
         state = repo.load_state() or {}
         for name in names:
-            if name == "price_samples":
+            if name not in KINDS:
+                continue
+            if name in {"price_samples", "news_analysis", "alerts", "order_intents", "broker_state"}:
                 tables[name] = repo.recent(name, limit=2000) if hasattr(repo, "recent") else repo.all(name)[-2000:]
             else:
                 tables[name] = repo.all(name)
@@ -401,18 +411,35 @@ def trading_tab(account: dict, state: dict, tables: dict[str, list[dict]]) -> No
     if isinstance(positions, list):
         positions = {p.get("symbol", str(i)): p for i, p in enumerate(positions)}
     quotes = latest_by_symbol(tables["quote_snapshots"])
+    costs = None
+    if state.get("settings"):
+        try:
+            from pennyquant.config.settings import Settings
+            from pennyquant.trading.costs import FeeSchedule
+            settings = Settings(**state["settings"])
+            if settings.fee_model != "legacy" or settings.exit_price_policy == "net":
+                costs = FeeSchedule(settings)
+        except (TypeError, ValueError):
+            st.warning("저장된 비용 설정을 확인하지 못해 포지션의 예상 청산 비용은 표시하지 않습니다.")
     rows = []
     for symbol, p in positions.items():
-        bid = number(quotes.get(symbol, {}).get("bid"), number(p.get("avg_price")))
+        bid = price_value(quotes.get(symbol, {}).get("bid"))
         qty = int(number(p.get("qty")))
         cost = number(p.get("avg_price"))
-        rows.append({"종목": symbol, "수량": qty, "평균 매수가 ($)": cost,
+        pnl = None if bid is None else ((costs.proceeds(bid, qty) if costs else bid * qty) - cost * qty - number(p.get("entry_fee")))
+        row = {"종목": symbol, "수량": qty, "평균 매수가 ($)": cost,
                      "매도 가능가 ($)": bid, "손절가 ($)": p.get("stop_price"), "익절가 ($)": p.get("target_price"),
-                     "평가손익 ($)": round((bid - cost) * qty - number(p.get("entry_fee")), 4),
-                     "전략": STRATEGY_NAMES.get(p.get("strategy"), p.get("strategy", "—"))})
+                     "평가손익 ($)": round(pnl, 4) if pnl is not None else None,
+                     "전략": STRATEGY_NAMES.get(p.get("strategy"), p.get("strategy", "—"))}
+        if costs and qty > 0 and cost > 0:
+            row["예상 손익분기가 ($)"] = costs.breakeven_bid(cost, qty, number(p.get("entry_fee")))
+        rows.append(row)
     if rows:
         dataframe(rows)
-        st.caption("평가손익은 최근 매도 호가 기준이며 향후 매도 비용은 별도입니다.")
+        if costs:
+            st.caption("평가손익과 손익분기가는 매수 비용·예상 매도 수수료·가격 불리함을 반영한 추정치입니다. 실제 체결·청구 금액은 달라질 수 있습니다.")
+        else:
+            st.caption("평가손익은 최근 매도 호가 기준이며 향후 매도 비용은 별도입니다.")
     else:
         empty("현재 보유한 포지션이 없습니다.")
 
@@ -543,6 +570,258 @@ def system_tab(state: dict, tables: dict[str, list[dict]], report: dict, db_path
         st.code("python -m pennyquant --help\nstreamlit run pennyquant/dashboard/app.py -- --db data/pennyquant.db --report data/report.json", language="bash")
 
 
+TRIGGER_NAMES = {"rise": "급등", "surge": "급등", "gain": "상승률", "price_surge": "급등",
+                 "fall": "급락", "drop": "급락", "decline": "급락", "price_drop": "급락",
+                 "volume": "거래량 증가", "volume_surge": "거래량 급증", "relative_volume": "상대 거래량 증가",
+                 "turnover": "거래대금 증가", "dollar_volume": "거래대금 증가", "active": "거래 활발",
+                 "price_rise": "급등", "price_fall_watch": "급락 관찰", "high_market_volume": "거래량 상위",
+                 "high_market_turnover": "거래대금 상위", "short_window_volume_spike": "단기 거래량 급증"}
+READINESS_NAMES = {"READY": "조건 확인 완료", "WATCH": "관찰", "BLOCKED": "신규 매수 차단"}
+SENTIMENT_NAMES = {"POSITIVE": "호재 후보", "NEGATIVE": "악재", "NEUTRAL": "중립",
+                   "MIXED": "혼합", "UNKNOWN": "판단 보류", "UNCERTAIN": "판단 보류"}
+BLOCKER_NAMES = {
+    "daily_loss": "일일 손실 한도 도달", "daily_loss_limit": "일일 손실 한도 도달",
+    "manual_halt": "사용자가 신규 진입 중지", "unknown_relative_volume": "상대 거래량 이력 미확인",
+    "market_inputs_unverified": "매매용 시장 데이터 검증 대기", "missing_verified_snapshot": "종목·시장 조건 검증 대기",
+    "unverified_market_data": "매매용 시장 데이터 검증 대기", "unknown_previous_close": "전일 종가 미확인",
+    "not_tradable": "현재 거래 가능 상태 미확인", "unapproved_exchange": "거래소 확인 필요",
+    "stale_quote": "최신 호가 확인 필요", "wide_spread": "호가 차이가 큼",
+    "missing_primary_evidence": "SEC·공식 보도자료 근거 대기", "no_primary_evidence": "SEC·공식 보도자료 근거 대기",
+    "llm_unavailable": "AI 분석 연결 필요", "llm_error": "AI 분석 실패 · 판단 보류",
+    "negative_news": "악재 확인", "dilution_risk": "주식 희석 위험", "max_positions": "동시 보유 한도 도달",
+    "max_positions_reached": "동시 보유 한도 도달", "falling_from_high": "고점 대비 하락폭 초과",
+    "verified_market_snapshot_required": "매매용 시장 데이터 검증 대기",
+    "primary_news_analysis_required": "SEC·공식 보도자료 분석 대기",
+    "ranking_time_unknown": "순위 제공 시각 미확인", "ranking_stale_or_future": "순위 시각 확인 필요",
+}
+
+
+def text_items(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None]
+    return []
+
+
+def pipeline_candidate_rows(candidates: list[dict]) -> list[dict]:
+    rows = []
+    for item in latest_by_symbol(candidates).values():
+        blockers = text_items(item.get("blockers") or item.get("readiness_blockers"))
+        gain = item.get("gain_pct")
+        state = str(item.get("readiness", "WATCH")).upper()
+        rows.append({
+            "종목": str(item.get("symbol", "—")),
+            "선정 이유": " · ".join(TRIGGER_NAMES.get(v, v) for v in text_items(item.get("triggers"))) or "확인 중",
+            "현재가 ($)": price_value(item.get("last_price")),
+            "등락률 (%)": number(gain) * 100 if gain is not None else None,
+            "거래량": item.get("trading_volume"), "거래대금 ($)": item.get("trading_amount"),
+            "상대 거래량": item.get("relative_volume"),
+            "판단 상태": READINESS_NAMES.get(state, "확인 중"),
+            "관찰·차단 사유": " · ".join(BLOCKER_NAMES.get(v, v) for v in blockers) or "—",
+            "제공 시각 상태": quote_health(item.get("timestamp") or item.get("ranked_at"))["status"],
+            "수신 시각 (KST)": timestamp(item.get("received_at"), short=True),
+        })
+    return sorted(rows, key=lambda row: row["종목"])
+
+
+def analysis_source(item: dict) -> str:
+    kind = str(item.get("source_kind") or item.get("source") or "").lower()
+    if "alpaca" in kind:
+        return "Alpaca · 지연 보조 자료"
+    if item.get("primary_verified") is True:
+        return {"sec": "SEC · 원문 확인", "rss": "공식 RSS · 출처 확인"}.get(kind, "확인된 원문")
+    return {"sec": "SEC · 원문 검증 대기", "rss": "RSS · 출처 검증 대기"}.get(kind, "출처 확인 필요")
+
+
+def pipeline_alerts(state: dict, status: dict, tables: dict[str, list[dict]]) -> list[dict]:
+    alerts = list(tables.get("alerts", []))
+    for item in state.get("alerts") or []:
+        if isinstance(item, dict) and item not in alerts:
+            alerts.append(item)
+    reasons = text_items(state.get("halt_reasons")) + text_items(status.get("halt_reasons"))
+    if any(reason in {"daily_loss", "daily_loss_limit"} for reason in reasons):
+        if not any("daily_loss" in str(item.get("code") or item.get("kind") or item.get("reason")) for item in alerts):
+            alerts.append({"id": "daily-loss-latched", "level": "critical", "code": "daily_loss",
+                           "message": "일일 손실 한도에 도달했습니다. 오늘 신규 매수는 중단하고 보유 포지션의 위험 관리는 계속합니다."})
+    return alerts[-100:]
+
+
+def alert_sound() -> bytes:
+    samples = array("h", (int(6000 * math.sin(2 * math.pi * 660 * i / 16000)) for i in range(3200)))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        output.writeframes(samples.tobytes())
+    return buffer.getvalue()
+
+
+def render_pipeline_dashboard(repo, state: dict, tables: dict[str, list[dict]], status: dict,
+                              db_path: Path, manual_halt: bool) -> None:
+    mode = "live" if status.get("mode") == "live" else "paper"
+    live_enabled = mode == "live" and status.get("live_orders_enabled") is True
+    badge = "실주문 연결" if live_enabled else ("실주문 차단" if mode == "live" else "모의매매")
+    st.markdown('<div class="hero"><div><div class="eyebrow">PENNYQUANT / MARKET & NEWS</div>'
+                '<h1>시세·뉴스 통합 매매</h1><p>급증 종목 발견 → 공시·보도자료 확인 → AI 분석 → 전략 판단</p>'
+                f'</div><span class="pill">{badge}</span></div>', unsafe_allow_html=True)
+    if mode == "live":
+        if live_enabled:
+            st.warning("실주문 전송이 활성화된 실행입니다. 주문·체결 상태와 신규 진입 제한을 확인하세요.")
+        else:
+            st.info("실거래 연결 상태를 확인하고 있습니다. 현재 실주문 전송은 차단되어 있습니다.")
+    else:
+        st.info("모의매매 실행입니다. 조건을 모두 확인한 종목만 진입하며, 거래가 0건일 수 있습니다.")
+
+    interval = number(status.get("interval_seconds"), 5.0)
+    health = event_health({"last_event": status.get("last_cycle_at") or status.get("last_event")},
+                          max_age=max(10.0, interval * 2 + 2))
+    run_label = {"starting": "시작 중", "running": "감시 중", "stopped": "중지됨", "error": "오류"}.get(status.get("status"), "실행 상태 미확인")
+    st.caption(f"실행 상태: {run_label} · 마지막 점검 {health['last_event']} · 경과 {health['lag_label']}")
+    if health["stale"]:
+        st.warning("최근 수집·분석 갱신을 확인하지 못했습니다. 저장된 결과를 표시하고 있습니다.")
+
+    account = (state.get("account") or {}) if mode == "paper" else {}
+    broker = repo.get_control("broker_state", {}) if repo else {}
+    if mode == "live":
+        broker = broker or (tables.get("broker_state") or [{}])[-1]
+        if broker.get("reconciled") is True or broker.get("verified") is True:
+            account = broker.get("account") or {}
+    positions = account.get("positions") or {}
+    positions_verified = bool(account)
+    if mode == "live" and broker.get("reconciled") is True:
+        positions = broker.get("positions") or positions
+        positions_verified = True
+    max_positions = int(number(status.get("max_positions"), 5))
+    candidates = tables.get("candidates", [])
+    if isinstance(status.get("active_symbols"), list):
+        active = set(status["active_symbols"])
+        candidates = [row for row in candidates if row.get("symbol") in active]
+    rows = pipeline_candidate_rows(candidates)
+    alerts = pipeline_alerts(state, status, tables)
+    halt_reasons = list(dict.fromkeys(text_items(state.get("halt_reasons")) + text_items(status.get("halt_reasons"))))
+    daily_latched = any(reason in {"daily_loss", "daily_loss_limit"} for reason in halt_reasons)
+    metrics = st.columns(5)
+    metrics[0].metric("후보 종목", f"{len(rows)}개")
+    metrics[1].metric("보유 / 최대 종목", f"{len(positions)} / {max_positions}" if positions_verified else f"— / {max_positions}")
+    equity = account.get("equity")
+    start = account.get("day_start_equity")
+    metrics[2].metric("총자산", usd(equity) if equity is not None else "—")
+    pnl = number(equity) - number(start) if equity is not None and start is not None else None
+    metrics[3].metric("당일 순손익", usd(pnl) if pnl is not None else "—",
+                      help="수수료를 반영한 실현·평가 손익 기준입니다. 실제 청구 금액은 증권사 체결 내역으로 확인합니다.")
+    metrics[4].metric("신규 진입", "당일 손실로 중지" if daily_latched else ("사용자 중지" if manual_halt else "조건 충족 시 검토"))
+
+    for alert in alerts[-5:][::-1]:
+        message = str(alert.get("message") or BLOCKER_NAMES.get(str(alert.get("code")), "위험 관리 알림을 확인하세요."))
+        severity = str(alert.get("level") or alert.get("severity") or "warning").lower()
+        (st.error if severity in {"critical", "error", "fatal"} else st.warning)(message)
+    identifiers = {str(alert.get("id") or alert.get("code") or alert.get("timestamp") or index)
+                   for index, alert in enumerate(alerts)}
+    previous = st.session_state.get("system_alert_ids")
+    if previous is not None and identifiers - set(previous) and st.session_state.get("risk_audio_enabled", False):
+        st.audio(alert_sound(), format="audio/wav", autoplay=True)
+    st.session_state["system_alert_ids"] = sorted(identifiers)
+
+    market, news, trading, operations = st.tabs(["후보 종목", "뉴스 · AI 분석", "주문 · 포지션", "운영 · 알림"])
+    with market:
+        panel_title("MARKET SIGNALS", "감시 후보", "급락도 관찰 대상으로 표시합니다. 후보 선정은 매수나 공매도 지시가 아닙니다.")
+        if rows:
+            dataframe(rows, column_config={"현재가 ($)": st.column_config.NumberColumn(format="$%.4f"),
+                                          "등락률 (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                                          "거래대금 ($)": st.column_config.NumberColumn(format="$%.0f")})
+        else:
+            empty("아직 후보가 없습니다. 시세 감지가 시작되거나 조건에 맞는 종목이 나올 때까지 기다립니다.")
+        st.caption("순위 데이터의 기준가격은 공식 전일 종가와 다를 수 있습니다. 상대 거래량이나 거래 가능 상태가 미확인이면 진입을 보류합니다.")
+    with news:
+        panel_title("EVIDENCE & AI", "사건과 판단 근거", "SEC·공식 보도자료를 확인하고, Alpaca 지연 뉴스는 보조로 사용합니다.")
+        analyses = tables.get("news_analysis", [])[-50:][::-1]
+        if not analyses:
+            empty("아직 분석 결과가 없습니다. 원문 확인이나 AI 연결에 실패하면 판단을 보류합니다.")
+        for item in analyses:
+            event = item.get("event") if isinstance(item.get("event"), dict) else {}
+            sentiment = str(item.get("sentiment") or item.get("overall_sentiment") or "UNKNOWN").upper()
+            symbol = str(item.get("ticker") or item.get("symbol") or "종목 미확인")
+            title = str(item.get("title") or item.get("headline") or event.get("title") or "뉴스 분석 결과")
+            label = SENTIMENT_NAMES.get(sentiment, "판단 보류")
+            st.markdown(f'<div class="news-card"><span class="news-tag">{html.escape(symbol)} · {html.escape(label)}</span>'
+                        f'<h4>{html.escape(title)}</h4><small>{html.escape(analysis_source(item))} · '
+                        f'{html.escape(timestamp(item.get("analyzed_at"), short=True))}</small></div>', unsafe_allow_html=True)
+            st.write(str(item.get("reason") or "판단 근거 확인 필요"))
+            st.caption(f"발표 {timestamp(item.get('published_at') or event.get('published_at'), short=True)} · "
+                       f"수신 {timestamp(item.get('received_at') or event.get('received_at'), short=True)}")
+            if item.get("error"):
+                st.warning("분석 처리 상태: " + str(item["error"]))
+            missing = text_items(item.get("missing_information"))
+            if missing:
+                st.caption("추가 확인: " + " · ".join(missing))
+            evidence = text_items(item.get("evidence"))
+            for event in item.get("events") or []:
+                if isinstance(event, dict):
+                    evidence.extend(text_items(event.get("evidence")))
+            if evidence:
+                with st.expander(f"{symbol} 원문 근거", expanded=False):
+                    for quote in list(dict.fromkeys(evidence)):
+                        st.text(quote)
+            st.caption("분석 당시 근거 적합 · 현재 진입은 시세·위험 조건 재확인" if item.get("entry_eligible") is True
+                       else "관찰·보조 자료 · 이 결과만으로 진입하지 않음")
+        st.caption("호재 분류와 모델의 신뢰도 값은 수익률이나 상승 확률을 뜻하지 않습니다.")
+    with trading:
+        if account:
+            trading_tab(account, state if mode == "paper" else {}, tables)
+        elif positions_verified:
+            panel_title("CONFIRMED HOLDINGS", "확인된 보유 수량")
+            if positions:
+                dataframe([{"종목": symbol, "보유 수량": quantity.get("qty") if isinstance(quantity, dict) else quantity}
+                           for symbol, quantity in positions.items()])
+            else:
+                empty("조회한 계좌에 보유 종목이 없습니다.")
+            st.caption("확인된 보유 수량만 표시합니다. 매수 가능 금액을 현금 잔고나 총자산으로 대신 표시하지 않습니다.")
+        else:
+            empty("확인된 계좌·포지션 상태가 없습니다. 임의의 잔고나 손익을 표시하지 않습니다.")
+        intents = tables.get("order_intents", [])[-50:][::-1]
+        if intents:
+            panel_title("ORDER REVIEW", "주문 검토 이력")
+            dataframe([{"시각 (KST)": timestamp(v.get("created_at") or v.get("timestamp"), short=True),
+                        "종목": v.get("symbol"), "구분": v.get("side"), "수량": v.get("qty"),
+                        "상태": STATUS_NAMES.get(str(v.get("status")), v.get("status")),
+                        "사유": v.get("reason") or v.get("blockers")} for v in intents])
+    with operations:
+        panel_title("RISK & OPERATIONS", "운영 상태", "일일 손실 중지는 사용자 중지 해제로 풀리지 않습니다. 보유 수량의 위험 관리는 계속합니다.")
+        dataframe([
+            {"항목": "실행 모드", "상태": "실거래" if mode == "live" else "모의매매"},
+            {"항목": "실주문 전송", "상태": "활성" if live_enabled else "차단"},
+            {"항목": "동시 보유 한도", "상태": f"{max_positions}종목"},
+            {"항목": "당일 손실 한도", "상태": f"{number(status.get('daily_loss_pct')) * 100:g}%" if status.get("daily_loss_pct") is not None else "설정 확인 필요"},
+            {"항목": "당일 손실 중지", "상태": "적용 중" if daily_latched else "한도 도달 이력 없음"},
+            {"항목": "사용자 신규 진입 중지", "상태": "적용 중" if manual_halt else "해제"},
+            {"항목": "Alpaca 뉴스", "상태": "약 15분 지연 · 보조 자료"},
+            {"항목": "AI 분석", "상태": str(status.get("llm_model") or "분석 결과에서 확인")},
+            {"항목": "수수료·청산 기준", "상태": str(status.get("fee_summary") or "저장된 비용·익절·손절 설정 적용")},
+        ])
+        if halt_reasons:
+            st.warning("신규 진입 제한: " + " · ".join(BLOCKER_NAMES.get(reason, reason) for reason in halt_reasons))
+        if status.get("error"):
+            error = status["error"]
+            st.error("최근 처리 오류: " + str(error.get("message") or error.get("code")) if isinstance(error, dict)
+                     else "최근 처리 오류: " + str(error))
+        if alerts:
+            panel_title("ALERT HISTORY", "위험 알림 이력")
+            dataframe([{"시각 (KST)": timestamp(item.get("timestamp") or item.get("created_at"), short=True),
+                        "수준": item.get("level") or item.get("severity"), "종목": item.get("symbol"),
+                        "내용": item.get("message")} for item in alerts[::-1]])
+        logs = tables.get("system_logs", [])[-100:][::-1]
+        if logs:
+            with st.expander("운영 로그", expanded=False):
+                dataframe(logs)
+        with st.expander("저장 경로", expanded=False):
+            st.write(str(db_path.resolve()))
+    st.markdown(f'<div class="footer">PennyQuant · 화면 갱신 {datetime.now(timezone.utc).astimezone(SEOUL).strftime("%Y.%m.%d %H:%M:%S KST")} · 조건을 충족하지 않으면 거래하지 않습니다.</div>', unsafe_allow_html=True)
+
+
 def render_dashboard(db_path: Path, report_path: Path, requested_mode: str = "auto") -> None:
     repo, state, tables, db_error = load_database(db_path)
     try:
@@ -551,6 +830,15 @@ def render_dashboard(db_path: Path, report_path: Path, requested_mode: str = "au
         source = repo.get_control("source", {}) if repo else {}
         runtime = repo.get_control("runtime", {}) if repo else {}
         monitor = repo.get_control("monitor", {}) if repo else {}
+        pipeline = repo.get_control("pipeline_status", {}) if repo else {}
+        runtime_kind = repo.get_control("runtime_kind", None) if repo else None
+        if pipeline_mode(runtime, pipeline, requested_mode, runtime_kind):
+            if db_error:
+                st.error(db_error)
+            if source.get("synthetic") is True or pipeline.get("synthetic") is True:
+                st.info("합성 데이터 데모입니다. AI 분류는 고정된 검증용 결과이며 실제 뉴스·LLM 호출·실거래가 아닙니다.")
+            render_pipeline_dashboard(repo, state, tables, pipeline, db_path, manual_halt)
+            return
         observing = monitor_mode(runtime, monitor, requested_mode)
         report, report_error = ({}, None) if observing else read_report(report_path)
         synthetic = source.get("synthetic", report.get("synthetic")) is True
@@ -662,17 +950,21 @@ def main() -> None:
         manual_halt = bool(repo.get_control("manual_halt", False)) if repo else False
         runtime = repo.get_control("runtime", {}) if repo else {}
         monitor_state = repo.get_control("monitor", {}) if repo else {}
+        pipeline = repo.get_control("pipeline_status", {}) if repo else {}
+        runtime_kind = repo.get_control("runtime_kind", None) if repo else None
+        integrated = pipeline_mode(runtime, pipeline, args.mode, runtime_kind)
         observing = monitor_mode(runtime, monitor_state, args.mode)
         with st.sidebar:
             st.markdown('<div class="brand">Penny<b>Quant</b></div><div class="brand-sub">NEWS-DRIVEN TRADING LAB</div>', unsafe_allow_html=True)
-            if observing:
+            if observing and not integrated:
                 st.markdown('<span class="pill">MONITOR ONLY</span>', unsafe_allow_html=True)
                 st.markdown("### 시세 감시 전용")
                 st.info("자동매매 비활성")
                 st.caption("토스 현재가를 주기적으로 조회합니다. 뉴스·매매 엔진·계좌 잔고 조회는 사용하지 않습니다.")
                 st.caption("종료하려면 run-toss를 실행한 터미널에서 Ctrl+C를 누르세요.")
             else:
-                st.markdown('<span class="pill">PAPER ONLY</span>', unsafe_allow_html=True)
+                label = "SYSTEM / LIVE" if integrated and pipeline.get("mode") == "live" else ("SYSTEM / PAPER" if integrated else "PAPER ONLY")
+                st.markdown(f'<span class="pill">{label}</span>', unsafe_allow_html=True)
                 st.markdown("### 매매 제어")
                 st.caption("신규 진입만 제어합니다. 보유 포지션의 위험 관리는 계속됩니다.")
                 if manual_halt:
@@ -685,7 +977,12 @@ def main() -> None:
                     if st.button("신규 진입 중지", width="stretch", disabled=repo is None):
                         repo.set_control("manual_halt", True)
                         st.rerun()
-                st.caption("연속 모의매매 엔진은 대기 중에도 약 0.2초 간격으로 제어값을 확인합니다. 상태 표시는 다음 갱신에 반영됩니다.")
+                if integrated:
+                    st.caption("사용자 중지 해제 후에도 일일 손실·미확인 주문·데이터 미검증 등의 제한은 유지됩니다.")
+                    st.toggle("새 위험 알림 소리", value=False, key="risk_audio_enabled",
+                              help="이 화면을 연 상태에서 새 위험 알림이 발생하면 짧은 소리를 재생합니다. 브라우저 설정에 따라 재생이 제한될 수 있습니다.")
+                else:
+                    st.caption("연속 모의매매 엔진은 대기 중에도 약 0.2초 간격으로 제어값을 확인합니다. 상태 표시는 다음 갱신에 반영됩니다.")
             st.divider()
             auto_refresh = st.toggle("자동 갱신 · 3초", value=True, key="auto_refresh")
             if st.button("데이터 새로고침", width="stretch"):

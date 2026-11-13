@@ -23,6 +23,7 @@ class StrategyContext:
     news: list[NewsEvent]
     now: datetime
     settings: Settings
+    analyses: dict | None = None
 
 
 class Strategy(Protocol):
@@ -72,7 +73,7 @@ def prepare(context: StrategyContext, minimum_bars: int) -> tuple[list[Bar], New
     recent = bars[-minimum_bars:]
     if any((utc(right.timestamp) - utc(left.timestamp)).total_seconds() != 60 for left, right in zip(recent, recent[1:])):
         return None
-    news = positive_event(context.news, symbol, now, context.settings)
+    news = positive_event(context.news, symbol, now, context.settings, analyses=context.analyses)
     if news is None:
         return None
     # A trend that completed before the catalyst was received is not evidence
