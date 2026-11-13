@@ -1,0 +1,26 @@
+# USD example, not a KRW/USD exchange-rate quote. Paper mode only.
+initial_cash: 70.0
+mode: paper
+risk_per_trade: 0.01
+stop_pct: 0.05
+take_profit_pct: 0.10
+daily_loss_pct: 0.02
+max_entries: 2
+max_positions: 1
+max_consecutive_losses: 2
+max_spread_pct: 0.005
+max_quote_age_seconds: 5
+max_news_age_hours: 24
+max_news_delay_seconds: 120
+max_candidates: 20
+min_price: 1.0
+max_price: 5.0
+min_gain_pct: 0.10
+min_relative_volume: 3.0
+min_dollar_volume: 2000000
+max_drawdown_from_high: 0.12
+fee_bps: 10.0
+slippage_bps: 10.0
+order_ttl_seconds: 30
+require_realtime_news: true
+regular_hours_only: true

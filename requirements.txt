@@ -1,0 +1,7 @@
+httpx>=0.28,<1
+websockets>=15,<17
+PyYAML>=6,<7
+pandas>=2.2,<4
+numpy>=2,<3
+streamlit>=1.41,<2
+exchange-calendars>=4.7,<5
