@@ -125,6 +125,9 @@ class MySQLRepository:
         self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(2,%s)",
                       ("SessionQuant 시장·뉴스 원장과 정확한 DECIMAL 금융 수치 투영",))
 
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(3,%s)",
+                      ("시장 참조 ETF 관측·계산과 FRED 일별 수신 이력 분리",))
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         with self._mutex:

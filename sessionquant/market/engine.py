@@ -154,6 +154,9 @@ class MarketEngine:
                         max_eligibility_age_seconds=self.max_eligibility_age_seconds,
                         max_spread_pct=self.max_spread_pct, min_dollar_volume=self.min_dollar_volume,
                         min_rvol=self.min_rvol, require_evidence=self.strict_data)
+        from ..market_reference.contracts import REFERENCE_SYMBOLS
+        if symbol in REFERENCE_SYMBOLS:
+            blockers.append('market_reference_not_trading_candidate')
         if quality and quality['bars']['status'] != 'COMPLETE':
             blockers.append('minute_history_incomplete_or_stale')
         if self.use_market_filter and (regime.state in {"BEARISH", "UNKNOWN"}

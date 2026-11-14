@@ -44,6 +44,7 @@ class DashboardData:
     account_status: dict = field(default_factory=dict)
     watchlist_state: dict = field(default_factory=dict)
     market_quality: dict = field(default_factory=dict)
+    market_reference: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -103,6 +104,7 @@ def load_database(path: str | Path) -> DashboardData:
         result.state = repository.load_state() or {}
         result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
         result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
+        result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
         result.actual_account=repository.get_control("actual_account_snapshot")
         result.account_status=repository.get_control("account_monitor_status",{}) or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
@@ -296,6 +298,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                                     "제공 시각": timestamp(quote.get("timestamp")), "수집 시각": timestamp(quote.get("received_at"))})
         _table(market_rows, "SPY·QQQ의 최신 확정봉과 호가를 기다리고 있습니다.")
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
+        from sessionquant.dashboard.reference_panel import render_references
+        render_references(data.market_reference)
         schedule = data.context.get("economic_calendar", [])
         if isinstance(schedule, list) and schedule:
             _table([{"일정": row.get("name", row.get("event", "")), "발표 시각": timestamp(row.get("timestamp", row.get("published_at"))), "출처": row.get("source", "")} for row in schedule if isinstance(row, dict)])

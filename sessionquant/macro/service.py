@@ -115,6 +115,11 @@ class NewsPipeline:
                 # 과거 기준일 조회는 FREDClient.fetch(now=...)로 별도로 요청한다.
                 for row in await self.fred.fetch():
                     self.repo.record("macro_indicators", row)
+                    from ..market_reference.contracts import identity
+                    receipt = utc(self.clock()).isoformat()
+                    self.repo.record('fred_reference_observations',{**row,'id':'fred-received:'+identity({'row':row,'ingested_at':receipt}),
+                        'ingested_at':receipt,'purpose':'OFFICIAL_DAILY_BASELINE','source':'FRED','latency_class':'DAILY',
+                        'publication_time_status':'UNKNOWN' if row.get('published_at') is None else 'PROVIDED'})
             except (ValueError, RuntimeError, TypeError, OSError, httpx.HTTPError):
                 issues.append({"provider": "fred", "code": "daily_context_unavailable"})
         self.status = {"status": "AVAILABLE" if self._analyses else "UNKNOWN",

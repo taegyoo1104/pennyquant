@@ -110,6 +110,10 @@ class WatchlistSelector:
             if symbol in seen:
                 raise ValueError('시총 배치에 중복 티커가 있습니다.')
             seen.add(symbol)
+            from ..market_reference.contracts import REFERENCE_SYMBOLS
+            if symbol in REFERENCE_SYMBOLS:
+                issues.append({'ticker':symbol,'code':'reference_etf_not_a_trading_member'})
+                continue
             if symbol not in members:
                 continue
             try:

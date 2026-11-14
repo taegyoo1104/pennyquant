@@ -272,3 +272,25 @@ def test_real_mysql_paper_market_partial_cancel_race_preserves_audit_and_money(m
     assert Decimal(order['simulated_fill_price'])==Decimal('100.1')
     assert len(reader.all('executions'))==2 and restored.broker.reserved_cash==0
     assert restored.broker.reconcile()['ok']
+
+
+def test_real_mysql_reference_journal_restore_and_namespace_isolation(mysql_repositories):
+    """ETF·FRED 원장의 Decimal 문자열·시각·기존 주문 ID를 분리 보존한다."""
+    from sessionquant.market_reference.store import ReferenceStore, OBSERVATIONS
+    from test_market_reference import NOW, candle, series
+    repo, other = mysql_repositories(), mysql_repositories()
+    repo.record('orders', {'id': 'existing-order', 'symbol': 'AAPL', 'qty': '0.123456'})
+    store = ReferenceStore(repo)
+    item = series(store, final='99.125')
+    repo.record('fred_reference_observations', {'id': 'fred-fixture', 'series': 'DGS10', 'value': '4.125', 'published_at': None})
+    reader = mysql_repositories(repo.namespace)
+    restored = ReferenceStore(reader)
+    assert restored.publish(NOW)['items']['IEF']['id'] == item['id']
+    restored.ingest(candle(price='99.125'))
+    assert len(reader.all(OBSERVATIONS)) == 31
+    assert reader.all('orders')[0]['id'] == 'existing-order'
+    assert reader.all('fred_reference_observations')[0]['published_at'] is None
+    assert other.all(OBSERVATIONS) == [] and other.all('orders') == []
+    with reader.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=3')
+        assert cursor.fetchone()[0] == 3

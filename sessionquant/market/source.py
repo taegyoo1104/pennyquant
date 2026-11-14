@@ -29,7 +29,7 @@ class MarketBatch:
 class TossSessionSource:
     def __init__(self, client: TossMarketClient | None = None, *, candidates_per_cycle: int = 2, clock=None,
                  watchlist=None, max_api_calls=24, light_refresh_seconds=30, ranking_refresh_seconds=60,
-                 max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None):
+                 max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None):
         if type(candidates_per_cycle) is not int or not 1 <= candidates_per_cycle <= 10:
             raise ValueError("한 주기에 상세 수집할 종목 수는 1~10개입니다")
         self.client = client or TossMarketClient()
@@ -41,6 +41,7 @@ class TossSessionSource:
         self.max_cycle_seconds = max_cycle_seconds
         self.history_pages_per_cycle = history_pages_per_cycle
         self.on_priority_batch = on_priority_batch
+        self.reference_monitor = reference_monitor
         if type(max_cycle_seconds) is not int or not 5 <= max_cycle_seconds <= 30:
             raise ValueError('후보 조회 마감 예산은 5~30초 정수여야 합니다.')
         if type(history_pages_per_cycle) is not int or not 0 <= history_pages_per_cycle <= 3:
@@ -131,6 +132,10 @@ class TossSessionSource:
 
         async def call(source, method, *args, symbol='*', optional=False, **kwargs):
             budget.reserved = 0
+            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'MARKET_DATA'
+            until = state.get('reference_backoff_groups',{}).get(group)
+            if until and utc(self.clock()) < utc(until):
+                return None
             if state.get('backoff_until') and utc(self.clock()) < utc(state['backoff_until']):
                 return None
             remaining = self.max_cycle_seconds-(monotonic()-started)
@@ -154,7 +159,11 @@ class TossSessionSource:
                 if isinstance(exc,httpx.HTTPStatusError):
                     error['http_status'] = exc.response.status_code
                     if exc.response.status_code == 429:
-                        state['backoff_until'] = provider_retry_until(exc.response.headers.get('Retry-After'),utc(self.clock())).isoformat()
+                        until = provider_retry_until(exc.response.headers.get('Retry-After'),utc(self.clock())).isoformat()
+                        if source.startswith('market_reference:'):
+                            state.setdefault('reference_backoff_groups',{})[group] = until
+                        else:
+                            state['backoff_until'] = until
                 batch.errors.append(error)
             finally:
                 measurements.append({'source':source,'symbol':symbol,'priority':not optional,'status':status,
@@ -266,6 +275,25 @@ class TossSessionSource:
             await deliver()
             state['priority_phase_seconds'] = round(monotonic()-started,3)
             await manager.refresh(utc(self.clock()))
+            if self.reference_monitor is not None:
+                async def reference_read(stream,symbol):
+                    from ..market_reference.contracts import REFERENCES
+                    methods = {'stocks':(self.client.stocks,(list(REFERENCES),),{}),
+                               'prices':(self.client.prices,(list(REFERENCES),),{}),
+                               'orderbook':(self.client.orderbook,(symbol,),{}),
+                               'candle':(self.client.reference_candles,(symbol,),{}),
+                               'daily':(self.client.reference_candles,(symbol,),{'interval':'1d','count':5})}
+                    method,args,kwargs = methods[stream]
+                    before_errors = len(batch.errors)
+                    value = await call('market_reference:'+stream,method,*args,symbol=symbol,optional=True,**kwargs)
+                    error = None
+                    if value is None:
+                        last_error = batch.errors[-1] if len(batch.errors)>before_errors else {}
+                        error = 'http_'+str(last_error['http_status']) if last_error.get('http_status') else last_error.get('error_type','budget_or_backoff_or_deadline')
+                    return {'data':value,'error':error,'received_at':utc(self.clock()).isoformat()}
+                # 참고군은 위험 자료보다 뒤이며, 예산이 부족하면 후보 슬롯을 남기고 축소한다.
+                allowance = max(0,budget.limit-budget.used-(self.candidates_per_cycle*2+1))
+                await self.reference_monitor.poll(reference_read,limit=allowance)
             pool = manager.light_symbols(utc(self.clock()))
             current = utc(self.clock())
             if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:

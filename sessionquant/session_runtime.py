@@ -152,10 +152,16 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     raw = batch_events(batch)
                     raw = [x for x in raw if engine.last_time is None or event_time(x) >= engine.last_time]
                     engine.apply_batch(raw,datetime.now(timezone.utc))
+                from .market_reference.collector import MarketReferenceMonitor
+                from .market_reference.settings import reference_settings
+                reference_config = reference_settings(config.market_reference)
+                reference = MarketReferenceMonitor(repo,clock=lambda:datetime.now(timezone.utc),
+                    price_seconds=reference_config['price_seconds'],candle_seconds=reference_config['candle_seconds'],
+                    calls_per_cycle=reference_config['calls_per_cycle']) if reference_config['enabled'] else None
                 market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
-                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority)
+                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference)
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:

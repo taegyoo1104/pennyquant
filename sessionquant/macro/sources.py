@@ -174,7 +174,9 @@ class FREDClient:
                 except (InvalidOperation, KeyError, TypeError):
                     continue
                 values.append({"id": f"fred:{series}:{item['date']}:{now.date()}", "series": series,
-                    "observation_date": item["date"], "received_at": now.isoformat(), "value": str(value),
+                    "observation_date": item["date"], "received_at": datetime.now(timezone.utc).isoformat(), "value": str(value),
+                    "queried_at":now.isoformat(),"published_at":None,"revised_at":None,
+                    "point_in_time_verified":False,"vintage_semantics":"realtime_start/end are vintage dates, not live quotes",
                     "units": "percent" if series in {"DGS2", "DGS10"} else "usd_per_barrel",
                     "frequency": "daily", "real_time": False, "auxiliary_only": True,
                     "realtime_start": item.get("realtime_start", body.get("realtime_start")),

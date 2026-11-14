@@ -114,7 +114,8 @@ class WatchlistManager:
         members = self.universe.members(now)
         if not status['snapshot'] or status['snapshot']['data_status'] != 'VALID' or status['status'] == 'SYNTHETIC_BLOCKED':
             return []
-        return [row['ticker'] for row in status['items'] if row['ticker'] in members][:self.config.watchlist_size]
+        from ..market_reference.contracts import REFERENCE_SYMBOLS
+        return [row['ticker'] for row in status['items'] if row['ticker'] in members and row['ticker'] not in REFERENCE_SYMBOLS][:self.config.watchlist_size]
 
     def observe_prices(self, rows, received_at):
         received_at = utc(received_at)
@@ -204,6 +205,8 @@ class WatchlistManager:
 
     def entry_blockers(self, symbol, now):
         now = utc(now)
+        from ..market_reference.contracts import REFERENCE_SYMBOLS
+        if symbol in REFERENCE_SYMBOLS:return ['market_reference_not_trading_candidate']
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         if status['status'] != 'VALID':
             return ['watchlist_'+status['status'].lower()]

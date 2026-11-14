@@ -200,6 +200,13 @@ class TossMarketClient:
             raise DataQualityError('분봉 다음 페이지 시각을 확인할 수 없습니다.') from None
         return bars, following
 
+    async def reference_candles(self,symbol: str,*,interval='1m',count=200):
+        """참조군은 원본 Decimal 문자열로 계산하며 주문·거래 가능 플래그를 만들지 않는다."""
+        if interval not in {'1m','1d'} or not 1 <= count <= 200:
+            raise ValueError('참조군 봉 주기·개수를 확인하세요.')
+        return await self._get('/api/v1/candles',params={'symbol':symbols_parameter([symbol]),
+            'interval':interval,'count':count,'adjusted':'false'})
+
     async def rankings(self, *, ranking_type: str = "MARKET_TRADING_AMOUNT", count: int = 20):
         if ranking_type not in {"MARKET_TRADING_AMOUNT", "MARKET_TRADING_VOLUME", "TOP_GAINERS", "TOP_LOSERS"}:
             raise ValueError("market-wide ranking required")
