@@ -33,6 +33,8 @@ class Market:
         return [Bar(symbol,stamp,stamp,100,101,99,100,100000)],None
     async def quote(self,symbol,**kwargs):
         self.calls.append(('quote',symbol))
+        if self.throttle:
+            httpx.Response(429,headers={'Retry-After':'120'},request=httpx.Request('GET','https://fake.test?apikey=PRIVATE')).raise_for_status()
         return Quote(symbol,self.clock(),self.clock(),100,100.01,1000,1000,False,False,'NASDAQ')
 
 
@@ -73,12 +75,17 @@ async def test_small_budget_rotates_focus_without_inventing_missing_candles(tmp_
         source=TossSessionSource(client,clock=lambda:clock.now,watchlist=manager,max_api_calls=8)
         first=await source.poll([],priority_symbols=['T001'])
         assert len(client.calls)<=8
-        assert not first.bars and manager.state['budget_exhausted']
-        assert {q.symbol for q in first.quotes}=={'T001','SPY','QQQ','T400','T401'}
-        client.calls.clear();clock.now+=timedelta(seconds=30)
-        second=await source.poll([],priority_symbols=['T001'])
-        assert len(client.calls)<=8
-        assert 'T402' in {q.symbol for q in second.quotes}
+        # 단계 02에서는 제한된 예산도 보유·ETF 자료가 먼저 사용한다.
+        assert {b.symbol for b in first.bars}=={'T001','SPY','QQQ'} and manager.state['budget_exhausted']
+        assert {q.symbol for q in first.quotes}=={'T001','SPY','QQQ'}
+        visited=set()
+        for _ in range(3):
+            client.calls.clear();clock.now+=timedelta(seconds=30)
+            following=await source.poll([],priority_symbols=['T001'])
+            assert len(client.calls)<=8
+            assert {'T001','SPY','QQQ'} <= {q.symbol for q in following.quotes}
+            visited.update(q.symbol for q in following.quotes if q.symbol.startswith('T4'))
+        assert {'T400','T401','T402','T403'} <= visited
     finally:repo.close()
 
 
@@ -90,12 +97,12 @@ async def test_429_applies_provider_backoff_to_whole_cycle_without_secret_output
         client=Market(lambda:now);client.throttle=True
         source=TossSessionSource(client,clock=lambda:now,watchlist=manager)
         batch=await source.poll([],priority_symbols=['T001'])
-        assert len(client.calls)==1 and not batch.quotes
+        assert client.calls==[('stocks',['T001','SPY','QQQ']),('quote','T001')] and not batch.quotes
         assert manager.state['backoff_until']==(now+timedelta(seconds=120)).isoformat()
         assert batch.errors[0]['http_status']==429 and 'PRIVATE' not in str(batch.errors)
         assert manager.entry_blockers('T400',now)==['market_provider_backoff']
         await source.poll([],priority_symbols=['T001'])
-        assert len(client.calls)==1
+        assert len(client.calls)==2
     finally:repo.close()
 
 

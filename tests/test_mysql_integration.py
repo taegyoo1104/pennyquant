@@ -216,3 +216,31 @@ async def test_real_mysql_watchlist_snapshot_focus_and_fair_order_survive_reconn
     assert view['snapshot']['synthetic'] is True and view['focus_count'] == 20
     assert any(row.get('kind') == 'watchlist_focus' and row['items'] for row in reader.all('pipeline_status'))
     assert reader.all('orders') == []
+
+
+def test_real_mysql_market_quality_metadata_and_strict_recovery(mysql_repositories):
+    """합성 시세의 출처·미확인 자격·품질 보고서를 격리 MySQL에서 복구한다."""
+    from sessionquant.market.eligibility import toss_eligibility
+    from sessionquant.market.quality import QUALITY_KEY
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.models import Quote, jsonable
+    from sessionquant.session_engine import SessionEngine
+    from test_market_data_quality import NOW, THROUGH, SOURCE, minutes, stock
+    repo = mysql_repositories()
+    universe = UniverseStore()
+    universe.refresh(['TEST'],source='SYNTHETIC_FIXTURE',observed_at=NOW-timedelta(days=1))
+    engine = SessionEngine(repo,universe,synthetic=True,strict_market_data=True)
+    records = [{'kind':'bar','data':jsonable(bar)} for bar in minutes()]
+    records += [{'kind':'eligibility','data':jsonable(toss_eligibility('TEST',stock(),NOW))},
+                {'kind':'quote','data':jsonable(Quote('TEST',THROUGH,NOW,100,100.01,100,100,False,False,'NASDAQ'))}]
+    engine.apply_batch(records,NOW)
+    report = repo.get_control(QUALITY_KEY)
+    assert report['required_data_coverage']['rvol']['verified'] == 0
+    assert report['blocker_counts']['eligibility_unverified'] == 1
+    reader = mysql_repositories(repo.namespace)
+    restored = SessionEngine(reader,universe,synthetic=True,strict_market_data=True,restore=True)
+    assert restored.market.bars['TEST'][0].source == SOURCE
+    assert restored.market.eligibility['TEST'].account_scope == 'UNKNOWN'
+    assert reader.get_control(QUALITY_KEY) == report and reader.all('orders') == []
+    with pytest.raises(ValueError):
+        SessionEngine(reader,universe,synthetic=True,strict_market_data=False,restore=True)

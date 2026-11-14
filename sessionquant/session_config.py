@@ -30,6 +30,8 @@ class SessionConfig:
     max_api_calls_per_cycle: int = 24
     light_refresh_seconds: int = 30
     ranking_refresh_seconds: int = 60
+    max_cycle_seconds: int = 15
+    history_pages_per_cycle: int = 1
     news_enabled: bool = True
     include_alpaca: bool = True
     company_rss_catalog: bool = True
@@ -50,7 +52,8 @@ class SessionConfig:
             raise ValueError('감시목록은 불리언·market_cap_top 정책이어야 합니다.')
         for name, low, high in [('watchlist_size',1,100),('focus_size',1,20),('watchlist_refresh_days',1,7),
                                ('watchlist_data_max_age_seconds',10,300),('focus_min_hold_seconds',0,3600),
-                               ('max_api_calls_per_cycle',8,100),('light_refresh_seconds',10,300),('ranking_refresh_seconds',30,600)]:
+                               ('max_api_calls_per_cycle',8,100),('light_refresh_seconds',10,300),('ranking_refresh_seconds',30,600),
+                               ('max_cycle_seconds',5,30),('history_pages_per_cycle',0,3)]:
             value=getattr(self,name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f'{name} 값은 {low}~{high} 정수여야 합니다.')

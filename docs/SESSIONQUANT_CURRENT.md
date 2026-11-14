@@ -11,10 +11,11 @@
 | `live-local` | 별도 실계좌 대사·위험 관리 → 제한적 Toss 어댑터 | 기본 사전 조회. 실제 주문은 매 실행 별도 활성화 조건 필요 |
 | `demo` / `replay` / `backtest` | 합성 또는 수신 기록 → 별도 모의 장부 | 외부 실주문 없음. 최신 감시목록을 과거에 자동 적용하지 않음 |
 | `watchlist-refresh` | 검증된 로컬 시총 입력 → PAPER 선택 이력 | 외부 API·주문 없음. 실행 중인 작성자와 파일 잠금 공유 |
+| `market-data-status` | PAPER 품질 보고서 → 만료·확보율 재검사 | 외부 API·주문·LLM 호출 없음 |
 | `watchlist-status` / `watchlist-export` | PAPER 감시·집중 이력 조회 | 주문·LLM 생성 없음 |
 | `legacy` / 이전 호환 수집 명령 | `legacy_cli` 및 이전 PennyQuant 경로 | 현재 100→20 정책과 분리. 별도 매뉴얼 참조 |
 
-`pennyquant` 패키지 이름은 호환 진입점이다. 새 운영 안내는 이 문서와 [단계 01](STAGE01_WATCHLIST.md), [MySQL](MYSQL_LOCAL.md), [실거래 제한](PHASE5_LOCAL.md)을 따른다. 과거 `SYSTEM_RUN.md`, `STRATEGIES.md`, `LEGACY_README.md`의 안내를 새 감시 정책으로 해석하지 않는다.
+`pennyquant` 패키지 이름은 호환 진입점이다. 새 운영 안내는 이 문서와 [단계 01](STAGE01_WATCHLIST.md), [단계 02](STAGE02_MARKET_DATA.md), [MySQL](MYSQL_LOCAL.md), [실거래 제한](PHASE5_LOCAL.md)을 따른다. 과거 `SYSTEM_RUN.md`, `STRATEGIES.md`, `LEGACY_README.md`의 안내를 새 감시 정책으로 해석하지 않는다.
 
 ## 공통 회귀 검사
 
@@ -36,3 +37,5 @@
 이 단계의 코드 변경 전 기준선은 **631개 통과·선택 MySQL 검사 8개 제외**다. 기존 경고는 pandas의 시간대 배열 변환 관련 경고다. 기존 실패는 확인되지 않았다. 외부 토스 계좌·유료 LLM·사용자 PC MySQL은 이 기준선 검사에 포함하지 않았다.
 
 첨부 `00_baseline_docs_ci.txt`의 전체 CI 구축은 별도 단계 00 작업이다. 이 요청은 단계 01이므로 GitHub Actions를 새로 활성화하거나 다음 단계 기능을 묶지 않았다. 이 문서는 현재 경로와 회귀 기준에 필요한 최소 진입 문서다. CI 미구축 상태를 실계좌 안전성 검증 완료로 해석하지 않는다.
+
+단계 02부터 `run`은 엄격한 시세·적격성·RVOL 근거 검사를 사용한다. 위험 호가와 분봉은 후보 탐색 전에 엔진에 전달하고 과거 페이지는 남은 예산에서만 보충한다. 실제 계좌 자격·기업행동·시총 공급 자료의 차단 항목은 아직 해결되지 않았다. 자세한 출처·정책·호환 범위는 단계 02 문서를 따른다.

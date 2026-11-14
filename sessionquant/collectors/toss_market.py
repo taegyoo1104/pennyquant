@@ -9,6 +9,7 @@ import asyncio
 import os
 import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from time import monotonic
 
 import httpx
@@ -25,34 +26,66 @@ def symbols_parameter(symbols: list[str] | tuple[str, ...], maximum: int = 200) 
     return ",".join(dict.fromkeys(symbols))
 
 
+def _number(value, *, integral=False, positive=False):
+    """문자열 숫자를 검사하며 거래량의 소수 부분을 버리지 않는다."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise ValueError('숫자 형식 미확인')
+    number = Decimal(str(value))
+    if not number.is_finite() or number < 0 or (positive and number <= 0):
+        raise ValueError('유효 범위 밖의 숫자')
+    if integral and number != number.to_integral_value():
+        raise ValueError('소수 거래량·잔량은 현재 정수 모델에서 지원하지 않습니다.')
+    return int(number) if integral else float(number)
+
+
 def parse_orderbook(symbol: str, data: dict, received_at: datetime, *,
                     exchange: str = "UNKNOWN", tradable: bool = False, halted: bool = False) -> Quote:
-    """Orderbook alone does not establish exchange, halt or order eligibility."""
-    if data.get("currency") != "USD" or not data.get("timestamp"):
+    """호가는 거래 가능·거래정지 여부를 증명하지 않는다. 역전·미래·결측은 거부한다."""
+    if not isinstance(data, dict) or data.get("currency") != "USD" or not data.get("timestamp"):
         raise DataQualityError("USD orderbook with a known event time required")
     asks, bids = data.get("asks", []), data.get("bids", [])
-    if not asks or not bids:
+    if not isinstance(asks,list) or not isinstance(bids,list) or not asks or not bids:
         raise DataQualityError("two-sided orderbook required")
-    ask = min(asks, key=lambda x: float(x["price"]))
-    bid = max(bids, key=lambda x: float(x["price"]))
-    return Quote(symbol, utc(data["timestamp"]), utc(received_at), float(bid["price"]),
-                 float(ask["price"]), int(float(bid["volume"])), int(float(ask["volume"])),
-                 tradable, halted, exchange)
+    try:
+        asks = [(_number(x['price'],positive=True),_number(x['volume'],integral=True)) for x in asks]
+        bids = [(_number(x['price'],positive=True),_number(x['volume'],integral=True)) for x in bids]
+        ask, bid = min(asks), max(bids)
+        stamp, known = utc(data['timestamp']), utc(received_at)
+        if stamp > known:
+            raise ValueError('미래 호가')
+        return Quote(symbol,stamp,known,bid[0],ask[0],bid[1],ask[1],tradable,halted,exchange)
+    except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation,OverflowError):
+        raise DataQualityError('호가 검증 실패: 역전·숫자·시각·잔량 형식을 확인하세요.') from None
 
 
-def parse_candles(symbol: str, data: dict, received_at: datetime) -> list[Bar]:
-    # Official 1m timestamp is the END of [timestamp-1minute,timestamp).
+def parse_candles(symbol: str, data: dict, received_at: datetime, *, observation=None) -> list[Bar]:
+    """1분 종료 시각을 보존하고 미완성 봉을 제외한다. 누락 봉은 생성하지 않는다."""
     result = []
-    for item in data.get("candles", []):
-        if item.get("currency") != "USD":
-            raise DataQualityError("USD candles required")
-        timestamp = utc(item["timestamp"])
-        if timestamp > utc(received_at):
-            continue  # never expose an unfinished or future bar
-        result.append(Bar(symbol, timestamp, utc(received_at), float(item["openPrice"]),
-                          float(item["highPrice"]), float(item["lowPrice"]),
-                          float(item["closePrice"]), int(float(item["volume"]))))
-    return sorted(result, key=lambda b: b.timestamp)
+    report = observation if observation is not None else {}
+    report.update(source='toss:/api/v1/candles:1m',price_adjustment='raw',volume_comparability='UNKNOWN',
+                  zero_volume_policy='UNKNOWN',received_at=utc(received_at).isoformat(),future_excluded=0)
+    try:
+        if not isinstance(data,dict) or not isinstance(data.get('candles'),list):
+            raise ValueError('분봉 응답은 배열이어야 합니다.')
+        report['raw_count'] = len(data['candles'])
+        for item in data['candles']:
+            if item.get("currency") != "USD":
+                raise ValueError('USD 분봉 필요')
+            timestamp = utc(item['timestamp'])
+            if timestamp.second or timestamp.microsecond:
+                raise ValueError('1분 종료 경계 필요')
+            if timestamp > utc(received_at):
+                report['future_excluded'] += 1
+                continue
+            result.append(Bar(symbol,timestamp,utc(received_at),_number(item['openPrice'],positive=True),
+                _number(item['highPrice'],positive=True),_number(item['lowPrice'],positive=True),
+                _number(item['closePrice'],positive=True),_number(item['volume'],integral=True),
+                source=report['source'],price_adjustment='raw'))
+        report.update(status='PARSED',accepted_count=len(result))
+    except (ValueError,TypeError,KeyError,AttributeError,InvalidOperation,OverflowError):
+        report.update(status='INVALID',accepted_count=0)
+        raise DataQualityError('분봉 검증 실패: 통화·종료 시각·정수 거래량·OHLC를 확인하세요.') from None
+    return sorted(result,key=lambda b:b.timestamp)
 
 
 class TossMarketClient:
@@ -64,6 +97,8 @@ class TossMarketClient:
         self.account_seq = int(seq) if seq is not None and seq != "" else None
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(timeout=15, follow_redirects=False)
+        self.read_observations = {}
+        self.candle_observations = {}
         self._token = ""
         self._token_deadline = 0.0
         self._token_lock = asyncio.Lock()
@@ -94,12 +129,32 @@ class TossMarketClient:
             if self.account_seq is None:
                 raise CapabilityUnavailable("Set TOSS_ACCOUNT_SEQ from the accounts response")
             headers["X-Tossinvest-Account"] = str(self.account_seq)
-        response = await get_readonly(self.client, BASE_URL + path, limiter=self.limiter,
-                                      headers=headers, params=params)
+        started = monotonic()
+        try:
+            response = await get_readonly(self.client, BASE_URL + path, limiter=self.limiter,
+                                          headers=headers, params=params)
+        except httpx.HTTPStatusError as exc:
+            self._observe_read(path,exc.response,started)
+            raise
+        self._observe_read(path,response,started)
         data = response.json()
         if "result" not in data or "error" in data:
             raise DataQualityError("Toss response missing successful result envelope")
         return data["result"]
+
+    def _observe_read(self,path,response,started):
+        """시장 조회 계측만 보존한다. 인증·계좌·임의 응답 헤더는 저장하지 않는다."""
+        if path not in {'/api/v1/prices','/api/v1/stocks','/api/v1/candles','/api/v1/orderbook'}:
+            return
+        limits = {}
+        for key in ('ratelimit-limit','ratelimit-remaining','ratelimit-reset',
+                    'x-ratelimit-limit','x-ratelimit-remaining','x-ratelimit-reset'):
+            value = response.headers.get(key,'')
+            if re.fullmatch(r'[0-9]{1,15}(?:[.][0-9]{1,6})?',value):
+                limits[key] = value
+        self.read_observations[path] = {'http_status':response.status_code,
+            'duration_seconds':round(monotonic()-started,3),'received_at':now_utc().isoformat(),
+            'rate_headers':limits,'rate_headers_observed':bool(limits),'account_quota_verified':False,'cost_usd':None}
 
     async def prices(self, symbols: list[str]):
         return await self._get("/api/v1/prices", params={"symbols": symbols_parameter(symbols)})
@@ -131,7 +186,19 @@ class TossMarketClient:
         if before:
             params["before"] = utc(before).isoformat()
         data = await self._get("/api/v1/candles", params=params)
-        return parse_candles(symbol, data, now_utc()), data.get("nextBefore")
+        report = self.candle_observations.setdefault(symbol,{})
+        received = now_utc()
+        bars = parse_candles(symbol,data,received,observation=report)
+        following = data.get('nextBefore')
+        try:
+            if following is not None and (not isinstance(following,str) or utc(following) > received):
+                raise ValueError('과거 페이지 커서 미확인')
+            if following is not None:
+                utc(following)
+        except (ValueError,TypeError,AttributeError):
+            report['status'] = 'INVALID_CURSOR'
+            raise DataQualityError('분봉 다음 페이지 시각을 확인할 수 없습니다.') from None
+        return bars, following
 
     async def rankings(self, *, ranking_type: str = "MARKET_TRADING_AMOUNT", count: int = 20):
         if ranking_type not in {"MARKET_TRADING_AMOUNT", "MARKET_TRADING_VOLUME", "TOP_GAINERS", "TOP_LOSERS"}:

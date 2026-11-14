@@ -1,9 +1,4 @@
-"""Same elapsed-session-minute RVOL with complete, verified history.
-
-The caller must attest that split/corporate-action handling makes all supplied
-volumes comparable. This function cannot infer that property from OHLCV alone.
-It intentionally returns None when exact comparable observations are missing.
-"""
+"""분할 비교 가능성과 완전한 동일 경과 분 이력을 요구하는 RVOL 계산."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -20,7 +15,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 
 @lru_cache(maxsize=16)
 def _calendar(first_year: int, last_year: int):
-    # Already a project dependency, shared with risk/session validation.
+    # 기존 거래일·위험 관리와 같은 거래소 달력을 사용한다.
     import exchange_calendars as xcals
     return xcals.get_calendar("XNYS", start=f"{first_year}-01-01", end=f"{last_year}-12-31")
 
@@ -37,20 +32,17 @@ def relative_volume(
     symbol: str,
     min_sessions: int = 20,
     corporate_actions_verified: bool = False,
+    observed_at: datetime | None = None,
 ) -> float | None:
-    """Current cumulative volume / mean of prior same-minute cumulatives.
+    """현재 누적 거래량을 직전 동일 경과 분의 평균 누적 거래량으로 나눈다.
 
-    ``current_time`` is an exact completed regular-session minute boundary;
-    ``current_cumulative`` must cover open through that boundary, excluding any
-    current partial minute. The latest ``min_sessions`` prior calendar sessions
-    long enough to reach that elapsed minute are used. Missing one of their
-    required minute bars makes the result unknown: incomplete sessions are not
-    silently replaced by older complete sessions.
+    ``current_time``은 확정 정규장 분 경계다. 현재 누적치는 개장부터 해당 경계까지
+    빠짐없이 포함해야 한다. 해당 경과 분까지 도달하는 직전 ``min_sessions`` 거래일을
+    선택하고, 누락된 최근 거래일을 더 오래된 완전한 날로 대체하지 않는다.
 
-    News/market timestamps are independent of the function's execution clock.
-    Only historical bars received by ``current_time`` can contribute. The
-    caller attests complete current-session coverage and corporate-action-safe,
-    comparable raw/adjusted volumes via ``corporate_actions_verified=True``.
+    ``observed_at``은 이 값을 실제 사용할 때의 확인 가능 시각이다. 생략하면 기존처럼
+    ``current_time``을 쓴다. 종료 경계 뒤에 수신한 과거 페이지도 실제 수신 후에만
+    사용할 수 있다. 호출자는 기업행동/분할 전후 거래량 비교 근거를 별도로 확인한다.
     """
     if not isinstance(min_sessions, int) or isinstance(min_sessions, bool) or min_sessions < 1:
         raise ValueError("min_sessions must be a positive integer")
@@ -58,6 +50,9 @@ def relative_volume(
         return None
     try:
         now = utc(current_time)
+        known = utc(observed_at) if observed_at is not None else now
+        if known < now:
+            return None
     except (TypeError, ValueError, AttributeError):
         return None
     if now.second or now.microsecond:
@@ -99,12 +94,11 @@ def relative_volume(
         except (TypeError, ValueError, AttributeError):
             continue
         bar_day = timestamp.astimezone(NEW_YORK).date()
-        if bar_day not in selected_dates or received > now or received < timestamp:
+        if bar_day not in selected_dates or received > known or received < timestamp:
             continue
         existing = observed[bar_day].get(timestamp)
         if existing is not None:
-            # Identical repeated receipts can be deduplicated. Conflicting
-            # revisions cannot be chosen without an explicit revision policy.
+            # 동일 값의 반복 수신만 합친다. 충돌한 정정본을 임의 선택하지 않는다.
             original = (existing.open, existing.high, existing.low, existing.close, existing.volume)
             revised = (bar.open, bar.high, bar.low, bar.close, bar.volume)
             if original != revised:

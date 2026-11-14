@@ -42,11 +42,15 @@ class Bar:
     low: float
     close: float
     volume: int
+    source: str = "UNKNOWN"
+    price_adjustment: str = "UNKNOWN"
 
     def __post_init__(self):
         symbol_valid(self.symbol)
         utc(self.timestamp); utc(self.received_at)
         whole(self.volume, "volume")
+        if not isinstance(self.source, str) or not self.source or self.price_adjustment not in {"UNKNOWN", "raw", "adjusted"}:
+            raise ValueError("봉 제공처·가격 조정 정책을 확인하세요.")
         for key in ("open", "high", "low", "close"):
             positive(getattr(self, key), key)
         if self.low > min(self.open, self.close) or self.high < max(self.open, self.close) or self.low > self.high or self.volume < 0:

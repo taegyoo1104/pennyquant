@@ -50,6 +50,8 @@ def parser():
         if name == 'watchlist-export':
             cmd.add_argument('--output',type=Path,required=True)
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
+    quality = sub.add_parser('market-data-status',help='저장된 시세·적격성·RVOL 확보율 조회; 외부 호출 없음')
+    quality.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'),help='PAPER_LOCAL 설정 파일')
     run = sub.add_parser("run", help="로컬 MySQL과 토스 읽기 전용 시세로 모의 운영")
     run.add_argument("--config", type=Path, default=Path("config/sessionquant.yaml"), help="운영 설정 YAML")
     run.add_argument("--no-dashboard", action="store_true", help="대시보드 없이 실행")
@@ -122,7 +124,21 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command in {'watchlist-status','watchlist-refresh','watchlist-export'}:
+        if args.command == 'market-data-status':
+            from .session_config import load_session_config
+            from .database.repository import Repository
+            from .market.reporting import current_report
+            from .market.quality import QUALITY_KEY
+            config = load_session_config(args.config)
+            os.environ['SQ_ENVIRONMENT'] = 'PAPER_LOCAL'
+            os.environ['SQ_DB_BACKEND'] = config.database_backend
+            repo = Repository(config.db_path,backend=config.database_backend)
+            try:
+                report = current_report(repo.get_control(QUALITY_KEY,{}))
+                print(json.dumps({'read_only':True,'llm_generation_calls':0,'order_writes':0,**report},ensure_ascii=False,indent=2))
+            finally:
+                repo.close()
+        elif args.command in {'watchlist-status','watchlist-refresh','watchlist-export'}:
             from .session_config import load_session_config
             from .watchlist.commands import command
             report = asyncio.run(command(load_session_config(args.config),args.command,output=getattr(args,'output',None)))

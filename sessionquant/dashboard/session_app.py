@@ -42,6 +42,7 @@ class DashboardData:
     actual_account: dict | None = None
     account_status: dict = field(default_factory=dict)
     watchlist_state: dict = field(default_factory=dict)
+    market_quality: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -100,6 +101,7 @@ def load_database(path: str | Path) -> DashboardData:
         repository = Repository(path)
         result.state = repository.load_state() or {}
         result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
+        result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
         result.actual_account=repository.get_control("actual_account_snapshot")
         result.account_status=repository.get_control("account_monitor_status",{}) or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
@@ -299,6 +301,9 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         else:
             st.caption("중요 경제 일정: 미확인. 일정이 없다는 뜻은 아닙니다.")
     with candidates:
+        if view['environment'] == 'PAPER_LOCAL':
+            from sessionquant.dashboard.market_quality_panel import render_quality
+            render_quality(data.market_quality)
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
             render_watchlist(data.watchlist_state, data.tables['candidates'])

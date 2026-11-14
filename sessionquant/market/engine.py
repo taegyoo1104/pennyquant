@@ -37,10 +37,12 @@ class MarketEngine:
     def __init__(self, universe: UniverseStore, strategy: str = "pullback", *,
                  max_quote_age_seconds: float = 30, max_eligibility_age_seconds: float = 60,
                  max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
-                 min_rvol: float = 1.0, allow_neutral: bool = False, use_market_filter: bool = True):
+                 min_rvol: float = 1.0, allow_neutral: bool = False, use_market_filter: bool = True, strict_data: bool = False):
         if strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
             raise ValueError("지원하지 않는 전략입니다")
         self.universe, self.strategy = universe, strategy
+        self.strict_data = strict_data
+        self.quality_rows = {}
         for name, value in (("max_quote_age_seconds", max_quote_age_seconds),
                             ("max_eligibility_age_seconds", max_eligibility_age_seconds),
                             ("max_spread_pct", max_spread_pct), ("min_dollar_volume", min_dollar_volume),
@@ -121,7 +123,28 @@ class MarketEngine:
         rvol = observed.get("value") if observed.get("verified") and (
             observed["observed_at"] <= now and (now - observed["observed_at"]).total_seconds() <= 330) else None
         eligibility, quote = self.eligibility.get(symbol), self.quotes.get(symbol)
-        if rvol is None:
+        quality = None
+        if self.strict_data:
+            from .quality import bar_quality, rvol_report
+            from .eligibility import field_verified
+            bars = self.bars.get(symbol, [])
+            volume = rvol_report(bars,symbol,data.five[-1].timestamp if data.five else None,now,
+                                 evidence=eligibility.volume_evidence if eligibility else None)
+            rvol = volume['value']
+            valid_eligibility = bool(eligibility and eligibility.symbol == symbol and
+                eligibility.checked_at <= now and (now-eligibility.checked_at).total_seconds() <= self.max_eligibility_age_seconds
+                and eligibility.valid_until and eligibility.valid_until >= now and
+                all(field_verified(eligibility,name,expected,now) and getattr(eligibility,name) is expected
+                    for name,expected in [('tradable',True),('fractional',True),('halted',False),('corporate_action',False)]))
+            quality = {'symbol':symbol,'observed_at':now.isoformat(), 'bars':bar_quality(bars,symbol,now),
+                'rvol':volume, 'eligibility_verified':valid_eligibility,
+                'eligibility_max_age_seconds':self.max_eligibility_age_seconds,
+                'eligibility':jsonable(eligibility) if eligibility else None,
+                'quote_fresh':bool(quote and quote.symbol == symbol and quote.timestamp <= quote.received_at <= now
+                    and all(0 <= (now-t).total_seconds() <= self.max_quote_age_seconds for t in [quote.timestamp,quote.received_at])),
+                'quote_at':quote.timestamp.isoformat() if quote else None,
+                'quote_received_at':quote.received_at.isoformat() if quote else None}
+        elif rvol is None:
             rvol = self.calculate_rvol(symbol, now, comparability_verified=bool(
                 eligibility and eligibility.corporate_action is False and eligibility.volume_history_verified is True
                 and eligibility.checked_at <= now
@@ -130,7 +153,9 @@ class MarketEngine:
                         max_quote_age_seconds=self.max_quote_age_seconds,
                         max_eligibility_age_seconds=self.max_eligibility_age_seconds,
                         max_spread_pct=self.max_spread_pct, min_dollar_volume=self.min_dollar_volume,
-                        min_rvol=self.min_rvol)
+                        min_rvol=self.min_rvol, require_evidence=self.strict_data)
+        if quality and quality['bars']['status'] != 'COMPLETE':
+            blockers.append('minute_history_incomplete_or_stale')
         if self.use_market_filter and (regime.state in {"BEARISH", "UNKNOWN"}
                                        or (regime.state == "NEUTRAL" and not self.allow_neutral)):
             blockers.append(f"market_{regime.state.lower()}")
@@ -145,6 +170,10 @@ class MarketEngine:
         indicator_values = data.to_dict() | {"relative_volume": rvol, "score_components": components,
                                             "sector_strength_known": sector_value is not None,
                                             "market_filter_enabled": self.use_market_filter}
+        if quality is not None:
+            quality['blockers'] = list(dict.fromkeys(blockers))
+            self.quality_rows[symbol] = quality
+            indicator_values['data_quality'] = quality
         return MarketDecision(symbol, not blockers, tuple(blockers), score, regime.state,
                               self.strategy, signal, indicator_values)
 

@@ -142,13 +142,20 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                 from .watchlist.selection import WatchlistManager
                 watchlist = WatchlistManager(repo, universe, config)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
-                                   restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist)
+                                   restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
+                                   strict_market_data=True)
             for snapshot in universe.snapshots:
                 repo.record("universe_history", snapshot)
             if config.source == "toss":
+                def receive_priority(batch):
+                    # 위험 자료는 후보 탐색 완료를 기다리지 않고 단일 작성자 엔진에 전달한다.
+                    raw = batch_events(batch)
+                    raw = [x for x in raw if engine.last_time is None or event_time(x) >= engine.last_time]
+                    engine.apply_batch(raw,datetime.now(timezone.utc))
                 market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
-                    ranking_refresh_seconds=config.ranking_refresh_seconds)
+                    ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
+                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority)
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:
@@ -201,7 +208,8 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     raw = batch_events(batch)
                     # 이전에 받은 봉은 원본 수신 시각을 유지하므로 신규 배치의 커서보다 과거일 수 있다.
                     raw = [x for x in raw if engine.last_time is None or event_time(x) >= engine.last_time]
-                    engine.apply_batch(raw, datetime.now(timezone.utc))
+                    observed_at = datetime.now(timezone.utc)
+                    engine.apply_batch(raw, observed_at, controls={'sq_market_cycle_at':observed_at.isoformat()})
                     for error in batch.errors:
                         repo.log("WARNING", error["message"], source=error["source"], symbol=error["symbol"],
                                  error_type=error["error_type"])

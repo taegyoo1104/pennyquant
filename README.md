@@ -1,6 +1,8 @@
 # SessionQuant
 
 현재 실행 경로는 [SESSIONQUANT_CURRENT.md](docs/SESSIONQUANT_CURRENT.md), 새 감시 정책은 [단계 01](docs/STAGE01_WATCHLIST.md)을 따릅니다. **`run`은 시총 감시 최대 100 → 집중 분석 최대 20의 PAPER_LOCAL 경로입니다.** 검증된 시총 공급 파일이 없으면 UNKNOWN으로 표시하고 신규 진입을 차단합니다. S&P 500 전체 편입 원장과 기존 보유·미체결 위험 관리는 유지합니다.
+
+[단계 02 시세·자격·RVOL 품질 안내](docs/STAGE02_MARKET_DATA.md): `run`은 근거·만료를 검사하고 위험 자료를 후보 탐색 전에 전달합니다. `market-data-status`로 확보율과 부족 입력을 조회합니다. 실제 토스 계좌 자격·분할 거래량 비교 근거가 없는 항목은 UNKNOWN을 유지합니다.
  2.1
 
 S&P 500 구성 종목의 장중 추세와 SPY·QQQ 시장 방향, 기업·경제 뉴스를 함께 확인하는 Python 3.12 이상 모의매매 시스템입니다. 일반 `run`은 Paper Trading 전용입니다. Phase 5의 첫 1종목 소액 실주문 검증 경로 `live-local`이 추가됐으며 기본은 주문 없는 계좌 검사입니다. 실제 계좌 검증과 완전 자동 실거래 연결은 별도 단계이고 GCP 배포는 Phase 6 범위입니다.

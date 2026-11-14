@@ -33,13 +33,14 @@ def event_time(raw: dict) -> datetime:
 class SessionEngine:
     def __init__(self, repository: Repository, universe: UniverseStore, *, strategy: str = "pullback",
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
-                 synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None):
+                 synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
+                 strict_market_data: bool = False):
         self.control_state=control_state
         self.watchlist_policy=watchlist_policy
         self.repo, self.universe = repository, universe
         self.strategy, self.synthetic, self.use_news = strategy, synthetic, use_news
         self.use_market_filter = use_market_filter
-        self.market = MarketEngine(universe, strategy, use_market_filter=use_market_filter)
+        self.market = MarketEngine(universe, strategy, use_market_filter=use_market_filter, strict_data=strict_market_data)
         self.broker = PaperBroker(settings or PortfolioSettings())
         self.failed = False
         self.risk_provider = risk_provider
@@ -57,6 +58,7 @@ class SessionEngine:
             if not restore:
                 raise ValueError("이미 저장된 상태가 있습니다. 복구 옵션 또는 별도 DB를 사용하세요.")
             if (stored.get("schema_version") != 2 or stored.get("environment") != "PAPER_LOCAL"
+                    or (stored.get('strict_market_data',False) and not strict_market_data)
                     or stored.get("strategy") != strategy or stored.get("synthetic") != synthetic
                     or stored.get("use_news", True) != use_news
                     or stored.get("use_market_filter", True) != use_market_filter):
@@ -156,6 +158,7 @@ class SessionEngine:
         self.dirty_symbols.clear()
         broker_state = self.broker.to_state()
         state = {"schema_version": 2, "environment": "PAPER_LOCAL", "strategy": self.strategy,
+                 "strict_market_data":self.market.strict_data,
                  "synthetic": self.synthetic, "use_news": self.use_news, "use_market_filter": self.use_market_filter, "broker": broker_state,
                  "cursor": self.cursor, "last_time": self.last_time.isoformat() if self.last_time else None,
                  "market_symbols": sorted(self.market_symbols), "consumed_signals": sorted(self.consumed_signals),
@@ -185,6 +188,9 @@ class SessionEngine:
                    "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else "ENABLED",
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         self.repo.set_control("sessionquant_context", context)
+        if self.market.strict_data:
+            from .market.reporting import persist_quality
+            persist_quality(self,now)
         self.repo.set_control("runtime_kind", "sessionquant")
         self._last_summary = broker_state
         self._last_persist_at = now
@@ -257,6 +263,8 @@ class SessionEngine:
                             decision = replace(decision, eligible=False, signal=None,
                                 blockers=tuple(dict.fromkeys([*decision.blockers, *scope_blockers])))
                     decisions.append((decision, risk))
+                    if self.market.strict_data:
+                        self.market.quality_rows[symbol]['blockers'] = list(decision.blockers)
                     self.repo.record("candidates", {"id": symbol, "timestamp": now, **decision.to_dict(), "news_risk": risk})
                 for decision, risk in sorted(decisions, key=lambda item: (-item[0].score, item[0].symbol)):
                     signal = decision.signal

@@ -19,6 +19,10 @@ symbols_per_cycle: 2
 max_api_calls_per_cycle: 24
 light_refresh_seconds: 30
 ranking_refresh_seconds: 60
+# 후보 탐색은 남은 시간 안에서만 수행하며 위험 호가를 먼저 전달한다.
+max_cycle_seconds: 15
+# 과거 분봉은 남은 호출 예산에서 최대 1페이지씩 보충한다. 0이면 중단한다.
+history_pages_per_cycle: 1
 poll_seconds: 10
 news_enabled: true
 news_refresh_seconds: 600
