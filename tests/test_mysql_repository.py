@@ -85,7 +85,10 @@ def test_record_uses_hashed_identity_and_bound_json_without_sql_interpolation(co
     repo = repository(connection)
     record = {"id": "long:" + "x" * 1000, "title": "한글 quote ' ; DROP TABLE pq_orders"}
     repo.record("news_analysis", record)
-    sql, params = connection.calls[-1]
+    # 연구 기록 상태 조회가 뒤따르므로 검증할 원본 INSERT를 명시적으로 선택한다.
+    inserts = [(sql,params) for sql,params in connection.calls if sql.startswith("INSERT INTO pq_news_analysis(")]
+    assert len(inserts) == 1
+    sql,params = inserts[0]
     assert "DROP TABLE" not in sql and len(params[2]) == 32
     assert json.loads(params[3]) == record and params[0] == "system"
     before = len(connection.calls)

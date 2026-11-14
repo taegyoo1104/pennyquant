@@ -15,7 +15,7 @@ KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_even
          "alerts", "pipeline_status", "order_intents", "broker_state",
          "market_regimes", "macro_news", "macro_analysis", "llm_usage", "session_state",
          "universe_history", "reconciliations", "account_snapshots", "schema_migrations",
-         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations")
+         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events")
 
 
 class Repository:
@@ -42,8 +42,8 @@ class Repository:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS {name} (seq INTEGER PRIMARY KEY, record_id TEXT UNIQUE, payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS engine_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS controls (name TEXT PRIMARY KEY, payload TEXT NOT NULL)")
-        if self.db.execute("PRAGMA user_version").fetchone()[0] < 3:
-            self.db.execute("PRAGMA user_version=3")
+        if self.db.execute("PRAGMA user_version").fetchone()[0] < 4:
+            self.db.execute("PRAGMA user_version=4")
         self.db.commit()
         self._in_transaction = False
 
@@ -79,7 +79,13 @@ class Repository:
         if not isinstance(data, dict):
             raise ValueError("record must be object")
         rid = record_identity(kind, data)
-        self.import_record(kind, data, rid)
+        from ..research.journal import KINDS as RECORDED, capture_record
+        if kind in RECORDED or (kind == 'pipeline_status' and data.get('kind') == 'watchlist_focus'):
+            with self.transaction():
+                self.import_record(kind, data, rid)
+                capture_record(self,kind,data)
+        else:
+            self.import_record(kind, data, rid)
 
     def import_record(self, kind: str, value: dict, record_id: str | None) -> None:
         """기존 SQLite 기록의 원래 식별자를 그대로 이관한다."""
@@ -90,6 +96,18 @@ class Repository:
         self.db.execute(f"INSERT INTO {kind}(record_id,payload) VALUES (?,?) ON CONFLICT(record_id) DO UPDATE SET payload=excluded.payload",
                         (rid, dumps(data)))
         self._commit()
+
+    def iter_records(self, kind, *, batch_size=500):
+        """원본 순번을 유지하며 제한된 페이지로 큰 기록을 읽는다."""
+        if kind not in KINDS or type(batch_size) is not int or not 1 <= batch_size <= 2000:
+            raise ValueError('기록 종류·페이지 크기를 확인하세요.')
+        after = 0
+        while True:
+            rows = self.db.execute(f'SELECT seq,payload FROM {kind} WHERE seq>? ORDER BY seq LIMIT ?', (after,batch_size)).fetchall()
+            if not rows:break
+            for seq,payload in rows:
+                after = seq
+                yield seq,json.loads(payload)
 
     def all(self, kind: str) -> list[dict]:
         if kind not in KINDS:
@@ -155,9 +173,11 @@ class Repository:
         return json.loads(row[0]) if row else None
 
     def set_control(self, name: str, value) -> None:
-        self.db.execute("INSERT INTO controls VALUES(?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
-                        (name, dumps(value)))
-        self._commit()
+        from ..research.journal import CONTROLS, capture_control
+        with self.transaction():
+            self.db.execute("INSERT INTO controls VALUES(?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload",
+                            (name, dumps(value)))
+            if name in CONTROLS:capture_control(self,name,value)
 
     def get_control(self, name: str, default=None):
         row = self.db.execute("SELECT payload FROM controls WHERE name=?", (name,)).fetchone()

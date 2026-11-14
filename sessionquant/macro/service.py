@@ -142,6 +142,19 @@ class NewsPipeline:
         except (ValueError, TypeError, KeyError, AttributeError):
             return False
 
+    def recorded_evidence(self,now,symbol):
+        """당시 위험 조회에 사용 가능한 분석 버전만 기록하며 재분석하지 않는다."""
+        from ..portfolio.models import serialize
+        rows = [row for row in self._analyses.values() if self._recent(row,now)
+                and (row.get('category') != 'company' or row.get('ticker') == symbol)]
+        analyses = []
+        for row in rows:
+            event = row.get('event') or {}
+            analyses.append({key:row.get(key) for key in ('id','model','prompt_version','analyzed_at','error')} | {
+                'published_at':row.get('published_at') or event.get('published_at'),
+                'received_at':row.get('received_at') or event.get('received_at')})
+        return serialize({'analyses':analyses,'economic_events':[event for event in self._economic.values() if event.blackout(now)]})
+
     def risk_context(self, now: datetime, symbol: str | None = None) -> dict:
         now = utc(now)
         reasons, major_adverse, available = [], False, False

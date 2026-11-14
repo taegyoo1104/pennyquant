@@ -101,6 +101,9 @@ def _session_exit_rate(state):
 
 
 def compare_session(input_path: Path, universe_path: Path, report: Path, *, settings=None, synthetic=False):
+    report = Path(report)
+    if report.suffix.lower() != '.json' or report.exists() or report.with_suffix('.md').exists():
+        raise ValueError('기존 보고서를 덮어쓰지 않습니다. 새 .json 경로를 지정하세요.')
     settings = settings or PortfolioSettings()
     variants = [(name, name, settings, True, True) for name in ("momentum", "pullback", "gap_breakout", "vwap")]
     variants += [("pullback_no_add", "pullback", replace(settings, allow_adds=False), True, True),
@@ -124,11 +127,12 @@ def compare_session(input_path: Path, universe_path: Path, report: Path, *, sett
                                "미청산 포지션은 매수호가로 평가합니다. 미래 청산 비용·LLM·인프라 비용은 차감되지 않았습니다.",
                                "legacy_limit_v1은 이전 가격제한 연구 모델이며 시장가 성과와 구분합니다."]}
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    with report.open('x',encoding='utf-8') as stream:
+        json.dump(payload,stream,ensure_ascii=False,indent=2,allow_nan=False)
     lines = ["# SessionQuant 전략 비교", "", "합성 검증 자료이며 실제 수익률이 아닙니다." if synthetic else "사용자가 제공한 기록을 재생한 결과입니다.", "",
              "| 실험 | 체결 모델 | 완료 거래 | 비용 차감 수익률 | 최대 낙폭 | 수수료 | 미청산 |", "|---|---|---:|---:|---:|---:|---:|"]
     for label, item in results.items():
         lines.append(f"| {label} | {item['fill_model_version']} | {item['trades']} | {item['return_pct']:.3f}% | {item['max_drawdown_pct']:.3f}% | ${item['fees_usd']} | {item['open_positions']} |")
     lines += ["", *payload["limitations"], "", "LLM·서버 비용은 제외되어 있습니다. 운영 DB의 llm_usage와 실제 인프라 청구서를 별도로 확인하세요."]
-    report.with_suffix(".md").write_text("\n\n".join(lines), encoding="utf-8")
+    with report.with_suffix('.md').open('x',encoding='utf-8') as stream:stream.write('\n\n'.join(lines))
     return payload

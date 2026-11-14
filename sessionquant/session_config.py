@@ -34,6 +34,7 @@ class SessionConfig:
     history_pages_per_cycle: int = 1
     market_reference: dict = field(default_factory=dict)
     macro_reference_filter: dict = field(default_factory=dict)
+    recording_enabled: bool = True
     news_enabled: bool = True
     include_alpaca: bool = True
     company_rss_catalog: bool = True
@@ -67,6 +68,7 @@ class SessionConfig:
                 raise ValueError(f"{name}은 {minimum}초 이상이어야 합니다.")
         if type(self.symbols_per_cycle) is not int or not 1 <= self.symbols_per_cycle <= 10:
             raise ValueError("symbols_per_cycle은 1~10의 정수여야 합니다.")
+        if type(self.recording_enabled) is not bool:raise ValueError('연구 기록 설정은 불리언이어야 합니다.')
         if (type(self.news_enabled) is not bool or type(self.include_alpaca) is not bool
                 or type(self.company_rss_catalog) is not bool):
             raise ValueError("뉴스 사용 설정은 true 또는 false여야 합니다.")

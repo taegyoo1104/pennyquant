@@ -52,6 +52,29 @@ def parser():
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
     quality = sub.add_parser('market-data-status',help='저장된 시세·적격성·RVOL 확보율 조회; 외부 호출 없음')
     quality.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'),help='PAPER_LOCAL 설정 파일')
+    export = sub.add_parser('record-export',help='중지한 PAPER 원장에서 시점 보존 연구 묶음 내보내기')
+    export.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
+    export.add_argument('--out',type=Path,required=True,help='새 출력 폴더')
+    export.add_argument('--run-id',help='특정 실행 기록만 선택; 첫 시작이 빈 모의 계좌여야 재생 가능')
+    recorded_quality = sub.add_parser('record-quality',help='연구 묶음의 해시·시각·누락·확보율 검사; 외부 호출 없음')
+    recorded_quality.add_argument('--bundle',type=Path,required=True)
+    recorded_replay = sub.add_parser('replay-recording',help='전략 처리 시계를 보존한 격리 SQLite Paper 재생')
+    recorded_replay.add_argument('--bundle',type=Path,required=True)
+    recorded_replay.add_argument('--db',type=Path,required=True,help='새 모의 재생 SQLite 파일')
+    recorded_replay.add_argument('--policy',choices=('baseline','shadow','reference','fail_closed'),default='baseline')
+    recorded_replay.add_argument('--strategy',choices=('momentum','pullback','gap_breakout','vwap'))
+    recorded_replay.add_argument('--no-news',action='store_true')
+    recorded_replay.add_argument('--resume',action='store_true')
+    study = sub.add_parser('evaluate-recording',help='고정 정책·뉴스 기여·시간순 외표본 비교; 실거래·LLM 호출 없음')
+    study.add_argument('--bundle',type=Path,required=True)
+    study.add_argument('--report',type=Path,required=True)
+    study.add_argument('--strategy',choices=('all','momentum','pullback','gap_breakout','vwap'),default='all')
+    study.add_argument('--train-days',type=int,default=20)
+    study.add_argument('--validation-days',type=int,default=5)
+    study.add_argument('--holdout-days',type=int,default=5)
+    study.add_argument('--min-trades',type=int,default=30)
+    study.add_argument('--api-cost-usd',help='해당 기록 기간의 확인된 API 실비 USD; 미확인이면 생략')
+    study.add_argument('--infrastructure-cost-usd',help='해당 기록 기간의 확인된 운영 실비 USD; 미확인이면 생략')
     run = sub.add_parser("run", help="로컬 MySQL과 토스 읽기 전용 시세로 모의 운영")
     run.add_argument("--config", type=Path, default=Path("config/sessionquant.yaml"), help="운영 설정 YAML")
     run.add_argument("--no-dashboard", action="store_true", help="대시보드 없이 실행")
@@ -132,7 +155,36 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == 'market-data-status':
+        if args.command == 'record-export':
+            from .session_config import load_session_config
+            from .session_runtime import _open
+            from .research.bundle import export_recording
+            config = load_session_config(args.config)
+            os.environ['SQ_DB_BACKEND'] = config.database_backend
+            os.environ['SQ_ENVIRONMENT'] = 'PAPER_LOCAL'
+            stack,repo = _open(config.db_path,config.database_backend)
+            with stack: result = export_recording(repo,args.out,run_id=args.run_id)
+            print(json.dumps({'output':str(args.out),'records':result['record_count'],
+                'bundle_id':result['bundle_id'],'data_validation':result['data_validation'],'live_order_writes':0},ensure_ascii=False,indent=2))
+        elif args.command == 'record-quality':
+            from .research.bundle import load_bundle
+            from .research.quality import quality_report
+            load_bundle(args.bundle)
+            print(json.dumps(quality_report(args.bundle/'events.jsonl'),ensure_ascii=False,indent=2))
+        elif args.command == 'replay-recording':
+            from .research.replay import replay_recording
+            result = replay_recording(args.bundle,args.db,strategy=args.strategy,policy=args.policy,
+                use_news=not args.no_news,resume=args.resume)
+            print(json.dumps({'db':str(args.db),'fills':len(result['fills']),'policy':result['policy'],
+                'equity':result['state']['equity'],'live_order_writes':0,'llm_generation_calls':0},ensure_ascii=False,indent=2))
+        elif args.command == 'evaluate-recording':
+            from .research.evaluation import evaluate_recording
+            result = evaluate_recording(args.bundle,args.report,strategy=args.strategy,train_days=args.train_days,
+                validation_days=args.validation_days,holdout_days=args.holdout_days,min_trades=args.min_trades,
+                api_cost_usd=args.api_cost_usd,infrastructure_cost_usd=args.infrastructure_cost_usd)
+            print(json.dumps({'report':str(args.report),'split_status':result['split_plan']['status'],
+                'actual_out_of_sample_validated':False,'live_order_writes':0,'llm_generation_calls':0},ensure_ascii=False,indent=2))
+        elif args.command == 'market-data-status':
             from .session_config import load_session_config
             from .database.repository import Repository
             from .market.reporting import current_report

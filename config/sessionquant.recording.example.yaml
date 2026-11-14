@@ -1,0 +1,34 @@
+# 05단계의 새 PAPER 기록 공간. 실제 주문·뉴스/LLM 호출은 하지 않는다.
+# .env에 SQ_DB_NAMESPACE가 고정되어 있다면 수집·내보내기에 같은 새 이름을 지정한다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-recording-v1.db
+universe_path: ../data/sp500-universe.json
+source: toss
+strategy: pullback
+recording_enabled: true
+watchlist_enabled: true
+watchlist_size: 100
+focus_size: 20
+market_cap_input: ../data/market-cap-input.json
+symbols_per_cycle: 2
+max_api_calls_per_cycle: 24
+history_pages_per_cycle: 1
+news_enabled: false
+include_alpaca: false
+company_rss_catalog: false
+market_reference:
+  enabled: true
+  price_seconds: 30
+  candle_seconds: 180
+  calls_per_cycle: 2
+macro_reference_filter:
+  enabled: false
+  paper_shadow_only: true
+portfolio:
+  initial_cash: '100'
+  paper_fill_model: market_v2
+  paper_latency_seconds: '1'
+  paper_cancel_latency_seconds: '0'
+  slippage_rate: '0.001'
+  min_entry_to_exit_minutes: 30

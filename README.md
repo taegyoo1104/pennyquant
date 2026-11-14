@@ -6,7 +6,9 @@
 
 [단계 03 Paper 체결 안내](docs/STAGE03_PAPER_FILLS.md): 새 모의 체결 기본값은 `market_v2`입니다. 기존 가격제한 장부와 섞지 않도록 새 DB 설정 예시를 제공합니다. 실제 주문 연결은 변경하지 않았습니다.
 
-[단계 04 전략·위험·청산 결과](docs/STAGE04_STRATEGY_RISK_EXIT.md): 추가매수 위험 재계산·취소 확인 후 잔량 청산·오프라인 매개변수 비교를 보완했습니다. 시장 참고 ETF 위험 감시는 기본 OFF·관찰 전용입니다. 실제 공급자/계좌 검증과 05 외표본 결과 전에는 매매 필터를 활성화하지 않습니다. [00~04 점검](docs/REVISION_00_04_AUDIT.md)을 참고하며 05 이후는 사용자 별도 승인 후 진행합니다.
+[단계 04 전략·위험·청산 결과](docs/STAGE04_STRATEGY_RISK_EXIT.md): 추가매수 위험 재계산·취소 확인 후 잔량 청산·오프라인 매개변수 비교를 보완했습니다. 시장 참고 ETF 위험 감시는 기본 OFF·관찰 전용입니다. 실제 공급자/계좌 검증과 외표본 결과 전에는 운영 매매 필터를 활성화하지 않습니다. [00~04 점검](docs/REVISION_00_04_AUDIT.md)을 참고하세요.
+
+[단계 05 실데이터 기록·재생·평가](docs/STAGE05_RECORDING_BACKTEST.md): `run`의 실제 처리 시계와 분석 버전을 별도 원장에 기록하고 `record-export`, `record-quality`, `replay-recording`, `evaluate-recording`으로 검증합니다. 새 기록 설정은 [sessionquant.recording.example.yaml](config/sessionquant.recording.example.yaml)입니다. 실제 장기간 기록·외표본 효과는 아직 미검증이며, 06 이후는 별도 승인 후 진행합니다. 이 단계 05는 아래에서 언급하는 기존 Phase 5 실거래 기능과 구분합니다.
  2.1
 
 S&P 500 구성 종목의 장중 추세와 SPY·QQQ 시장 방향, 기업·경제 뉴스를 함께 확인하는 Python 3.12 이상 모의매매 시스템입니다. 일반 `run`은 Paper Trading 전용입니다. Phase 5의 첫 1종목 소액 실주문 검증 경로 `live-local`이 추가됐으며 기본은 주문 없는 계좌 검사입니다. 실제 계좌 검증과 완전 자동 실거래 연결은 별도 단계이고 GCP 배포는 Phase 6 범위입니다.

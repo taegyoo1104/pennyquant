@@ -128,6 +128,9 @@ class MySQLRepository:
         self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(3,%s)",
                       ("시장 참조 ETF 관측·계산과 FRED 일별 수신 이력 분리",))
 
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(4,%s)",
+                      ("실제 수신·분석·전략 처리 시점의 불변 연구 기록",))
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         with self._mutex:
@@ -194,7 +197,13 @@ class MySQLRepository:
         data = exact_jsonable(value)
         if not isinstance(data, dict):
             raise ValueError("기록은 JSON 객체여야 합니다")
-        self.import_record(kind, data, record_identity(kind, data))
+        from ..research.journal import KINDS as RECORDED, capture_record
+        if kind in RECORDED or (kind == 'pipeline_status' and data.get('kind') == 'watchlist_focus'):
+            with self.transaction():
+                self.import_record(kind,data,record_identity(kind,data))
+                capture_record(self,kind,data)
+        else:
+            self.import_record(kind,data,record_identity(kind,data))
 
     def import_record(self, kind: str, value: dict, record_id: str | None) -> None:
         """원래 기록 ID를 유지하며 JSON 원장과 금융 수치 투영을 함께 저장한다."""
@@ -282,6 +291,19 @@ class MySQLRepository:
                 return True
         return False
 
+    def iter_records(self,kind,*,batch_size=500):
+        """다른 네임스페이스를 읽지 않는 순번 기반 페이지 조회."""
+        table = self._kind(kind)
+        if type(batch_size) is not int or not 1 <= batch_size <= 2000:raise ValueError('페이지 크기를 확인하세요.')
+        after = 0
+        while True:
+            rows = self._execute(f'SELECT seq,payload FROM {table} WHERE namespace=%s AND seq>%s ORDER BY seq LIMIT %s',
+                                 (self.namespace,after,batch_size),fetch='all')
+            if not rows:break
+            for seq,payload in rows:
+                after = seq
+                yield seq,json.loads(payload) if isinstance(payload,str) else payload
+
     def all(self, kind: str) -> list[dict]:
         rows = self._execute(f"SELECT payload FROM {self._kind(kind)} WHERE namespace=%s ORDER BY seq",
                              (self.namespace,), fetch="all")
@@ -323,8 +345,11 @@ class MySQLRepository:
     def set_control(self, name: str, value) -> None:
         self._control_name(name)
         payload = self._json(value)
-        self._execute("INSERT INTO pq_controls(namespace,name,payload) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE payload=%s",
-                      (self.namespace, name, payload, payload))
+        from ..research.journal import CONTROLS, capture_control
+        with self.transaction():
+            self._execute("INSERT INTO pq_controls(namespace,name,payload) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE payload=%s",
+                          (self.namespace,name,payload,payload))
+            if name in CONTROLS:capture_control(self,name,value)
 
     def get_control(self, name: str, default=None):
         self._control_name(name)

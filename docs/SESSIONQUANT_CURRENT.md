@@ -12,6 +12,8 @@
 | `demo` / `replay` / `backtest` | 합성 또는 수신 기록 → 별도 모의 장부 | 외부 실주문 없음. 최신 감시목록을 과거에 자동 적용하지 않음 |
 | `watchlist-refresh` | 검증된 로컬 시총 입력 → PAPER 선택 이력 | 외부 API·주문 없음. 실행 중인 작성자와 파일 잠금 공유 |
 | `market-data-status` | PAPER 품질 보고서 → 만료·확보율 재검사 | 외부 API·주문·LLM 호출 없음 |
+| `record-export` / `record-quality` | 중지한 PAPER 원장 → 불변 처리 시점 묶음 → 무결성·품질 | 새 파일만 생성, 외부 API·실주문·LLM 호출 없음 |
+| `replay-recording` / `evaluate-recording` | 처리 시계·당시 뉴스/참고 자료 → 격리 SQLite Paper → 고정 정책·외표본 구간 진단 | 운영 장부·위험 필터 활성화 없음, 실제 성과는 미검증 |
 | `watchlist-status` / `watchlist-export` | PAPER 감시·집중 이력 조회 | 주문·LLM 생성 없음 |
 | `legacy` / 이전 호환 수집 명령 | `legacy_cli` 및 이전 PennyQuant 경로 | 현재 100→20 정책과 분리. 별도 매뉴얼 참조 |
 
@@ -42,4 +44,4 @@
 
 단계 03부터 새 Paper 기본 체결은 `market_v2`다. 기존 버전 1 장부는 `legacy_limit_v1`으로 복구하며 기본 시장가 장부로 자동 전환하지 않는다. [새 실행 공간·호환 방법](STAGE03_PAPER_FILLS.md)을 먼저 확인한다. `run-account`, 제한적 `live-local`의 실제 주문 연결은 이 변경에 포함하지 않았다.
 
-최신 개정의 [00~04 점검](REVISION_00_04_AUDIT.md), [02 참고 ETF 보완](STAGE02_MARKET_DATA.md), [04 전략·위험·청산 결과](STAGE04_STRATEGY_RISK_EXIT.md)를 함께 확인한다. `market_reference`는 거래 100/집중 20 정원 밖의 읽기 전용 관측이다. `macro_reference_filter` 기본값은 OFF·shadow이며 운영 매매 적용은 아직 허용하지 않는다. `risk-experiments`는 기존 기록을 임시 SQLite로 비교하는 오프라인 명령으로, 실제 수집·05 외표본 검증·실거래 활성화 기능이 아니다. 05부터는 단계별 별도 승인 후 진행한다.
+최신 개정의 [00~04 점검](REVISION_00_04_AUDIT.md), [02 참고 ETF 보완](STAGE02_MARKET_DATA.md), [04 전략·위험·청산 결과](STAGE04_STRATEGY_RISK_EXIT.md), 승인된 [05 기록·재생·평가](STAGE05_RECORDING_BACKTEST.md)를 함께 확인한다. `market_reference`는 거래 100/집중 20 정원 밖의 읽기 전용 관측이다. `macro_reference_filter` 기본값은 OFF·shadow이며 운영 매매 적용은 아직 허용하지 않는다. `risk-experiments`는 기존 자료의 손절·익절 가설 비교이며, 새 기록의 시점 정합 평가와 홀드아웃 계획은 `evaluate-recording`을 사용한다. 실제 장기간 데이터와 효과 검증은 미완료다. 06부터는 단계별 별도 승인 후 진행한다.

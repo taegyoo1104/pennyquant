@@ -327,3 +327,37 @@ def test_real_mysql_strategy_risk_latch_and_pending_cancel_survive_restore(mysql
     assert not [o for o in restored.broker.orders.values() if o.intent.side == 'sell']
     assert restored_monitor.state['latched']
     assert reader.get_control('sessionquant_context')['risk_policy_version'] == 2
+
+
+def test_real_mysql_research_journal_revisions_rollback_and_namespace(mysql_repositories,monkeypatch,tmp_path):
+    """원래 분석 ID는 유지하고 별도 불변 기록·익명화·원자 복구를 검사한다."""
+    from sessionquant.research import journal
+    from sessionquant.research.bundle import export_recording,load_bundle
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.session_engine import SessionEngine
+    from test_paper_market_fills import NOW
+    repo,other=mysql_repositories(),mysql_repositories()
+    clock=[NOW]
+    monkeypatch.setattr(journal,'clock',lambda:clock[0])
+    engine=SessionEngine(repo,UniverseStore(),synthetic=True,record_inputs=True)
+    journal.start(repo,engine,source='toss')
+    repo.record('news_analysis',{'id':'same','model':'fixture','sentiment':'NEUTRAL','analyzed_at':NOW.isoformat()})
+    clock[0]+=timedelta(seconds=1)
+    repo.record('news_analysis',{'id':'same','model':'fixture','sentiment':'NEGATIVE','analyzed_at':NOW.isoformat()})
+    assert len(repo.all('news_analysis'))==1
+    assert len([row for row in repo.all('research_events') if row['kind']=='news_analysis'])==2
+    count=len(repo.all('research_events'))
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            repo.record('news_analysis',{'id':'rollback','model':'fixture'})
+            raise RuntimeError('원자성 검사')
+    assert repo.get_record('news_analysis','rollback') is None and len(repo.all('research_events'))==count
+    reader=mysql_repositories(repo.namespace)
+    assert list(reader.iter_records('research_events'))==list(repo.iter_records('research_events'))
+    assert list(other.iter_records('research_events'))==[]
+    journal.stop(repo)
+    output=tmp_path/'mysql-bundle';export_recording(reader,output)
+    assert load_bundle(output)['record_count']>0
+    with reader.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=4')
+        assert cursor.fetchone()[0]==4

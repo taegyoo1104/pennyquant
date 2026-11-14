@@ -35,11 +35,15 @@ class SessionEngine:
     def __init__(self, repository: Repository, universe: UniverseStore, *, strategy: str = "pullback",
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
-                 strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None):
+                 strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False):
+        self.record_inputs = record_inputs
+        self._batch_decisions = []
+        self._batch_news_contexts = {}
+        self._batch_scope_blockers = None
         self.macro_reference_risk = macro_reference_risk
         self.reference_risk_status = {}
-        if macro_reference_risk is not None and macro_reference_risk.effective_enabled and not synthetic:
-            raise ValueError('위험 필터 ON 정책은 격리 합성 연구에서만 검증할 수 있습니다.')
+        if macro_reference_risk is not None and macro_reference_risk.effective_enabled and not synthetic and not research_replay:
+            raise ValueError('위험 필터 ON 정책은 격리 합성 연구 또는 승인된 오프라인 기록 재생에서만 검증할 수 있습니다.')
         self.control_state=control_state
         self.watchlist_policy=watchlist_policy
         self.repo, self.universe = repository, universe
@@ -95,6 +99,16 @@ class SessionEngine:
         self.exit_manager = SessionExitManager(self.broker)
 
     def risk_context(self, now: datetime, symbol: str) -> dict:
+        context = self._risk_context(now,symbol)
+        if self.record_inputs:
+            try:
+                evidence = self.risk_provider.recorded_evidence(now,symbol) if self.risk_provider and hasattr(self.risk_provider,'recorded_evidence') else {}
+            except Exception as error:
+                evidence = {'error_type':type(error).__name__,'analyses':[],'economic_events':[]}
+            self._batch_news_contexts[symbol] = {'context':context,'evidence':evidence,'available_at':now.isoformat()}
+        return context
+
+    def _risk_context(self, now: datetime, symbol: str) -> dict:
         empty = {"status": "UNKNOWN", "block_entries": False, "major_adverse": False,
                  "blackout": False, "reasons": ["뉴스 상태 미확인"]}
         if not self.use_news:
@@ -240,6 +254,9 @@ class SessionEngine:
             if available > now or (previous and available < previous):
                 raise ValueError("이벤트가 미래 자료이거나 수신 시각 순서가 뒤바뀌었습니다.")
             previous = available
+        self._batch_decisions = []
+        self._batch_news_contexts = {}
+        self._batch_scope_blockers = {} if self.watchlist_policy is not None else None
         try:
             with self.repo.transaction():
                 for raw in events:
@@ -300,14 +317,19 @@ class SessionEngine:
                     risk = self.risk_context(now, symbol)
                     decision = self.market.evaluate(symbol, now, news_blocked=bool(risk.get("block_entries") or risk.get("blackout")))
                     if reference_blocked:
+                        if decision.signal is not None:
+                            self.repo.record('pipeline_status',{'id':'reference-block:'+decision.signal.id, 'kind':'reference_entry_block',
+                                'signal_id':decision.signal.id,'symbol':symbol,'timestamp':now,'status':self.reference_risk_status.get('status')})
                         decision = replace(decision, eligible=False, signal=None,
                             blockers=tuple(dict.fromkeys([*decision.blockers, 'macro_reference_risk_restriction'])))
                     if self.watchlist_policy is not None:
                         scope_blockers = self.watchlist_policy.entry_blockers(symbol, now)
+                        self._batch_scope_blockers[symbol] = list(scope_blockers)
                         if scope_blockers:
                             decision = replace(decision, eligible=False, signal=None,
                                 blockers=tuple(dict.fromkeys([*decision.blockers, *scope_blockers])))
                     decisions.append((decision, risk))
+                    self._batch_decisions.append(decision.to_dict())
                     if self.market.strict_data:
                         self.market.quality_rows[symbol]['blockers'] = list(decision.blockers)
                     self.repo.record("candidates", {"id": symbol, "timestamp": now, **decision.to_dict(), "news_risk": risk})
@@ -335,7 +357,7 @@ class SessionEngine:
                     self.repo.record('pipeline_status',{'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
                         'timestamp':now,'approved':allocation.approved,'reason':allocation.reason,'audit':allocation.audit,'exit_policy':serialize(self.exit_policy)})
                     if allocation.approved:
-                        self.repo.record("order_intents", serialize(allocation.intent)|{'risk_audit':allocation.audit,'risk_policy_version':2})
+                        self.repo.record("order_intents", serialize(allocation.intent)|{'signal_id':signal.id,'risk_audit':allocation.audit,'risk_policy_version':2})
                         self.broker.submit_order(allocation.intent)
                         self.consumed_signals.add(signal.id)
                 session_status = self.exit_manager.snapshot(now,orders=session_status['orders'])
@@ -346,6 +368,9 @@ class SessionEngine:
                 heartbeat_due = self._last_persist_at is None or (now - self._last_persist_at).total_seconds() >= 30
                 if events or changed or heartbeat_due or controls:
                     self._persist(now, session_status)
+                if self.record_inputs:
+                    from .research.journal import frame
+                    frame(self,events,now,manual_halt=manual_halt)
                 for name, value in (controls or {}).items():
                     self.repo.set_control(name, value)
         except BaseException:
