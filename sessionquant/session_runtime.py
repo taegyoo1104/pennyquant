@@ -109,7 +109,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             raise ValueError("유효한 S&P 500 구성 이력이 없습니다. universe-refresh 또는 출처가 있는 이력을 준비하세요.")
         await universe.refresh_public()
     stack, repo = _open(config.db_path, config.database_backend)
-    market = news = market_task = news_task = dashboard = None
+    market = news = market_task = news_task = account_task = dashboard = None
     notifier = DesktopNotifier(enabled=desktop_notifications)
     engine = None
     with stack:
@@ -138,12 +138,25 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     "--", "--db", str(config.db_path)], env=dashboard_environment(database=True))
                 print(f"SessionQuant 모의매매 대시보드: http://127.0.0.1:{port}", flush=True)
             print("PAPER_LOCAL 실행 중입니다. 실제 주문은 비활성화되어 있습니다.", flush=True)
+            next_account=0.
             cycles, next_market, next_news, next_tick, next_universe = 0, 0., 0., 0., time.monotonic() + 86400
             while max_cycles is None or cycles < max_cycles:
                 current, monotonic = datetime.now(timezone.utc), time.monotonic()
                 if market and market_task is None and monotonic >= next_market:
                     market_task = asyncio.create_task(market.poll(list(universe.members(current)),
                                                       priority_symbols=list(engine.broker.positions)))
+                if market and account_task is None and monotonic>=next_account:
+                    from .account_monitor import fetch_account_snapshot
+                    account_task=asyncio.create_task(fetch_account_snapshot(market.client))
+                    next_account=monotonic+30
+                if account_task and account_task.done():
+                    try:
+                        actual=account_task.result()
+                        repo.set_control('actual_account_snapshot',actual)
+                        repo.set_control('account_monitor_status',{'status':'ok','updated_at':actual['received_at']})
+                    except Exception as exc:
+                        repo.set_control('account_monitor_status',{'status':'error','message':'실계좌 갱신 실패: 이전 조회 기록입니다.','error_type':type(exc).__name__})
+                    account_task=None
                 if news and news_task is None and monotonic >= next_news:
                     symbols = list(dict.fromkeys([*engine.broker.positions, *engine.market.quotes]))
                     symbols = [s for s in symbols if s not in {"SPY", "QQQ"}][:20]
@@ -209,7 +222,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     next_universe = monotonic + 86400
                 await asyncio.sleep(.1)
         finally:
-            for task in (market_task, news_task):
+            for task in (market_task, news_task, account_task):
                 if task and not task.done():
                     task.cancel()
                 if task:

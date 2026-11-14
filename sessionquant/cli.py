@@ -29,6 +29,10 @@ def parser():
     account.add_argument("--port",type=int,default=8502)
     account.add_argument("--no-dashboard",action="store_true")
     account.add_argument("--max-polls",type=int)
+    all_check=sub.add_parser("check-connections",help="토스·DB·OpenAI·뉴스 전체 연결 점검; 주문·LLM 생성 없음")
+    all_check.add_argument("--config",type=Path,default=Path("config/sessionquant.yaml"))
+    all_check.add_argument("--offline",action="store_true",help="네트워크·DB에 연결하지 않고 설정만 점검")
+    all_check.add_argument("--symbol",default="AAPL")
     news_setup=sub.add_parser("setup-news",help="OpenAI·FRED·Alpaca·SEC 접속 설정을 한 번 저장")
     news_setup.add_argument("--from-current",action="store_true")
     news_check=sub.add_parser("check-news",help="뉴스 키·소스·모델 설정 점검; 기본은 연결하지 않음")
@@ -110,7 +114,10 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == "setup-news":
+        if args.command == "check-connections":
+            from .connection_checks import check_connections
+            print(json.dumps(asyncio.run(check_connections(args.config,offline=args.offline,symbol=args.symbol)),ensure_ascii=False,indent=2))
+        elif args.command == "setup-news":
             from .local_env import setup_local_env
             setup_local_env(from_current=args.from_current,news_only=True)
         elif args.command == "check-news":

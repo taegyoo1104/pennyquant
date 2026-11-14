@@ -70,9 +70,8 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
             pass
         def load_state(self):
             return {"account": {"equity": "100"}}
-        def get_control(self, name, default):
-            assert name == "sessionquant_context"
-            return {"environment": "PAPER_LOCAL"}
+        def get_control(self, name, default=None):
+            return {"sessionquant_context":{"environment":"PAPER_LOCAL"}}.get(name,default)
         def recent(self, name, limit):
             calls.append((name, limit))
             return []
@@ -99,3 +98,41 @@ def test_dashboard_reads_actual_engine_flat_state_and_context():
     assert view["regime"] == "BULLISH"
     assert view["lag"] == 0
     assert view["synthetic"]
+
+
+def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_path, monkeypatch):
+    from sessionquant.database.repository import Repository
+    path = tmp_path/'dashboard.db'
+    repo = Repository(path, backend='sqlite')
+    repo.save_state({'cash': '70', 'equity': '70'})
+    repo.set_control('actual_account_snapshot', {
+        'received_at': datetime.now(timezone.utc).isoformat(),
+        'items': [{'symbol': 'AAPL', 'name': 'Apple', 'currency': 'USD', 'quantity': '0.123456',
+            'averagePurchasePrice': '180', 'lastPrice': '190', 'marketValue': {'amount': '23.45664'},
+            'profitLoss': {'amount': '1.23456'}}],
+        'summary': {'marketValue': {'amount': {'usd': '1200.50', 'krw': '350000'}}},
+        'buying_power': {'USD': '321.45', 'KRW': None}, 'issues': []})
+    repo.set_control('session_llm_budget_v1', {'2026-11': {'spent': '0.20001'}})
+    repo.set_control('openai_funding_note', {'total_usd': '10'})
+    repo.set_control('llm_provider_health', {'code': 'NO_CREDIT', 'message': '잔액 부족: 차트·청산 관리 계속'})
+    repo.close()
+    monkeypatch.setenv('SQ_DB_BACKEND', 'sqlite')
+    monkeypatch.setenv('SQ_DB', str(path))
+    monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception and not app.error
+    assert any('LIVE_LOCAL' in row.value for row in app.caption)
+    assert [metric.value for metric in app.metric][:4] == ['$1,200.50', '$321.45', '₩350,000', '—']
+    assert {"시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"}.issubset({item.label for item in app.tabs})
+    assert any(metric.label == '프로그램 누적 비용 · 추정' and metric.value == '$0.20' for metric in app.metric)
+    assert any(metric.label == 'OpenAI 충전 누계 · 직접 기록' and metric.value == '$10.00' for metric in app.metric)
+    assert any('잔액 부족' in row.value for row in app.warning)
+    assert any('0.123456' in str(frame.value) for frame in app.dataframe)
+    app.text_input(key='openai-deposit').set_value('0')
+    app.button(key='save-openai-deposit').click().run()
+    assert not app.exception
+    repo = Repository(path, backend='sqlite')
+    assert repo.get_control('openai_funding_note')['total_usd'] == '0'
+    assert repo.get_control('llm_provider_health')['code'] == 'NO_CREDIT'
+    assert repo.all('orders') == []
+    repo.close()

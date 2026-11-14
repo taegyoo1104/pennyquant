@@ -155,9 +155,12 @@ async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknow
             manual_exits=set(broker.state.get('manual_exit_symbols',[]))
             if dashboard:
                 from ..notifications import dashboard_environment
-                app=Path(__file__).resolve().parents[1]/'dashboard'/'account_app.py'
+                app=Path(__file__).resolve().parents[1]/'dashboard'/'session_app.py'
+                from ..session_config import load_session_config
+                settings_file=Path(__file__).resolve().parents[2]/'config'/'sessionquant.yaml'
+                usage_path=load_session_config(settings_file).db_path if settings_file.exists() else Path('data/sessionquant-paper-local.db')
                 display=subprocess.Popen([sys.executable,'-m','streamlit','run',str(app),'--server.address','127.0.0.1',
-                    '--server.port',str(port),'--server.headless','true','--','--db',str(config['db_path'])],env=dashboard_environment(database=True))
+                    '--server.port',str(port),'--server.headless','true','--','--db',str(config['db_path']),'--usage-db',str(usage_path),'--usage-environment','PAPER_LOCAL'],env=dashboard_environment(database=True))
                 print(f'매매 제어 화면: http://127.0.0.1:{port} · 시작 대기',flush=True)
             notifier=DesktopNotifier()
             polls=0; need_exit=broker.state.get('system_exit_requested',False)

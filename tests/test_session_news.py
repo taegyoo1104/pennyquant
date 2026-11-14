@@ -136,3 +136,43 @@ async def test_model_evaluation_defaults_to_no_paid_calls(tmp_path,monkeypatch):
     assert result['execute'] is False and not result['results']
     with pytest.raises(ValueError,match='OPENAI_API_KEY'):
         await evaluate_models(file,tmp_path/'paid.json',execute=True)
+
+
+@pytest.mark.parametrize('slow', [False, True])
+async def test_actual_account_task_reuses_market_client_without_blocking_ticks(tmp_path, monkeypatch, slow):
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.session_config import SessionConfig
+    from sessionquant.session_runtime import run_session
+    from sessionquant.session_engine import SessionEngine
+    now = datetime.now(timezone.utc)
+    universe = tmp_path/'universe.json'
+    UniverseStore(universe).refresh(['AAPL'], source='SYNTHETIC_FIXTURE', observed_at=now)
+    shared_client = object()
+    fetched, cancelled, ticks = [], [], []
+    class Market:
+        client = shared_client
+        async def poll(self, *a, **k):
+            return SimpleNamespace(bars=[], quotes=[], eligibility=[], errors=[])
+        async def aclose(self): pass
+    async def fetch(client):
+        fetched.append(client)
+        if slow:
+            try: await asyncio.Event().wait()
+            finally: cancelled.append(True)
+        raise ValueError('계좌 조회 실패 모의 응답')
+    original_tick = SessionEngine.tick
+    def tick(self, when):
+        ticks.append(when)
+        return original_tick(self, when)
+    monkeypatch.setattr('sessionquant.session_runtime.TossSessionSource', lambda **kw: Market())
+    monkeypatch.setattr('sessionquant.account_monitor.fetch_account_snapshot', fetch)
+    monkeypatch.setattr(SessionEngine, 'tick', tick)
+    config = SessionConfig(database_backend='sqlite', db_path=tmp_path/'paper.db', universe_path=universe,
+        news_enabled=False, poll_seconds=1)
+    await asyncio.wait_for(run_session(config, no_dashboard=True, max_cycles=2, desktop_notifications=False), timeout=10)
+    assert fetched == [shared_client] and len(ticks) >= 2
+    assert bool(cancelled) == slow
+    repo = Repository(config.db_path, backend='sqlite')
+    if not slow: assert repo.get_control('account_monitor_status')['status'] == 'error'
+    assert repo.load_state()['environment'] == 'PAPER_LOCAL'
+    repo.close()

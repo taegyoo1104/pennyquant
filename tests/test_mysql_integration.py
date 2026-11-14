@@ -26,9 +26,9 @@ def mysql_repositories():
     config = MySQLConfig.from_env()
     repositories = []
 
-    def create(namespace=None):
+    def create(namespace=None, *, environment=config.environment):
         selected = namespace or "integration_" + uuid4().hex
-        repo = MySQLRepository("integration.db", replace(config, namespace=selected))
+        repo = MySQLRepository("integration.db", replace(config, namespace=selected, environment=environment))
         repositories.append(repo)
         return repo
 
@@ -152,3 +152,36 @@ def test_real_mysql_engine_persist_and_restore_book_actual_simulated_fills(mysql
     assert restored.manager.account.positions["TEST"].qty == engine.manager.account.positions["TEST"].qty
     assert restored.manager.account.cash == engine.manager.account.cash
     assert len(restored.manager.fills) == 1
+
+
+def test_main_cost_panel_reads_paper_namespace_while_account_is_live(mysql_repositories, monkeypatch):
+    """실제 계좌 화면에서도 Paper 비용 원장을 선택하고 다른 장부와 합치지 않는다."""
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from sessionquant.database.config import namespace_for
+    from sessionquant.dashboard.summary_panels import open_cost_repository, cost_summary
+    path = 'cost-' + uuid4().hex + '.db'
+    paper = mysql_repositories(namespace_for(path, environment='PAPER_LOCAL'), environment=None)
+    live = mysql_repositories(namespace_for(path, environment='LIVE_LOCAL'), environment=None)
+    month = datetime.now(timezone.utc).strftime('%Y-%m')
+    paper.set_control('session_llm_budget_v1', {month: {'spent': '0.123456'}})
+    paper.set_control('openai_funding_note', {'total_usd': '10'})
+    live.set_control('session_llm_budget_v1', {month: {'spent': '99'}})
+    monkeypatch.setenv('SQ_DB_BACKEND', 'mysql')
+    monkeypatch.setenv('SQ_ENVIRONMENT', 'LIVE_LOCAL')
+    reader = open_cost_repository(path, environment='PAPER_LOCAL')
+    try:
+        assert reader.namespace == paper.namespace
+        summary = cost_summary(reader)
+        assert summary['spent'] == Decimal('0.123456') and summary['deposited'] == 10
+    finally:
+        reader.close()
+
+
+def test_connection_probe_detects_other_mysql_runtime_namespace(mysql_repositories):
+    """다른 네임스페이스의 실행 중 수집기를 발견하면 토큰을 재발급하지 않는다."""
+    from sessionquant.connection_checks import active_collector
+    paper = mysql_repositories()
+    live = mysql_repositories()
+    live.set_control('account_monitor_status', {'status': 'ok', 'updated_at': datetime.now(timezone.utc).isoformat()})
+    assert active_collector(paper)

@@ -1,4 +1,4 @@
-"""SessionQuant의 모의계좌와 시장·뉴스·운영 상태를 읽기 전용으로 표시한다."""
+"""SessionQuant의 실제 계좌와 전략·뉴스·운영 상태 및 거래 제어를 표시한다."""
 from __future__ import annotations
 
 import argparse
@@ -39,6 +39,8 @@ class DashboardData:
     backend: str = "sqlite"
     error: str | None = None
     connected: bool = False
+    actual_account: dict | None = None
+    account_status: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -96,11 +98,16 @@ def load_database(path: str | Path) -> DashboardData:
             return result
         repository = Repository(path)
         result.state = repository.load_state() or {}
+        result.actual_account=repository.get_control("actual_account_snapshot")
+        result.account_status=repository.get_control("account_monitor_status",{}) or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
         broker_status = (repository.get_control("broker_state", {}) or {}) if not result.context else {}
         if broker_status.get("mode") == "live" and not result.context:
             result.context={"environment":"LIVE_LOCAL","mode":"live","synthetic":False,
                 "updated_at":broker_status.get("observed_at"),"source_label":"실계좌 주문·체결 기록"}
+        if result.actual_account and not result.context:
+            result.context={"environment":"LIVE_LOCAL","mode":"account_readonly","synthetic":False,
+                "updated_at":result.actual_account.get("received_at"),"source_label":"토스 실제 계좌 조회"}
         for name in TABLES:
             if name in KINDS:
                 result.tables[name] = repository.recent(name, limit=2000)
@@ -217,7 +224,7 @@ def _news_rows(rows: list[dict]) -> list[dict]:
     return result
 
 
-def render_dashboard(path: str | Path) -> None:
+def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=None) -> None:
     import streamlit as st
 
     data = load_database(path)
@@ -226,27 +233,44 @@ def render_dashboard(path: str | Path) -> None:
         st.error(data.error)
     if not data.connected and not data.error:
         st.info("저장된 실행 기록이 없습니다. 먼저 합성 데모 또는 모의매매 엔진을 실행하세요.")
+    if data.account_status.get("status")=="error":
+        st.warning(data.account_status.get("message","실계좌 조회 실패: 이전 기록을 확인하세요."))
     if view["synthetic"]:
         st.warning("합성 데이터 데모입니다. 실제 시장 수익이나 실제 체결을 나타내지 않습니다.")
-    st.caption(f"환경: {view['environment']} · 저장소: {data.backend.upper()} · 화면은 읽기 전용 · 마지막 수신: {view['last_event']}")
+    st.caption(f"환경: {view['environment']} · 저장소: {data.backend.upper()} · 마지막 전략 수신: {view['last_event']}")
     if data.connected:
         control_repo=None
         try:
             from sessionquant.database.repository import Repository
             from sessionquant.trading_controls import render_controls
             control_repo=Repository(path)
-            render_controls(control_repo,positions=view['positions'])
+            render_controls(control_repo,positions=data.actual_account['items'] if data.actual_account and data.context.get('environment')=='LIVE_LOCAL' else view['positions'])
         except Exception:
             st.caption('거래 제어 연결을 확인할 수 없습니다.')
         finally:
             if control_repo: control_repo.close()
     metrics = st.columns(5)
     account = view["account"]
-    metrics[0].metric("계좌 평가금액", usd(account.get("equity")))
-    metrics[1].metric("현금", usd(account.get("cash")))
-    metrics[2].metric("예약 현금", usd(account.get("reserved_cash")))
-    metrics[3].metric("보유 종목", f"{len(view['positions'])} / 5")
-    metrics[4].metric("시장 상태", view["regime_label"])
+    if data.actual_account:
+        from sessionquant.dashboard.account_app import money
+        actual=data.actual_account
+        market_amount=((actual.get('summary') or {}).get('marketValue') or {}).get('amount') or {}
+        buying_power=actual.get('buying_power') or {}
+        metrics[0].metric('실계좌 미국 주식 평가금액',money(market_amount.get('usd'),'USD'))
+        metrics[1].metric('실계좌 달러 매수 가능 금액',money(buying_power.get('USD'),'USD'))
+        metrics[2].metric('실계좌 국내 주식 평가금액',money(market_amount.get('krw'),'KRW'))
+        metrics[3].metric('실계좌 원화 매수 가능 금액',money(buying_power.get('KRW'),'KRW'))
+    else:
+        metrics[0].metric('전략 평가금액 · 모의/검증 장부',usd(account.get('equity')))
+        metrics[1].metric('전략 현금 · 모의/검증 장부',usd(account.get('cash')))
+        metrics[2].metric('예약 현금',usd(account.get('reserved_cash')))
+        metrics[3].metric('관리 보유 종목',f"{len(view['positions'])} / 5")
+    metrics[4].metric('시장 상태',view['regime_label'])
+    from sessionquant.dashboard.summary_panels import render_actual_account,render_cost_panel
+    if data.actual_account:
+        render_actual_account(data.actual_account,data.account_status,show_metrics=False)
+    if data.connected:
+        render_cost_panel(path,usage_path=usage_path,usage_environment=usage_environment)
     if view["lag"] is not None and view["lag"] > 60:
         st.info("저장된 마지막 수신 시각이 60초를 초과했습니다. 재생·종료된 실행에서는 정상일 수 있습니다. 최근 기록만으로 현재 API 연결을 판단하지 않습니다.")
     market, candidates, portfolio, news, operations = st.tabs(["시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"])
@@ -282,8 +306,9 @@ def render_dashboard(path: str | Path) -> None:
         _table(rows)
         st.caption("뉴스가 없어도 기술적 조건으로 후보가 될 수 있습니다. 거래 가능 여부·소수점 지원·거래정지·기업행동을 확인하지 못하면 신규 주문을 허용하지 않습니다.")
     with portfolio:
-        st.subheader("포지션과 위험 예산")
-        _table(view["positions"], "현재 보유한 모의 포지션이 없습니다. 조건이 맞지 않으면 현금을 유지합니다.")
+        st.subheader("전략 관리 포지션과 위험 예산")
+        st.caption("상단의 토스 실제 계좌와 별도로 이 실행의 전략 장부를 표시합니다.")
+        _table(view["positions"], "현재 전략 관리 포지션이 없습니다. 조건이 맞지 않으면 현금을 유지합니다.")
         cols = st.columns(3)
         cols[0].metric("실현 손익", usd(account.get("realized_pnl")))
         cols[1].metric("일일 기준 자산", usd(account.get("day_start_equity")))
@@ -324,18 +349,20 @@ def render_dashboard(path: str | Path) -> None:
 
 
 def main() -> None:
-    """로컬 모의매매 화면을 실행한다."""
+    """로컬 전략·실계좌 통합 화면을 실행한다."""
     import streamlit as st
 
-    parser = argparse.ArgumentParser(description="SessionQuant 모의매매 대시보드")
+    parser = argparse.ArgumentParser(description="SessionQuant 통합 대시보드")
+    parser.add_argument("--usage-db",default=None)
+    parser.add_argument("--usage-environment",default=None)
     parser.add_argument("--db", default=os.getenv("SQ_DB", "data/sessionquant-paper-local.db"))
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
     st.title("SessionQuant")
-    st.caption("S&P 500 · 시장 흐름, 검증된 뉴스와 위험 예산으로 운영하는 장중 모의매매")
+    st.caption("S&P 500 · 시장·뉴스·전략 · 실제 계좌 연동과 위험 관리")
     with st.sidebar:
         st.subheader("로컬 거래 기록 조회")
-        st.info("조회 전용 · 주문 버튼 없음")
+        st.info("모의·실계좌 구분 표시 · 주문은 연결된 엔진에서 처리")
         refresh = st.toggle("자동 갱신 · 5초", value=True)
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
@@ -344,7 +371,7 @@ def main() -> None:
 
     @st.fragment(run_every="5s" if refresh else None)
     def monitor() -> None:
-        render_dashboard(Path(args.db))
+        render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,usage_environment=args.usage_environment)
 
     monitor()
 

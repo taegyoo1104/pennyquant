@@ -117,7 +117,8 @@ class NewsPipeline:
                 issues.append({"provider": "fred", "code": "daily_context_unavailable"})
         self.status = {"status": "AVAILABLE" if self._analyses else "UNKNOWN",
             "updated_at": utc(self.clock()).isoformat(), "issues": issues,
-            "budget": self.analyzer.ledger.snapshot(now), "force_liquidation": False}
+            "budget": self.analyzer.ledger.snapshot(now), "force_liquidation": False,
+            "llm_health":self.repo.get_control("llm_provider_health",{})}
         self.repo.set_control("session_news_status", self.status)
         # 원본·분석 DB 기록을 지우지 않고 현재 위험 조회용 메모리만 제한한다.
         self._analyses = {key: row for key, row in self._analyses.items()

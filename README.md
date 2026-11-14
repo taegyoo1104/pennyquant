@@ -142,7 +142,7 @@ python -m sessionquant legacy --help
 .\venv\Scripts\python.exe -m sessionquant run-account
 ```
 
-브라우저에서 **http://localhost:8502**를 엽니다. 이 경로에는 매수·매도·취소 기능이 없으며 별도 MySQL 네임스페이스(`live_local_sessionquant-account`)에 현재 조회 결과를 저장합니다. 자동매매를 시작하는 명령이 아닙니다.
+브라우저에서 **http://localhost:8502**를 엽니다. 기존 메인 화면의 시장·종목·포트폴리오·뉴스·운영 탭을 유지하고 상단에 실제 계좌와 OpenAI 사용량·충전 기록을 표시합니다. 이 경로에는 매수·매도·취소 기능이 없으며 별도 MySQL 네임스페이스(`live_local_sessionquant-account`)에 현재 조회 결과를 저장합니다. 자동매매를 시작하는 명령이 아닙니다.
 
 기본 10초 간격으로 조회하고 화면은 5초마다 새로 읽습니다. `Ctrl+C`로 종료합니다. 다른 토스 API 수집 프로그램과 동시에 실행하면 토큰 재발급이 기존 토큰을 무효화할 수 있으므로 먼저 기존 수집기를 종료하세요. 계좌가 여러 개면 `.env`의 `TOSS_ACCOUNT_SEQ`로 조회할 계좌를 선택합니다.
 
@@ -169,3 +169,26 @@ API의 매수 가능 금액은 현금 예수금·총자산과 다를 수 있습�
 ## 추가 뉴스·LLM 키 설정
 
 기존 Alpaca·SEC·RSS에 OpenAI와 FRED를 추가하는 전체 절차는 [NEWS_SETUP.md](docs/NEWS_SETUP.md)에 있습니다. `setup-news`로 뉴스 접속 정보만 한 번 저장하고 `check-news`로 값 노출 없이 점검합니다. `check-news --connect`도 주문이나 LLM 텍스트 생성을 하지 않습니다. 새 엔진의 모델·예산은 `.env`의 OPENAI_MODEL이 아니라 `config/sessionquant.yaml`의 llm 블록을 사용합니다.
+
+
+## 메인 화면의 실제 계좌·OpenAI 비용과 전체 연결 점검
+
+기존 메인 화면에서 시세·뉴스·모의 전략과 실제 계좌를 함께 보려면 실행합니다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant run --config config/sessionquant.yaml
+```
+
+**http://localhost:8501**에서 확인합니다. 실제 보유 주식과 통화별 매수 가능 금액은 토스에서 조회하지만 이 명령의 전략 주문은 Paper입니다. 실제 보유와 전략 장부를 분리합니다. 계좌 조회만 하려면 위의 `run-account`를 사용하며, 별도 시세·뉴스 분석은 시작하지 않습니다. 두 토스 수집 명령을 동시에 실행하지 마세요.
+
+OpenAI **프로그램 누적 비용 / 이번 달 비용 / 직접 기록한 충전 누계**를 메인에 표시합니다. 충전 누계는 화면의 **OpenAI 충전 누계 기록**을 펼쳐 입력합니다. 표준 API 키로 공식 잔액이나 충전 내역을 자동 조회했다고 표시하지 않습니다. 비용은 선택한 Paper 운영 DB의 설정된 토큰 단가를 사용한 추정치이며 다른 앱·조직 전체 비용은 포함하지 않습니다. 상세 내용은 [MAIN_DASHBOARD.md](docs/MAIN_DASHBOARD.md)를 보세요.
+
+**OpenAI 키가 없거나 잔액이 부족해도 차트 시그널에 따른 매매와 손절·당일 청산은 계속합니다.** 잔액·인증·요청 제한을 구분해 경고하고, 실패한 뉴스는 UNKNOWN으로 남깁니다. 이전에 확인된 악재·경제 일정·시장 및 위험 제한은 유지합니다. 충전 누계 미입력 또는 $0 자체는 거래 중단 조건이 아닙니다.
+
+모든 수집 프로그램을 종료한 뒤 전체 연결을 점검합니다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant check-connections
+```
+
+토스 시세·실계좌, MySQL, OpenAI 모델 접근, Alpaca·SEC·RSS·공식 기관·Treasury·GDELT·FRED를 검사합니다. 주문이나 LLM 텍스트 생성은 하지 않습니다. 모델 조회 성공은 잔액·실제 생성 성공의 증거가 아닙니다. `--offline`을 붙이면 저장된 설정 여부만 확인합니다. 미등록 RSS는 `not_configured`, 실행 중 토스 엔진을 감지하면 토큰 충돌을 피하려고 `skipped_active_collector`로 표시합니다. 종료 직후에는 마지막 기록이 만료되는 60초 뒤 다시 검사하세요.

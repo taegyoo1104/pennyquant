@@ -131,3 +131,18 @@ OpenAI의 `accessible: true`는 모델 메타데이터 접근 성공이며 실�
 발표 전후 15분 진입 제한은 확인된 경제 일정이 DB에 있어야 작동한다. 뉴스 RSS 연결만으로 향후 FOMC·CPI 일정이 자동 등록되는 것은 아니다. [Fed 일정](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm), [BLS 일정](https://www.bls.gov/schedule/news_release/), [BEA 일정](https://www.bea.gov/news/schedule)을 확인하고 [입력 형식](EVENT_FORMAT.md)에 따라 `calendar-import`로 등록한다. 일정은 확인 전 UNKNOWN이며 예시 날짜를 실제 확정 일정으로 가져오지 않는다.
 
 실거래 설정의 최소 주문 금액·소수점 자격 확인·계좌 확인·기존 위험 설정은 [PHASE5_LOCAL.md](PHASE5_LOCAL.md)를 따른다. 현재 단계에서 GCP 키·배포 설정은 필요 없다.
+
+
+## 잔액이 없을 때와 전체 연결 검사
+
+키 미설정, OpenAI의 `insufficient_quota` / `credit_balance_exhausted` 등 잔액·한도 응답은 뉴스 분석만 제한한다. 차트 기반 진입과 손절·당일 청산은 계속한다. 인증 오류·요청 속도 제한은 잔액 부족과 별도로 표시한다. 잔액 부족 시 10분 동안 반복 생성 요청을 중지하고 이후 필요한 분석 때 다시 확인한다. 충전 후 즉시 새 프로세스를 실행해도 같은 키의 대기 상태는 DB에 보존된다. 새로운 실패 뉴스는 UNKNOWN이며 이전의 확인된 악재·공식 일정 제한은 취소하지 않는다. 신호가 없거나 다른 위험 검사에 실패하면 거래하지 않는다.
+
+메인 화면의 충전 누계는 사용자가 직접 적은 메모이다. 미입력이나 $0 기록은 실제 잔액 고갈을 뜻하지 않으며 주문·분석의 차단 기준으로 쓰지 않는다. 공식 사용량·잔액 링크와 비용 범위는 [MAIN_DASHBOARD.md](MAIN_DASHBOARD.md)에 정리했다.
+
+토스 수집·거래 엔진을 종료한 뒤 한 번에 검사한다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant check-connections
+```
+
+이 명령은 생성 비용 없이 모델 접근과 뉴스 소스 연결을 검사하고 토스 시세·계좌와 DB를 추가 확인한다. `llm_credit_balance_verified: false`는 공식 잔액을 조회하지 않았다는 뜻이다. 표준 API 키만으로 잔액을 확정하거나 키 연결 성공을 충전 성공으로 취급하지 않는다.

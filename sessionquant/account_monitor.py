@@ -69,7 +69,7 @@ async def fetch_account_snapshot(client):
         'summary':{k:amounts(source.get(k)) for k in ('totalPurchaseAmount','marketValue','profitLoss','dailyProfitLoss')}}
 
 
-async def run_account_monitor(*,db_path=Path('data/sessionquant-account.db'),interval=10,port=8502,no_dashboard=False,max_polls=None):
+async def run_account_monitor(*,db_path=Path('data/sessionquant-account.db'),interval=10,port=8502,no_dashboard=False,max_polls=None,usage_path=None):
     if type(interval) is not int or not 5<=interval<=3600: raise ValueError('계좌 갱신 주기는 5~3600초입니다.')
     if type(port) is not int or not 1024<=port<=65535: raise ValueError('대시보드 포트 범위 오류')
     if max_polls is not None and (type(max_polls) is not int or max_polls<1): raise ValueError('max_polls는 1 이상이어야 합니다.')
@@ -109,9 +109,13 @@ async def run_account_monitor(*,db_path=Path('data/sessionquant-account.db'),int
                         'message':'계좌 갱신 실패. 이전 조회 시각과 토스 연결을 확인하세요.','error_type':type(exc).__name__})
                     if polls==0: raise
                 if not no_dashboard and dashboard is None:
-                    app=Path(__file__).parent/'dashboard'/'account_app.py'
+                    app=Path(__file__).parent/'dashboard'/'session_app.py'
+                    if usage_path is None:
+                        from .session_config import load_session_config
+                        settings_path=Path(__file__).resolve().parent.parent/'config'/'sessionquant.yaml'
+                        usage_path=load_session_config(settings_path).db_path if settings_path.exists() else Path('data/sessionquant-paper-local.db')
                     dashboard=subprocess.Popen([sys.executable,'-m','streamlit','run',str(app),'--server.address','127.0.0.1',
-                        '--server.port',str(port),'--server.headless','true','--','--db',str(db_path)],env=dashboard_environment(database=True))
+                        '--server.port',str(port),'--server.headless','true','--','--db',str(db_path),'--usage-db',str(usage_path),'--usage-environment','PAPER_LOCAL'],env=dashboard_environment(database=True))
                     print(f'실제 계좌 화면: http://127.0.0.1:{port}',flush=True)
                 polls+=1
                 if max_polls is None or polls<max_polls: await asyncio.sleep(interval)
