@@ -129,12 +129,18 @@ class Indicators:
     cumulative_volume: int
     dollar_volume: float
     previous_vwap: float | None = None
+    vwap_through: datetime | None = None
+    previous_vwap_through: datetime | None = None
+    calculated_at: datetime | None = None
 
     def to_dict(self) -> dict:
         return {"vwap": self.vwap, "previous_vwap": self.previous_vwap, "ema9": self.ema9, "atr14": self.atr14,
                 "volume_ratio": self.volume_ratio, "cumulative_volume": self.cumulative_volume,
                 "dollar_volume": self.dollar_volume, "five_count": len(self.five), "fifteen_count": len(self.fifteen),
-                "last_closed_at": self.five[-1].timestamp.isoformat() if self.five else None}
+                "last_closed_at": self.five[-1].timestamp.isoformat() if self.five else None,
+                'vwap_through':self.vwap_through.isoformat() if self.vwap_through else None,
+                'previous_vwap_through':self.previous_vwap_through.isoformat() if self.previous_vwap_through else None,
+                'calculated_at':self.calculated_at.isoformat() if self.calculated_at else None}
 
 
 def indicators(bars: list[Bar], now: datetime) -> Indicators:
@@ -149,4 +155,5 @@ def indicators(bars: list[Bar], now: datetime) -> Indicators:
                       atr(five) if continuous else None,
                       five[-1].volume / previous_volume if previous_volume and continuous else None,
                       sum(bar.volume for bar in selected), sum(bar.close * bar.volume for bar in selected),
-                      session_vwap(bars, now, through=five[-2].timestamp) if len(five) >= 2 else None)
+                      session_vwap(bars, now, through=five[-2].timestamp) if len(five) >= 2 else None,
+                      through,five[-2].timestamp if len(five)>=2 else None,utc(now))

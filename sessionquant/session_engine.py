@@ -21,6 +21,7 @@ from .portfolio.broker import PaperBroker
 from .portfolio.manager import PortfolioManager
 from .portfolio.models import PortfolioSettings, serialize
 from .portfolio.session import SessionExitManager
+from .portfolio.exit_policy import ExitPolicy
 
 
 def event_time(raw: dict) -> datetime:
@@ -34,7 +35,11 @@ class SessionEngine:
     def __init__(self, repository: Repository, universe: UniverseStore, *, strategy: str = "pullback",
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
-                 strict_market_data: bool = False):
+                 strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None):
+        self.macro_reference_risk = macro_reference_risk
+        self.reference_risk_status = {}
+        if macro_reference_risk is not None and macro_reference_risk.effective_enabled and not synthetic:
+            raise ValueError('위험 필터 ON 정책은 격리 합성 연구에서만 검증할 수 있습니다.')
         self.control_state=control_state
         self.watchlist_policy=watchlist_policy
         self.repo, self.universe = repository, universe
@@ -47,6 +52,9 @@ class SessionEngine:
         self.last_time = None
         self.cursor = 0
         self.risk_records: dict[str, dict] = {}
+        self.risk_provider_cache = {}
+        self._risk_lookup_errors = set()
+        self.exit_policy = exit_policy or ExitPolicy()
         self.consumed_signals: set[str] = set()
         self.dirty_symbols: set[str] = set()
         self.market_symbols: set[str] = set()
@@ -68,6 +76,9 @@ class SessionEngine:
             self.cursor = stored.get("cursor", 0)
             self.consumed_signals = set(stored.get("consumed_signals", []))
             self.risk_records = stored.get("risk_records", {})
+            if ExitPolicy(**stored.get('exit_policy',{})) != self.exit_policy:
+                raise ValueError('손절·청산 연구 정책이 저장된 실행과 다릅니다. 새 DB를 사용하세요.')
+            self.risk_provider_cache = stored.get('risk_provider_cache',{})
             self.market_symbols = set(stored.get("market_symbols", []))
             merged = {"schema_version": 1, **{name: {} for name in ("bars", "quotes", "eligibility", "rvol", "sector_strength")}}
             for symbol in sorted(self.market_symbols):
@@ -80,7 +91,7 @@ class SessionEngine:
             self.market.restore(merged)
         elif self.repo.get_control("runtime_kind") not in (None, "sessionquant"):
             raise ValueError("기존 PennyQuant DB는 호환 실행 경로로 열거나 새 DB를 지정하세요.")
-        self.manager = PortfolioManager(self.broker)
+        self.manager = PortfolioManager(self.broker,self.exit_policy)
         self.exit_manager = SessionExitManager(self.broker)
 
     def risk_context(self, now: datetime, symbol: str) -> dict:
@@ -89,7 +100,24 @@ class SessionEngine:
         if not self.use_news:
             return empty | {"status": "DISABLED"}
         if self.risk_provider:
-            return self.risk_provider.risk_context(now, symbol=symbol)
+            try:
+                context = self.risk_provider.risk_context(now,symbol=symbol)
+                if not isinstance(context,dict) or any(type(context.get(key,False)) is not bool for key in ('block_entries','major_adverse','blackout')):
+                    raise ValueError('뉴스 위험 상태 형식 미확인')
+            except Exception as exc:
+                if symbol not in self._risk_lookup_errors:
+                    self.repo.log('WARNING','뉴스 위험 조회에 실패했습니다. 가격 손절·시간 청산을 계속하며 확인되지 않은 악재를 생성하지 않습니다.',
+                                  error_type=type(exc).__name__,symbol=symbol)
+                self._risk_lookup_errors.add(symbol)
+                cached = self.risk_provider_cache.get(symbol,{})
+                known = bool(cached.get('available_at') and utc(cached['available_at']) <= now)
+                return empty|{'block_entries':bool(known and cached.get('block_entries')),
+                    'blackout':bool(known and cached.get('blackout')),'provider_error':True,
+                    'reasons':['뉴스 위험 조회 실패: UNKNOWN. 이전 신규 진입 제한은 조회 복구까지 유지합니다.']}
+            self._risk_lookup_errors.discard(symbol)
+            self.risk_provider_cache[symbol] = {'available_at':utc(now).isoformat(),
+                'block_entries':context.get('block_entries',False),'blackout':context.get('blackout',False)}
+            return context
         records = [self.risk_records.get(symbol), self.risk_records.get("*")]
         available = [r for r in records if r and r.get("verified") is True and
                      utc(r["available_at"]) <= now and 0 <= (now - utc(r["available_at"])).total_seconds() <= 86400]
@@ -147,6 +175,8 @@ class SessionEngine:
             self._journal_hashes[key] = digest
 
     def _persist(self, now: datetime, session_status: dict):
+        risk_snapshot = self.manager.risk_snapshot(now)
+        session_status['alerts'] = list(self.broker.alerts)
         # 종목별 시장 상태를 분리하여 매 호가마다 전체 유니버스를 다시 저장하지 않는다.
         metadata = self.market.to_state(include_bars=False)
         for symbol in sorted(self.dirty_symbols):
@@ -158,6 +188,7 @@ class SessionEngine:
         self.dirty_symbols.clear()
         broker_state = self.broker.to_state()
         state = {"schema_version": 2, "environment": "PAPER_LOCAL", "strategy": self.strategy,
+                 'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_provider_cache':self.risk_provider_cache,
                  "strict_market_data":self.market.strict_data,
                  "synthetic": self.synthetic, "use_news": self.use_news, "use_market_filter": self.use_market_filter, "broker": broker_state,
                  "cursor": self.cursor, "last_time": self.last_time.isoformat() if self.last_time else None,
@@ -186,7 +217,9 @@ class SessionEngine:
         context = {"environment": "PAPER_LOCAL", "mode": "paper", "live_orders_enabled": False,
                    "synthetic": self.synthetic, "strategy": self.strategy, "updated_at": now.isoformat(),
                    "market_regime": regime, "session": serialize(session_status), "account": account,
-                   "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else "ENABLED",
+                   "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else 'DEGRADED' if self._risk_lookup_errors else "ENABLED",
+                   'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_snapshot':risk_snapshot,
+                   'macro_reference_risk':self.reference_risk_status,
                    "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         self.repo.set_control("sessionquant_context", context)
@@ -241,6 +274,14 @@ class SessionEngine:
                                 'opened_at':position.opened_at.isoformat(),'requested_at':now.isoformat(),'attempt':0})
                 manual_halt = (self.repo.get_control("manual_halt", False) is True or
                     (self.control_state is not None and not self.control_state['running']))
+                if self.macro_reference_risk is not None:
+                    self.reference_risk_status = self.macro_reference_risk.evaluate(now)
+                reference_blocked = self.reference_risk_status.get('block_entries') is True
+                for order in self.broker.get_open_orders():
+                    if order.intent.side == 'buy':
+                        risk = self.risk_context(now,order.intent.symbol)
+                        if risk.get('block_entries') or risk.get('blackout') or reference_blocked:
+                            self.broker.cancel_order(order.client_id,now)
                 if manual_halt:
                     for order in self.broker.get_open_orders():
                         if order.intent.side == "buy":
@@ -251,14 +292,16 @@ class SessionEngine:
                     self.broker.process_quote(quote, now)
                 for symbol in list(self.broker.positions):
                     quote = self.market.quotes.get(symbol)
-                    if quote:
-                        risk = self.risk_context(now, symbol)
-                        self.manager.check_exits(quote, now, bearish_signal=self._bearish(symbol, now),
-                                                 confirmed_adverse=risk.get("major_adverse") is True)
+                    risk = self.risk_context(now,symbol)
+                    self.manager.check_exits(quote,now,symbol=symbol,bearish_signal=self._bearish(symbol,now),
+                                             confirmed_adverse=risk.get('major_adverse') is True)
                 decisions = []
                 for symbol in {q.symbol for q in quotes} - {"SPY", "QQQ"}:
                     risk = self.risk_context(now, symbol)
                     decision = self.market.evaluate(symbol, now, news_blocked=bool(risk.get("block_entries") or risk.get("blackout")))
+                    if reference_blocked:
+                        decision = replace(decision, eligible=False, signal=None,
+                            blockers=tuple(dict.fromkeys([*decision.blockers, 'macro_reference_risk_restriction'])))
                     if self.watchlist_policy is not None:
                         scope_blockers = self.watchlist_policy.entry_blockers(symbol, now)
                         if scope_blockers:
@@ -278,16 +321,24 @@ class SessionEngine:
                     add = decision.symbol in self.broker.positions
                     if add and not signal.allow_add:
                         continue
-                    allocation = self.manager.plan_entry(decision.symbol, quote.ask, signal.stop_price, now,
+                    stop = self.exit_policy.stop_price(quote.ask,signal.stop_price,decision.indicators.get('atr14'))
+                    if stop is None:
+                        self.repo.record('pipeline_status',{'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
+                            'timestamp':now,'approved':False,'reason':'exit_stop_unverified','exit_policy':serialize(self.exit_policy)})
+                        continue
+                    allocation = self.manager.plan_entry(decision.symbol, quote.ask, stop, now,bid=quote.bid,
                         market_state=decision.regime if self.use_market_filter else "BULLISH", tradable=evidence.tradable is True,
                         fractional_supported=evidence.fractional is True, trend_confirmed=True,
                         support_confirmed=signal.allow_add, rebound_confirmed=signal.allow_add,
                         major_bad_news=risk.get("major_adverse") is True, add=add, signal_id=signal.id,
                         session_allowed=self.exit_manager.permits_entry(now), strategy=self.strategy)
+                    self.repo.record('pipeline_status',{'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
+                        'timestamp':now,'approved':allocation.approved,'reason':allocation.reason,'audit':allocation.audit,'exit_policy':serialize(self.exit_policy)})
                     if allocation.approved:
-                        self.repo.record("order_intents", serialize(allocation.intent))
+                        self.repo.record("order_intents", serialize(allocation.intent)|{'risk_audit':allocation.audit,'risk_policy_version':2})
                         self.broker.submit_order(allocation.intent)
                         self.consumed_signals.add(signal.id)
+                session_status = self.exit_manager.snapshot(now,orders=session_status['orders'])
                 if self.control_state is not None:
                     from .trading_controls import heartbeat
                     heartbeat(self.repo,self.control_state,now=now,flat=not self.broker.positions and not self.broker.get_open_orders())

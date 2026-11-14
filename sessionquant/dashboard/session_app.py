@@ -45,6 +45,7 @@ class DashboardData:
     watchlist_state: dict = field(default_factory=dict)
     market_quality: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
+    fred_references: list = field(default_factory=list)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -105,6 +106,7 @@ def load_database(path: str | Path) -> DashboardData:
         result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
         result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
         result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
+        result.fred_references=repository.recent('fred_reference_observations',limit=30)
         result.actual_account=repository.get_control("actual_account_snapshot")
         result.account_status=repository.get_control("account_monitor_status",{}) or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
@@ -299,7 +301,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         _table(market_rows, "SPY·QQQ의 최신 확정봉과 호가를 기다리고 있습니다.")
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
         from sessionquant.dashboard.reference_panel import render_references
-        render_references(data.market_reference)
+        render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references)
         schedule = data.context.get("economic_calendar", [])
         if isinstance(schedule, list) and schedule:
             _table([{"일정": row.get("name", row.get("event", "")), "발표 시각": timestamp(row.get("timestamp", row.get("published_at"))), "출처": row.get("source", "")} for row in schedule if isinstance(row, dict)])
@@ -332,6 +334,13 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         cols[1].metric("일일 기준 자산", usd(account.get("day_start_equity")))
         cols[2].metric("초기 계획", "2종목 중심")
         st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
+        if view['environment'] == 'PAPER_LOCAL':
+            st.caption('현재 한 전략만 단독 평가합니다. 10%는 고정 대기 조건이 아닌 설정 목표이며, 이익 보호·악재·손절·시간 청산이 먼저 작동할 수 있습니다. 일일 2%는 신규 매수 중단 기준으로 갭·장애 손실을 보장하지 않습니다.')
+            risk = data.context.get('risk_snapshot') or {}
+            st.caption('저장 시점 예상 위험: '+str(risk.get('status','UNKNOWN'))+' · 검사 시각: '+timestamp(risk.get('checked_at')))
+            _table([{'종목':symbol,'손절 예상 손실':usd(row.get('loss_estimate')),'종목 위험 예산':usd(row.get('risk_budget')),
+                     '평가금액':usd(row.get('market_value')),'예상 위험 사유':', '.join(row.get('issues',[]))}
+                    for symbol,row in risk.get('positions',{}).items()],'예상 위험 기록이 없습니다. 입력 미확인은 안전 판정이 아닙니다.')
     with news:
         corporate, macro, usage = st.tabs(["기업 뉴스", "경제·정치·국제정세", "LLM 사용량"])
         with corporate:
@@ -353,6 +362,9 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         session = schedule if isinstance(schedule, dict) else {}
         st.caption(f"청산 시작: {timestamp(session.get('exit_start', session.get('liquidation_start')))} · 미청산 경고: {timestamp(session.get('alert_at', session.get('emergency_at')))}")
         st.caption("주문 전송과 체결 완료를 구분합니다. 부분 체결·잔량·시세 지연·미청산 사유는 아래 기록으로 확인하세요.")
+        if view['environment'] == 'PAPER_LOCAL':
+            full_session = view['session'] if isinstance(view['session'],dict) else {}
+            st.caption('청산 상태는 잔여 수량과 미결 주문을 함께 확인합니다. 매수 취소 확인 대기: '+str(len(full_session.get('pending_buy_cancellations',[])))+'건 · 미확인 주문: '+str(len(full_session.get('unknown_orders',[])))+'건')
         _table([{"주문 ID": row.get("client_id", row.get("id", "")), "종목": row.get("symbol", ""), "방향": row.get("side", ""),
                  "상태": STATUS_NAMES.get(str(row.get("status", "")).lower(), row.get("status", "")), "금액": usd(row.get("amount")),
                  "수량": str(row.get("qty", "")), "체결 수량": str(row.get("filled_qty", "")), "사유": row.get("reason", ""),

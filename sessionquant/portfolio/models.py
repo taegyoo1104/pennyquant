@@ -136,6 +136,7 @@ class OrderIntent:
     reason: str = ''
     is_add: bool = False
     expected_price: Decimal | None = None
+    reference_bid: Decimal | None = None
 
     def __post_init__(self):
         from ..models import symbol_valid
@@ -146,7 +147,7 @@ class OrderIntent:
             raise ValueError('주문 방향 또는 추가매수 표시가 올바르지 않습니다.')
         object.__setattr__(self, 'created_at', aware(self.created_at))
         object.__setattr__(self, 'limit_price', decimal(self.limit_price, 'limit_price', positive=True))
-        for name in ('amount', 'qty', 'stop_price', 'expected_price'):
+        for name in ('amount', 'qty', 'stop_price', 'expected_price', 'reference_bid'):
             if getattr(self, name) is not None:
                 object.__setattr__(self, name, decimal(getattr(self, name), name, positive=True))
         if self.side == 'buy' and (self.amount is None or self.qty is not None or self.stop_price is None):
@@ -155,6 +156,8 @@ class OrderIntent:
             raise ValueError('매도는 소수점 수량으로 지정합니다.')
         if self.side == 'buy' and self.stop_price >= self.limit_price:
             raise ValueError('손절 가격은 매수 제한 가격보다 낮아야 합니다.')
+        if self.reference_bid is not None and self.expected_price is not None and self.reference_bid > self.expected_price:
+            raise ValueError('참조 매수호가가 예상 매도호가보다 높습니다.')
 
 
 @dataclass
@@ -239,6 +242,7 @@ class AllocationDecision:
     approved: bool
     reason: str
     intent: OrderIntent | None = None
+    audit: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

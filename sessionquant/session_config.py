@@ -33,6 +33,7 @@ class SessionConfig:
     max_cycle_seconds: int = 15
     history_pages_per_cycle: int = 1
     market_reference: dict = field(default_factory=dict)
+    macro_reference_filter: dict = field(default_factory=dict)
     news_enabled: bool = True
     include_alpaca: bool = True
     company_rss_catalog: bool = True
@@ -74,6 +75,8 @@ class SessionConfig:
                 raise ValueError(f"{name}은 설정 객체여야 합니다.")
         from .market_reference.settings import reference_settings
         reference_settings(self.market_reference)
+        from .market_reference.risk import filter_settings
+        filter_settings(self.macro_reference_filter)
         from .news.catalog import merge_companies
         object.__setattr__(self, 'companies', merge_companies(self.companies, enabled=self.company_rss_catalog))
 

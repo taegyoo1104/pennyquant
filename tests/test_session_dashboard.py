@@ -83,7 +83,8 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
     data = load_database(tmp_path / "unused.db")
     assert data.connected
     assert calls[-1] == "closed"
-    assert all(limit == 2000 for name, limit in calls[:-1])
+    assert ('fred_reference_observations', 30) in calls
+    assert all(limit == (30 if name == 'fred_reference_observations' else 2000) for name, limit in calls[:-1])
 
 
 def test_dashboard_reads_actual_engine_flat_state_and_context():

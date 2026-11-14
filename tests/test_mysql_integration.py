@@ -294,3 +294,36 @@ def test_real_mysql_reference_journal_restore_and_namespace_isolation(mysql_repo
     with reader.db.cursor() as cursor:
         cursor.execute('SELECT version FROM sq_schema_versions WHERE version=3')
         assert cursor.fetchone()[0] == 3
+
+
+def test_real_mysql_strategy_risk_latch_and_pending_cancel_survive_restore(mysql_repositories):
+    """합성 위험 경고·매수 취소 대기와 금융 수량을 재연결 후 복구한다."""
+    from decimal import Decimal
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.market_reference.risk import MacroReferenceRiskMonitor
+    from sessionquant.market_reference.store import VIEW
+    from sessionquant.portfolio import PortfolioSettings
+    from sessionquant.session_engine import SessionEngine
+    from test_macro_reference_risk import view
+    from test_market_reference import NOW
+    from test_paper_market_fills import intent, quote
+    repo = mysql_repositories()
+    settings = PortfolioSettings(paper_cancel_latency_seconds=Decimal('2'))
+    options = {'enabled': True, 'paper_shadow_only': False}
+    monitor = MacroReferenceRiskMonitor(repo, options, research_only=True)
+    repo.set_control(VIEW, view(risk=True, down=True))
+    engine = SessionEngine(repo, UniverseStore(), settings=settings, synthetic=True, macro_reference_risk=monitor)
+    engine.broker.submit_order(intent(at=NOW))
+    engine.broker.process_quote(quote(1, at=NOW), max_fill_qty=Decimal('.05'))
+    engine.tick(NOW+timedelta(seconds=1))
+    assert engine.broker.get_order('buy').status == 'cancel_pending'
+    reader = mysql_repositories(repo.namespace)
+    restored_monitor = MacroReferenceRiskMonitor(reader, options, research_only=True)
+    restored = SessionEngine(reader, UniverseStore(), settings=settings, synthetic=True, restore=True,
+        macro_reference_risk=restored_monitor)
+    restored.tick(NOW+timedelta(seconds=3))
+    assert restored.broker.get_order('buy').status == 'cancelled'
+    assert restored.broker.positions['AAPL'].qty == Decimal('.05')
+    assert not [o for o in restored.broker.orders.values() if o.intent.side == 'sell']
+    assert restored_monitor.state['latched']
+    assert reader.get_control('sessionquant_context')['risk_policy_version'] == 2

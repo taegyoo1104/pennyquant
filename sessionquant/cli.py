@@ -75,6 +75,12 @@ def parser():
     replay.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
     replay.add_argument("--watchlist-history",type=Path,help="당시 저장된 감시·집중 목록 이력 JSON")
     replay.add_argument("--resume", action="store_true", help="동일 입력과 설정으로 중단 지점 복구")
+    risk = sub.add_parser('risk-experiments',help='단독 전략별 손절·익절·보유시간 가설 비교; 외부 API 없음')
+    risk.add_argument('--input',type=Path,required=True,help='수신 시각이 보존된 입력 JSONL')
+    risk.add_argument('--universe',type=Path,required=True,help='당시 편입 원장')
+    risk.add_argument('--report',type=Path,required=True,help='새 JSON 보고서 경로')
+    risk.add_argument('--strategy',choices=('all','momentum','pullback','gap_breakout','vwap'),default='all',help='전략마다 단독 실행. 기본은 네 전략 각각 비교')
+    risk.add_argument('--config',type=Path,help='비용·위험 설정. 연결 정보는 비교에서 사용하지 않음')
     backtest.add_argument("--report", type=Path, default=Path("data/session-report.json"))
     universe = sub.add_parser("universe-refresh", help="현재 구성 목록을 오늘부터 유효한 관측으로 저장")
     universe.add_argument("--output", type=Path, default=Path("data/sp500-universe.json"))
@@ -205,6 +211,17 @@ def main(argv=None):
             result = write_session_demo(args.out, strategy=args.strategy, backend=args.backend,fill_model=args.fill_model or "market_v2")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             print("합성 검증을 완료했습니다. 실제 시세·투자 성과·실제 주문이 아닙니다.")
+        elif args.command == 'risk-experiments':
+            os.environ['SQ_ENVIRONMENT'] = 'PAPER_LOCAL'
+            os.environ['SQ_DB_BACKEND'] = 'sqlite'
+            from .portfolio.models import PortfolioSettings
+            from .session_config import load_session_config
+            from .risk_experiments import compare_risk_parameters
+            settings = PortfolioSettings(**load_session_config(args.config).portfolio) if args.config else PortfolioSettings()
+            payload = compare_risk_parameters(args.input,args.universe,args.report,strategy=args.strategy,settings=settings,
+                synthetic=metadata(args.input).get('synthetic',False) is True)
+            print(json.dumps({'report':str(args.report),'experiments':len(payload['results']),'live_orders_enabled':False,
+                              'profitability_validated':False,'recommended_parameters':None},ensure_ascii=False,indent=2))
         elif args.command in {"replay", "backtest"}:
             from .portfolio.models import PortfolioSettings
             from .session_config import load_session_config

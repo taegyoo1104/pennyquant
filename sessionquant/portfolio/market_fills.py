@@ -75,6 +75,8 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         pnl = ZERO
         if side == 'buy':
             position = broker.positions.get(intent.symbol)
+            if position is not None and intent.is_add and price < position.avg_price:
+                broker._alert('add_execution_below_average',now,'추가매수 주문 후 가격 갭으로 평균가보다 낮게 체결되었습니다. 체결을 취소로 숨기지 않고 위험을 재점검합니다.',intent.symbol)
             if position is None:
                 position = FractionalPosition(intent.symbol,ZERO,price,ZERO,intent.stop_price,now,intent.strategy)
                 broker.positions[intent.symbol] = position

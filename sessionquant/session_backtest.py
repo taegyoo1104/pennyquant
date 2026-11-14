@@ -51,6 +51,11 @@ def summarize(result: dict, settings: PortfolioSettings) -> dict:
     slippages = [Decimal(f['slippage_bps']) for f in fills if f.get('slippage_bps') is not None]
     # 주문 제출 수가 아니라 포지션 수량 0으로 끝난 거래만 완료로 센다.
     return {"fill_model_version":settings.paper_fill_model,
+            'risk_policy_version':2,
+            'exit_reason_counts':dict(Counter(o['intent']['reason'] for o in exit_orders if Decimal(o['filled_qty']) > 0)),
+            'risk_decision_counts':dict(Counter(r['reason'] for r in result.get('risk_decisions',[]))),
+            'risk_decision_count_basis':'unique_signals_last_decision',
+            'risk_alert_count':len(state.get('alerts',[])),
             "assumed_latency_seconds":str(settings.paper_latency_seconds) if settings.paper_fill_model == "market_v2" else "0",
             "depth_participation_assumption":str(settings.paper_depth_participation) if settings.paper_fill_model == "market_v2" else "1",
             "net_pnl_basis":"realized_and_bid_marked_after_fill_fees",

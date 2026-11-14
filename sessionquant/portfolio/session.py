@@ -80,6 +80,10 @@ class SessionExitManager:
             for order in self.broker.get_open_orders():
                 if order.intent.side == 'buy':
                     self.broker.cancel_order(order.client_id,now)
+            if schedule and now >= schedule.exit_start:
+                for order in self.broker.get_open_orders():
+                    if order.intent.side == 'buy':
+                        self.broker._alert('entry_cancel_unconfirmed',now,'청산 전에 매수 취소 확인이 필요합니다.',order.intent.symbol)
         today = now.astimezone(ZoneInfo('America/New_York')).date()
         for symbol, position in list(self.broker.positions.items()):
             overnight = position.opened_at.astimezone(ZoneInfo('America/New_York')).date() < today
@@ -105,8 +109,19 @@ class SessionExitManager:
             order = self.manager._queue_exit(symbol, quote, now, reason)
             if order is not None:
                 orders.append(order)
-        remaining = {symbol: str(p.qty) for symbol, p in self.broker.positions.items()}
-        return {'schedule': schedule.to_dict() if schedule else None, 'entry_allowed': can_enter,
-                'positions_remaining': remaining, 'liquidation_complete': not remaining,
-                'orders': [o.client_id for o in orders], 'alerts': list(self.broker.alerts),
+        return self.snapshot(now,orders=[o.client_id for o in orders],schedule=schedule)
+
+    def snapshot(self, now, *, orders=(), schedule=None):
+        """주문을 만들지 않고 현재 체결 잔량·진행 주문으로 청산 상태만 계산한다."""
+        now = aware(now)
+        schedule = schedule or self.schedule(now)
+        remaining = {symbol:str(p.qty) for symbol,p in self.broker.positions.items()}
+        pending = self.broker.get_open_orders()
+        return {'schedule': schedule.to_dict() if schedule else None,
+                'entry_allowed':bool(schedule and schedule.entry_start <= now < schedule.entry_end and not self.broker.halted),
+                'positions_remaining':remaining,'liquidation_complete':not remaining and not pending,
+                'pending_orders':[{'client_id':o.client_id,'symbol':o.intent.symbol,'side':o.intent.side,'status':o.status} for o in pending],
+                'pending_buy_cancellations':[o.client_id for o in pending if o.intent.side == 'buy' and (o.cancel_requested_at is not None or o.status == 'unknown')],
+                'unknown_orders':[o.client_id for o in pending if o.status == 'unknown'],
+                'orders':list(orders),'alerts':list(self.broker.alerts),
                 'session_status': 'UNKNOWN' if schedule is None else 'KNOWN'}

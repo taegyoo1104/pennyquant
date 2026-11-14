@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
+import math
 
 from ..models import utc
 from .bars import Indicators, contiguous, session_bounds
@@ -42,9 +43,27 @@ def technical_signal(symbol: str, strategy: str, data: Indicators, regime: str, 
         raise ValueError("지원하지 않는 전략입니다")
     if opening_range_minutes not in (15, 30):
         raise ValueError("Opening Range는 15분 또는 30분이어야 합니다")
+    if isinstance(max_chase_atr,bool) or not isinstance(max_chase_atr,(float,int)) or not math.isfinite(max_chase_atr) or max_chase_atr <= 0:
+        raise ValueError('추격 제한 ATR 배수는 양의 유한 수여야 합니다.')
+    now = utc(now)
+    bounds = session_bounds(now)
+    if not bounds or not bounds[0] < now < bounds[1]:
+        return None
     if regime != "BULLISH" and not (allow_neutral and regime == "NEUTRAL"):
         return None
     bars = list(data.five)
+    # 상위 주기와 이전 봉도 해당 시점에 수신·확정된 같은 종목이어야 한다.
+    for group,period in ((bars,5),(data.fifteen,15)):
+        if any(b.symbol != symbol or not bounds[0] < b.timestamp <= b.received_at <= now
+               or (b.timestamp-bounds[0]).total_seconds() % (period*60) for b in group):
+            return None
+    if (data.calculated_at is None or not bars or utc(data.calculated_at) > now
+            or data.vwap_through != bars[-1].timestamp
+            or any(b.timestamp > bars[-1].timestamp for b in data.fifteen)):
+        return None
+    if any(isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value <= 0
+           for value in (data.vwap,data.ema9,data.atr14,data.volume_ratio)):
+        return None
     if len(bars) < 15 or not contiguous(bars, 5) or data.vwap is None or data.ema9 is None or not data.atr14:
         return None
     last, previous = bars[-1], bars[-2]
@@ -63,10 +82,9 @@ def technical_signal(symbol: str, strategy: str, data: Indicators, regime: str, 
     elif strategy == "pullback":
         first, second, rebound = bars[-3:]
         prior = bars[-4]
-        support_level = max(data.vwap, data.ema9)
         retracement = max(b.high for b in bars[-6:-3]) - min(first.low, second.low)
         if (rising_structure(data) and first.close < prior.close and second.close <= first.close
-                and abs(min(first.low, second.low) - support_level) <= atr_value
+                and min(abs(min(first.low, second.low)-level) for level in (data.vwap,data.ema9)) <= atr_value
                 and 0 < retracement <= 2.5 * atr_value and rebound.close > second.high
                 and rebound.close > data.vwap and rebound.volume > second.volume):
             reason = "15분 상승 추세에서 두 개 조정봉·지지 확인 후 재상승"
@@ -82,7 +100,9 @@ def technical_signal(symbol: str, strategy: str, data: Indicators, regime: str, 
             support = max(data.vwap, min(last.low, previous.low))
     elif strategy == "vwap":
         # 한 봉의 순간 돌파만으로는 진입하지 않고 재지지 또는 직전 고가 돌파를 확인한다.
-        if (data.previous_vwap is not None and previous.close < data.previous_vwap and last.close > data.vwap
+        if (data.previous_vwap is not None and math.isfinite(data.previous_vwap) and data.previous_vwap > 0
+                and data.previous_vwap_through == previous.timestamp
+                and previous.close < data.previous_vwap and last.close > data.vwap
                 and last.close > previous.high
                 and last.close > data.ema9 and rising_structure(data)):
             reason = "VWAP 재돌파와 직전 고가 돌파·상위 주기 상승 확인"

@@ -187,6 +187,14 @@ def test_reference_panel_handles_empty_unknown_and_missing_dates(store):
     assert len(rows) == 6 and all(r['품질'] == 'UNKNOWN' and r['원본 시각'] == '—' for r in rows)
 
 
+def test_reference_panel_does_not_show_expired_quality_as_current_success(store):
+    from sessionquant.dashboard.reference_panel import reference_rows
+    series(store)
+    saved = store.publish(NOW)
+    assert next(row for row in reference_rows(saved, NOW) if row['종목'] == 'IEF')['품질'] == 'GOOD'
+    assert next(row for row in reference_rows(saved, NOW+timedelta(seconds=301)) if row['종목'] == 'IEF')['품질'] == 'STALE'
+
+
 @pytest.mark.parametrize('value', [{'enabled': 'false'}, {'price_seconds': 1}, {'candle_seconds': 301},
     {'calls_per_cycle': True}, {'unknown': True}])
 def test_reference_config_rejects_invalid_intervals(value):

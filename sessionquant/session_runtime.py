@@ -50,7 +50,7 @@ def _open(repo_path, backend=None):
 
 
 def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, strategy="pullback", resume=False,
-                   synthetic=False, backend=None, settings=None, use_news=True, use_market_filter=True, watchlist_history=None):
+                   synthetic=False, backend=None, settings=None, use_news=True, use_market_filter=True, watchlist_history=None, exit_policy=None):
     tape = input_path.read_bytes()
     identity = sha256(tape + b"\x00" + universe_path.read_bytes()).hexdigest()
     records = [json.loads(line) for line in tape.splitlines() if line.strip()]
@@ -83,7 +83,7 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
         elif repo.get_control('watchlist_replay_history_digest'):
             raise ValueError('복구할 때 이전 감시목록 이력을 다시 지정하세요.')
         engine = SessionEngine(repo, universe, strategy=strategy, restore=resume, synthetic=synthetic,
-                               settings=settings, use_news=use_news, use_market_filter=use_market_filter, watchlist_policy=watchlist_policy)
+                               settings=settings, use_news=use_news, use_market_filter=use_market_filter, watchlist_policy=watchlist_policy,exit_policy=exit_policy)
         index = engine.cursor
         if type(index) is not int or not 0 <= index <= len(records):
             raise ValueError("저장된 재생 커서가 올바르지 않습니다.")
@@ -96,7 +96,8 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
             index = end
         return {"state": engine.broker.to_state(), "context": repo.get_control("sessionquant_context"),
                 "fills": jsonable(engine.broker.fills), "orders": jsonable(list(engine.broker.orders.values())),
-                "curve": repo.all("account_snapshots"), "regimes": repo.all("market_regimes")}
+                "curve": repo.all("account_snapshots"), "regimes": repo.all("market_regimes"),
+                'risk_decisions':[row for row in repo.all('pipeline_status') if row.get('kind') == 'risk_decision']}
 
 
 def batch_events(batch) -> list[dict]:
@@ -141,9 +142,11 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             if config.watchlist_enabled:
                 from .watchlist.selection import WatchlistManager
                 watchlist = WatchlistManager(repo, universe, config)
+            from .market_reference.risk import MacroReferenceRiskMonitor
+            reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
-                                   strict_market_data=True)
+                                   strict_market_data=True, macro_reference_risk=reference_risk)
             for snapshot in universe.snapshots:
                 repo.record("universe_history", snapshot)
             if config.source == "toss":

@@ -55,6 +55,8 @@ def process_legacy_quote(broker, quote, now: datetime | None = None, *, max_fill
         pnl = ZERO
         if side == 'buy':
             position = broker.positions.get(intent.symbol)
+            if position is not None and intent.is_add and price < position.avg_price:
+                broker._alert('add_execution_below_average',now,'추가매수 주문 후 평균가 아래에서 모의 체결되었습니다. 위험 예산을 확인하세요.',intent.symbol)
             if position is None:
                 position = FractionalPosition(intent.symbol, ZERO, price, ZERO, intent.stop_price, now, intent.strategy)
                 broker.positions[intent.symbol] = position
