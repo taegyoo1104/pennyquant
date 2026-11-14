@@ -91,9 +91,19 @@ class NewsAnalysis:
     def to_dict(self) -> dict:
         result = jsonable(asdict(self))
         result["news_id"] = self.news_id
-        result["analysis_id"] = sha256(
-            f"{self.news_id}:{self.ticker}:{self.model}:{self.prompt_version}:{self.analyzed_at}".encode()
-        ).hexdigest()[:32]
+        # A retry/refresh is not a new logical analysis just because its clock or
+        # token counters changed. Keep original availability in the payload, but
+        # deduplicate identical facts/errors; actual recovery or revised facts
+        # still receive their own durable record.
+        identity = {name: result[name] for name in (
+            "news_id", "ticker", "model", "prompt_version", "sentiment", "events", "confidence",
+            "requires_verification", "missing_information", "reason", "primary_verified", "entry_eligible",
+            "dilution_risk", "source_kind", "error",
+        )}
+        identity["input_digest"] = self.input_digest or event_digest(self.event, self.ticker)
+        result["analysis_id"] = sha256(json.dumps(
+            identity, sort_keys=True, ensure_ascii=False, allow_nan=False,
+        ).encode()).hexdigest()[:32]
         return result
 
 

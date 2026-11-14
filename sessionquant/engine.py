@@ -1,7 +1,7 @@
 """Receipt-ordered strategy engine with injected paper or broker execution."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -61,7 +61,7 @@ class EventEngine:
                 self.quotes[snap.quote.symbol] = snap.quote
             for raw in context.get("news", []):
                 item = parse_event({"kind": "news", "data": raw}).data
-                self.news[f"{item.id}:{item.received_at.isoformat()}"] = item
+                self._remember_news(item)
             # Quote ticks may be newer than the last scanner snapshot.
             from .events import parse_quote
             for symbol, raw in state.get("latest_quotes", {}).items():
@@ -97,8 +97,14 @@ class EventEngine:
         ticker = analysis.ticker
         if ticker not in event.symbols:
             raise ValueError("analysis ticker is not associated with the original news event")
-        self.analyses[f"{event.id}:{ticker}"] = payload
-        self.news[f"{event.id}:{event.received_at.isoformat()}"] = event
+        analysis_key = f"{event.id}:{ticker}"
+        previous_analysis = self.analyses.get(analysis_key)
+        if previous_analysis and previous_analysis.get("analysis_id") == payload.get("analysis_id"):
+            # Identical repeated observations must not postpone the first real
+            # availability of a fact that is already known to this engine.
+            payload = previous_analysis
+        self.analyses[analysis_key] = payload
+        self._remember_news(event)
         rule = classify(event)
         evaluation_time = utc(now or (datetime.now(timezone.utc) if self.live
                                      else self.last_time or analysis.analyzed_at or datetime.now(timezone.utc)))
@@ -131,7 +137,39 @@ class EventEngine:
                 "sentiment": analysis.sentiment.lower(), "event_type": "analyzed_event",
                 "reason": analysis.reason, "exclude": not analysis.entry_eligible,
                 "dilution_risk": analysis.dilution_risk}})
+        self._prune_news_context(evaluation_time)
         self.persist()
+
+    def _remember_news(self, event: NewsEvent) -> None:
+        # Preserve first actual observation for unchanged content. A re-poll must
+        # neither duplicate its full body in the active snapshot nor freshen it.
+        identity = f"{event.id}:{event_digest(event, '')}"
+        self.news.setdefault(identity, event)
+
+    def _prune_news_context(self, now: datetime) -> None:
+        """Bound active context by time; historical journals are never deleted.
+
+        Keep at least 48 hours and the full configured hazard/catalyst horizon.
+        A hard row cap could silently erase a still-actionable adverse event for
+        a held symbol, so stale publication time is the only eviction criterion.
+        """
+        horizon = max(48.0, self.settings.max_news_age_hours, self.settings.primary_news_max_age_hours)
+        cutoff = utc(now) - timedelta(hours=horizon)
+        self.news = {key: event for key, event in self.news.items() if utc(event.published_at) >= cutoff}
+        retained_ids = {event.id for event in self.news.values()}
+        retained_analyses = {}
+        for key, value in self.analyses.items():
+            if value.get("news_id") not in retained_ids:
+                continue
+            original = value.get("event")
+            if isinstance(original, dict) and original.get("published_at"):
+                try:
+                    if utc(original["published_at"]) < cutoff:
+                        continue
+                except (ValueError, TypeError, AttributeError):
+                    continue
+            retained_analyses[key] = value
+        self.analyses = retained_analyses
 
     def _request_adverse_news_exit(self, analysis, now: datetime) -> bool:
         """A verified fact can invalidate a holding before its price stop."""
@@ -200,9 +238,8 @@ class EventEngine:
         data = event.data
         if event.kind == "news":
             assert isinstance(data, NewsEvent)
-            self.news.setdefault(f"{data.id}:{data.received_at.isoformat()}", data)
-            # Keep one day plus a margin, preventing unbounded feed memory.
-            self.news = {k: v for k, v in self.news.items() if (now - v.received_at).total_seconds() <= 172800}
+            self._remember_news(data)
+            self._prune_news_context(now)
             if self.repository:
                 self.repository.record("news_events", {**jsonable(data), "classification": jsonable(classify(data))})
         elif event.kind == "snapshot":
@@ -296,6 +333,10 @@ class EventEngine:
             self.repository.record("quote_snapshots", quote)
 
     def persist(self):
+        if self.live:
+            self._prune_news_context(datetime.now(timezone.utc))
+        elif self.last_time is not None:
+            self._prune_news_context(self.last_time)
         if not self.repository:
             return
         with self.repository.transaction():
