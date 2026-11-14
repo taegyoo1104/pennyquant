@@ -21,6 +21,12 @@ def parser():
     live.add_argument("--confirm-account-seq",type=int)
     live.add_argument("--acknowledge-live-orders",action="store_true")
     live.add_argument("--max-polls",type=int)
+    account=sub.add_parser("run-account",help="내 실제 계좌 보유·매수 가능 금액·미체결 조회; 주문 없음")
+    account.add_argument("--db",type=Path,default=Path("data/sessionquant-account.db"))
+    account.add_argument("--interval",type=int,default=10)
+    account.add_argument("--port",type=int,default=8502)
+    account.add_argument("--no-dashboard",action="store_true")
+    account.add_argument("--max-polls",type=int)
     setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
     setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
@@ -95,7 +101,11 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == "setup-env":
+        if args.command == "run-account":
+            from .account_monitor import run_account_monitor
+            return asyncio.run(run_account_monitor(db_path=args.db,interval=args.interval,port=args.port,
+                no_dashboard=args.no_dashboard,max_polls=args.max_polls))
+        elif args.command == "setup-env":
             from .local_env import setup_local_env
             setup_local_env(from_current=args.from_current)
         elif args.command == "live-local":
