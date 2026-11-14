@@ -29,7 +29,13 @@ $env:SQ_MYSQL_PASSWORD = [System.Net.NetworkCredential]::new("", $secret).Passwo
 .\venv\Scripts\python.exe -m sessionquant db-check --db data/sessionquant-paper-local.db
 ```
 
-비밀번호 입력란에는 1번에서 설정한 **MySQL 전용 계정 비밀번호**를 입력합니다. 토스 API 클라이언트 시크릿이 아닙니다. 위 환경변수는 현재 터미널에서만 유지됩니다. `.env.example`은 설명용이며 자동으로 로드하지 않습니다. PyCharm의 실행 구성에서 같은 환경변수를 등록하거나 매번 이 터미널에서 실행할 수 있습니다.
+비밀번호 입력란에는 1번에서 설정한 **MySQL 전용 계정 비밀번호**를 입력합니다. 토스 API 클라이언트 시크릿이 아닙니다. 입력을 한 번 마쳤다면 같은 터미널에서 아래 명령으로 저장하세요. 이후 PyCharm·터미널을 다시 열어도 실제 `.env`를 자동으로 읽습니다. `.env.example` 자체는 읽지 않습니다. 기존 프로세스 환경변수가 파일보다 우선합니다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant setup-env --from-current
+```
+
+값이 누락됐다면 `setup-env`를 실행해 한 번 입력하세요. 파일은 Git/Docker에서 제외되며 실주문 활성화는 저장하지 않습니다.
 
 `db-check`는 접속과 테이블 구성을 확인하고 행 수·용량을 출력합니다. 정상 결과의 `ready`는 `true`입니다. 비밀번호를 출력하거나 실제 주문을 전송하지 않습니다. 새 DB의 테이블은 첫 연결 시 자동 생성됩니다.
 

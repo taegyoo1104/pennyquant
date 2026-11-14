@@ -86,6 +86,8 @@ def load_database(path: str | Path) -> DashboardData:
     result = DashboardData()
     repository = None
     try:
+        from sessionquant.local_env import load_local_env
+        load_local_env(database_only=True)
         from sessionquant.database.config import database_backend
         from sessionquant.database.repository import KINDS, Repository
 

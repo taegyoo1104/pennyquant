@@ -6,7 +6,7 @@ Phase 5의 첫 단계인 **로컬 1종목 소액 주문·체결·잔고 대사 �
 
 ## 먼저 주문 없는 사전 검사
 
-기존 프로그램을 종료하고 PyCharm에서 Ctrl+T로 업데이트한다. 같은 PowerShell에 기존 토스 키·MySQL 연결 변수가 설정돼 있어야 한다. API 키·비밀번호·계좌번호를 Git이나 채팅에 올리지 않는다.
+기존 프로그램을 종료하고 PyCharm에서 Ctrl+T로 업데이트한다. `setup-env --from-current`로 한 번 저장한 `.env` 또는 현재 PowerShell에 기존 토스 키·MySQL 연결 변수가 있어야 한다. 접속 설정 자동 로드는 실주문 활성화를 의미하지 않는다. API 키·비밀번호·계좌번호를 Git이나 채팅에 올리지 않는다.
 
 ```powershell
 .\venv\Scripts\python.exe -m pip install --no-deps -e .

@@ -21,6 +21,8 @@ def parser():
     live.add_argument("--confirm-account-seq",type=int)
     live.add_argument("--acknowledge-live-orders",action="store_true")
     live.add_argument("--max-polls",type=int)
+    setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
+    setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
     run = sub.add_parser("run", help="로컬 MySQL과 토스 읽기 전용 시세로 모의 운영")
     run.add_argument("--config", type=Path, default=Path("config/sessionquant.yaml"), help="운영 설정 YAML")
@@ -75,6 +77,12 @@ def parser():
 
 
 def main(argv=None):
+    from .local_env import load_local_env
+    try:
+        load_local_env()
+    except (ImportError,OSError,ValueError):
+        print("로컬 .env를 읽지 못했습니다. requirements.lock 설치와 파일 접근 권한을 확인하세요.",file=sys.stderr)
+        return 2
     argv = list(sys.argv[1:] if argv is None else argv)
     if (not argv or argv[0]!="live-local") and any(x in {"--live", "--acknowledge-live-orders"} for x in argv):
         print("SessionQuant Phase 0~4에서는 실제 주문을 실행할 수 없습니다.", file=sys.stderr)
@@ -87,7 +95,10 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == "live-local":
+        if args.command == "setup-env":
+            from .local_env import setup_local_env
+            setup_local_env(from_current=args.from_current)
+        elif args.command == "live-local":
             from .live.runtime import live_local
             result=asyncio.run(live_local(args.config,execute=args.execute,confirm_account_seq=args.confirm_account_seq,
                 acknowledge=args.acknowledge_live_orders,max_polls=args.max_polls))

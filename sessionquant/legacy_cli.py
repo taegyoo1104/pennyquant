@@ -70,6 +70,8 @@ def metadata(path: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .local_env import load_local_env
+    load_local_env()
     args = parser().parse_args(argv)
     try:
         settings = load_settings(args.config)

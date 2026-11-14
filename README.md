@@ -27,7 +27,7 @@ GitHub 저장소 주소는 [`taegyoo1104/pennyquant`](https://github.com/taegyoo
 
 ## 로컬 MySQL과 토스 시세로 실행하기
 
-[로컬 MySQL 설정](docs/MYSQL_LOCAL.md)에 따라 전용 데이터베이스와 제한된 사용자 계정을 만들고 `SQ_DB_BACKEND=mysql`, `SQ_MYSQL_HOST=127.0.0.1`, `SQ_MYSQL_DATABASE`, `SQ_MYSQL_USER`, `SQ_MYSQL_PASSWORD`를 본인 PC 환경에 설정합니다. 비밀번호는 Git이나 채팅에 넣지 않습니다. `.env.example`는 변수 이름 안내이며 `.env`를 자동으로 읽지는 않습니다.
+[로컬 MySQL 설정](docs/MYSQL_LOCAL.md)에 따라 전용 데이터베이스와 제한된 사용자 계정을 만들고 `SQ_DB_BACKEND=mysql`, `SQ_MYSQL_HOST=127.0.0.1`, `SQ_MYSQL_DATABASE`, `SQ_MYSQL_USER`, `SQ_MYSQL_PASSWORD`를 본인 PC 환경에 설정합니다. 비밀번호는 Git이나 채팅에 넣지 않습니다. `.env.example`은 변수 이름 안내이며, 실제 `.env`는 실행할 때 자동으로 읽습니다. 한 번 저장하는 방법은 아래를 참고하세요.
 
 ```powershell
 .\venv\Scripts\python.exe -m sessionquant db-check --db data/sessionquant-paper-local.db
@@ -120,3 +120,16 @@ python -m sessionquant legacy --help
 ```
 
 사용자 계좌의 최소 금액·소수점 지원·현재 거래 제한은 이 개발 환경에서 검증하지 못했습니다. 실제 주문은 매 실행마다 명시적 활성화와 계좌 확인이 필요합니다. 일반 `run`을 실제 주문으로 바꾸거나 기존 정수 지정가 실거래 어댑터를 소수점 주문에 재사용하지 않습니다.
+
+## 접속 정보를 한 번만 저장하기
+
+이미 토스·MySQL 환경변수를 입력한 **같은 PyCharm PowerShell 터미널**에서 실행합니다.
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.lock
+.\venv\Scripts\python.exe -m sessionquant setup-env --from-current
+```
+
+현재 설정된 토스·MySQL·Alpaca·OpenAI·FRED·SEC 접속 변수를 프로젝트 `.env`에 저장합니다. 값은 출력하지 않으며 Git과 Docker 이미지에서 제외합니다. 터미널·PyCharm을 다시 열어도 `python -m sessionquant ...`가 자동으로 읽습니다. 설정되지 않은 값을 입력하거나 변경하려면 `python -m sessionquant setup-env`를 실행하세요. API 키·DB 비밀번호 입력은 숨겨집니다.
+
+이미 프로세스에 설정된 환경변수가 `.env`보다 우선합니다. 파일 변경 후에도 이전 값을 쓴다면 해당 터미널/PyCharm 실행 구성의 오래된 환경변수를 해제한 뒤 다시 실행하세요. `.env`는 로컬 평문 설정이므로 내용을 공유하거나 업로드하지 마세요. 실행할 때마다 실주문 활성화 플래그가 필요한 규칙은 유지됩니다.

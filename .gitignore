@@ -7,6 +7,8 @@ __pycache__/
 build/
 dist/
 .env
+.env.*
+!.env.example
 data/
 *.db*
 *.engine.lock
