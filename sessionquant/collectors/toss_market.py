@@ -144,7 +144,7 @@ class TossMarketClient:
 
     def _observe_read(self,path,response,started):
         """시장 조회 계측만 보존한다. 인증·계좌·임의 응답 헤더는 저장하지 않는다."""
-        if path not in {'/api/v1/prices','/api/v1/stocks','/api/v1/candles','/api/v1/orderbook'}:
+        if path not in {'/api/v1/prices','/api/v1/stocks','/api/v1/candles','/api/v1/orderbook','/api/v1/sectors'} and not re.fullmatch(r'/api/v1/sectors/[A-Za-z0-9_-]{1,40}/stocks',path):
             return
         limits = {}
         for key in ('ratelimit-limit','ratelimit-remaining','ratelimit-reset',
@@ -155,6 +155,16 @@ class TossMarketClient:
         self.read_observations[path] = {'http_status':response.status_code,
             'duration_seconds':round(monotonic()-started,3),'received_at':now_utc().isoformat(),
             'rate_headers':limits,'rate_headers_observed':bool(limits),'account_quota_verified':False,'cost_usd':None}
+
+    async def sectors(self):
+        """전체 섹터 계층을 조회한다. 시총은 거래대금 순위와 구분한다."""
+        return await self._get('/api/v1/sectors')
+
+    async def sector_stocks(self, sector_id: str):
+        """하위 섹터 포함 미국 보통주의 원화 환산 시총을 읽는다."""
+        if not isinstance(sector_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,40}',sector_id):
+            raise ValueError('토스 섹터 ID 형식을 확인하세요.')
+        return await self._get(f'/api/v1/sectors/{sector_id}/stocks',params={'marketCountry':'US'})
 
     async def prices(self, symbols: list[str]):
         return await self._get("/api/v1/prices", params={"symbols": symbols_parameter(symbols)})

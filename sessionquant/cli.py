@@ -43,7 +43,7 @@ def parser():
     setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
     setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")
     for name, desc in [('watchlist-status','시총 감시·집중 목록 상태 조회'),
-                       ('watchlist-refresh','검증 시총 파일로 감시목록 갱신; 외부 API·주문 없음'),
+                       ('watchlist-refresh','토스 읽기 전용 시총 또는 검증 파일로 감시목록 갱신; 주문 없음'),
                        ('watchlist-export','수집 당시 감시·집중 목록 이력 내보내기')]:
         cmd = sub.add_parser(name,help=desc)
         cmd.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))

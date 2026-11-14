@@ -9,6 +9,7 @@ strategy: pullback
 watchlist_enabled: true
 watchlist_size: 100
 focus_size: 20
+market_cap_provider: auto  # 기존 파일 우선; 없으면 토스 섹터 시총
 market_cap_input: ../data/market-cap-input.json
 symbols_per_cycle: 2
 max_api_calls_per_cycle: 24

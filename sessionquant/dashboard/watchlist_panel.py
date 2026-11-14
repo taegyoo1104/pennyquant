@@ -15,7 +15,7 @@ def current_status(state, now=None):
             as_of = utc(snapshot['as_of_at'])
             if as_of > now:
                 return 'UNKNOWN', False
-            if (now-as_of).total_seconds() > state.get('max_age_days',7)*86400:
+            if (now-as_of).total_seconds() > state.get('max_age_days',7)*86400 or (snapshot.get('valid_until') and now>=utc(snapshot['valid_until'])):
                 status = 'EXPIRED'
         updated = state.get('updated_at')
         active = bool(updated and 0 <= (now-utc(updated)).total_seconds() <= state.get('data_max_age_seconds',120))
@@ -60,6 +60,9 @@ def render_watchlist(state, candidates):
         st.warning('시세 조회 예산을 소진했습니다. 조회가 늦어진 종목은 최신성 검사에서 차단됩니다.')
     if source.get('backoff_until'):
         st.caption('공급자 요청 제한 대기 시각: '+timestamp(source['backoff_until']))
+    snapshot=state.get('snapshot') or {}
+    if snapshot.get('currency')=='KRW':
+        st.caption('토스 보고 종목 시총(원화 환산·일별 갱신). 주식 클래스별 집계이며 발행사 합산이 아닙니다. 공급자의 정확한 평가 시각은 미제공입니다.')
     rows = []
     for row in items:
         last = row.get('last_detail_at')
@@ -67,10 +70,10 @@ def render_watchlist(state, candidates):
         blockers = list(row.get('entry_blockers',[]))
         if status != 'VALID': blockers.append('watchlist_'+status.lower())
         if row['ticker'] not in focus: blockers.append('focus_unknown_or_stale')
-        rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if status == 'VALID' else None, '검증자료 내 순위':row.get('rank'), '시가총액 USD':usd(row.get('market_cap_usd')),
+        rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if status == 'VALID' else None, '검증자료 내 순위':row.get('rank'), '시가총액':(row.get('market_cap_value')+' KRW') if row.get('currency')=='KRW' and row.get('market_cap_value') else usd(row.get('market_cap_usd')),
             '선정 상태':LABELS.get(status,status),'시총 선택 이유':row.get('selection_reason'),
             '현재 집중':row['ticker'] in focus, '집중 근거':row.get('focus_reason'),
-            '시총 기준일':timestamp(row.get('as_of_at')), '시총 수신일':timestamp(row.get('received_at')),
+            '시총 기준일/수집 시작':timestamp(row.get('as_of_at')), '시총 수신일':timestamp(row.get('received_at')),
             '알려진 시각':timestamp(row.get('known_at')), '최종 상세 조회':timestamp(last),
             '최근 조회 시도':timestamp(row.get('last_detail_attempt_at')), '상세 자료 지연(초)':age,
             '신규 진입 차단':', '.join(dict.fromkeys(blockers)) if active else '현재 수집 상태 미확인'})

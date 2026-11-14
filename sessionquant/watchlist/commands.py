@@ -1,4 +1,4 @@
-"""감시목록 읽기·검증·내보내기 명령. 증권사·LLM·주문 API는 호출하지 않는다."""
+"""감시목록 조회·검증·내보내기. 갱신만 토스 읽기 API를 사용할 수 있다."""
 import json
 import os
 from datetime import datetime, timezone
@@ -21,7 +21,28 @@ async def command(config, action, *, output=None):
         stack, repo = _open(config.db_path, config.database_backend)
         with stack:
             manager = WatchlistManager(repo, universe, config)
-            result = await manager.refresh(now, force=True)
+            from ..watchlist.toss_capitalization import bind_provider
+            from ..collectors.toss_market import TossMarketClient
+            from ..connection_checks import active_collector
+            client=TossMarketClient()
+            try:
+                if bind_provider(manager,client):
+                    if active_collector(repo):
+                        raise ValueError('토스 엔진·계좌 조회기를 종료한 뒤 갱신하세요. 인증 토큰 충돌을 방지합니다.')
+                    from .budget import ReadCallBudget,retry_budget
+                    budget=ReadCallBudget(64)
+                    token=retry_budget.set(budget)
+                    try:
+                        async def read(stream,symbol):
+                            budget.take()
+                            return await client.sectors() if stream=='sectors' else await client.sector_stocks(symbol)
+                        # 계층 1회 + 대분류별 1회. 호출 제한·실패 시 재전송하지 않고 종료한다.
+                        import asyncio
+                        await asyncio.wait_for(manager.provider.advance(read,limit=32),timeout=90)
+                    finally:retry_budget.reset(token)
+                result = await manager.refresh(datetime.now(timezone.utc), force=True)
+            finally:await client.aclose()
+            now=datetime.now(timezone.utc)
             manager.publish(now)
             return {'status':result['status'], 'watchlist_size':len(result['items']), 'refresh':result['refresh'],
                     'live_orders_enabled':False}

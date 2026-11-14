@@ -1,5 +1,5 @@
 # 기존 config/sessionquant.yaml에도 아래 감시 설정의 기본값이 자동 적용된다.
-# 이 파일을 실제 운영 설정으로 사용하려면 검증된 시총 파일과 로컬 DB를 먼저 준비한다.
+# 이 파일을 실제 운영 설정으로 사용하려면 로컬 DB·토스 키를 준비한다. 기존 시총 파일도 지원한다.
 environment: PAPER_LOCAL
 database_backend: mysql
 db_path: ../data/sessionquant-paper-local.db
@@ -10,6 +10,7 @@ watchlist_enabled: true
 watchlist_size: 100
 focus_size: 20
 selection_method: market_cap_top
+market_cap_provider: auto  # 기존 파일 우선; 없으면 토스 섹터 시총
 market_cap_input: ../data/market-cap-input.json
 watchlist_refresh_days: 7
 watchlist_data_max_age_seconds: 120

@@ -38,6 +38,9 @@ class TossSessionSource:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.cursor = 0
         self.watchlist = watchlist
+        if watchlist is not None:
+            from ..watchlist.toss_capitalization import bind_provider
+            bind_provider(watchlist,self.client)
         self.max_cycle_seconds = max_cycle_seconds
         self.history_pages_per_cycle = history_pages_per_cycle
         self.on_priority_batch = on_priority_batch
@@ -132,7 +135,7 @@ class TossSessionSource:
 
         async def call(source, method, *args, symbol='*', optional=False, **kwargs):
             budget.reserved = 0
-            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'MARKET_DATA'
+            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
             until = state.get('reference_backoff_groups',{}).get(group)
             if until and utc(self.clock()) < utc(until):
                 return None
@@ -160,7 +163,7 @@ class TossSessionSource:
                     error['http_status'] = exc.response.status_code
                     if exc.response.status_code == 429:
                         until = provider_retry_until(exc.response.headers.get('Retry-After'),utc(self.clock())).isoformat()
-                        if source.startswith('market_reference:'):
+                        if source.startswith(('market_reference:','market_cap:')):
                             state.setdefault('reference_backoff_groups',{})[group] = until
                         else:
                             state['backoff_until'] = until
@@ -274,7 +277,18 @@ class TossSessionSource:
                 await candles(symbol)
             await deliver()
             state['priority_phase_seconds'] = round(monotonic()-started,3)
-            await manager.refresh(utc(self.clock()))
+            from ..watchlist.toss_capitalization import TossMarketCapProvider
+            if isinstance(manager.provider,TossMarketCapProvider):
+                async def cap_read(stream,symbol):
+                    method,args = (self.client.sectors,()) if stream=='sectors' else (self.client.sector_stocks,(symbol,))
+                    return await call('market_cap:'+stream,method,*args,symbol=symbol or '*',optional=True)
+                try:
+                    await manager.provider.advance(cap_read,limit=1)
+                except (ValueError,TypeError,KeyError):
+                    batch.errors.append({'source':'market_cap','message':'토스 섹터 시총 형식 미확인; 기존 검증 목록을 보존합니다.'})
+            current_snapshot=manager.store.at(utc(self.clock())) or {}
+            force_cap=isinstance(manager.provider,TossMarketCapProvider) and manager.provider.state.get('complete',False) and current_snapshot.get('contract')!='toss_reported_security_krw_v1'
+            await manager.refresh(utc(self.clock()),force=force_cap)
             if self.reference_monitor is not None:
                 async def reference_read(stream,symbol):
                     from ..market_reference.contracts import REFERENCES

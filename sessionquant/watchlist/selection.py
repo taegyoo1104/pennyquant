@@ -68,6 +68,7 @@ class WatchlistManager:
         self.repo, self.universe, self.config = repo, universe, config
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.allow_synthetic = allow_synthetic
+        self.provider_explicit = provider is not None
         self.provider = provider or FileMarketCapProvider(config.market_cap_input)
         self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days)
         self.store = WatchlistStore(repo, universe, max_age_days=config.watchlist_refresh_days)
@@ -93,13 +94,16 @@ class WatchlistManager:
                 self.store.add(snapshot)
             valid = snapshot.payload['data_status'] == 'VALID'
             report = {'status': 'ok' if valid else 'partial', 'attempted_at': now.isoformat(),
-                'next_attempt_at': (min(now+timedelta(days=self.config.watchlist_refresh_days), utc(snapshot.payload['as_of_at'])+timedelta(days=self.config.watchlist_refresh_days)) if valid
+                'next_attempt_at': (min(now+timedelta(days=self.config.watchlist_refresh_days), utc(snapshot.payload.get('valid_until', (utc(snapshot.payload['as_of_at'])+timedelta(days=self.config.watchlist_refresh_days)).isoformat()))) if valid
                                     else now+timedelta(seconds=60)).isoformat(),
                 'issues': snapshot.payload['issues'], 'message': '시총 감시목록 갱신' if valid else '시총 자료 일부 미확인: 신규 진입 보류'}
         except (OSError, ValueError, TypeError, KeyError, httpx.HTTPError, RuntimeError) as exc:
             report = {'status': 'error', 'attempted_at': now.isoformat(),
                 'next_attempt_at': (now+timedelta(seconds=60)).isoformat(), 'error_type': type(exc).__name__,
                 'message': '검증된 시총 공급 자료가 없습니다. 기존 목록의 만료 여부를 확인하며 신규 임의 목록을 생성하지 않습니다.'}
+            from .toss_capitalization import CollectionPending
+            if isinstance(exc,CollectionPending):
+                report.update(status='collecting',message=str(exc),next_attempt_at=now.isoformat())
             if isinstance(exc, httpx.HTTPStatusError):
                 report['http_status'] = exc.response.status_code
                 if exc.response.status_code == 429:
@@ -285,7 +289,8 @@ class HistoricalWatchlistPolicy:
         if not snapshots:
             return ['watchlist_history_unknown']
         cap = max(snapshots, key=lambda r:r['known_at'])
-        if cap['data_status'] != 'VALID' or now-utc(cap['as_of_at']) > self.max_age:
+        if (cap['data_status'] != 'VALID' or now-utc(cap['as_of_at']) > self.max_age
+                or (cap.get('valid_until') and now>=utc(cap['valid_until']))):
             return ['watchlist_history_expired_or_partial']
         if cap['synthetic'] and not self.allow_synthetic:
             return ['watchlist_history_synthetic_blocked']

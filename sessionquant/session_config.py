@@ -24,6 +24,7 @@ class SessionConfig:
     focus_size: int = 20
     selection_method: str = 'market_cap_top'
     market_cap_input: Path = Path('data/market-cap-input.json')
+    market_cap_provider: str = 'auto'
     watchlist_refresh_days: int = 7
     watchlist_data_max_age_seconds: int = 120
     focus_min_hold_seconds: int = 300
@@ -51,6 +52,8 @@ class SessionConfig:
             raise ValueError("지원하지 않는 전략입니다.")
         if self.source not in {"toss", "file"} or (self.source == "file" and self.input_path is None):
             raise ValueError("source는 toss 또는 file이며, file은 input_path가 필요합니다.")
+        if self.market_cap_provider not in {'auto','file','toss'}:
+            raise ValueError('market_cap_provider는 auto, file, toss여야 합니다.')
         if type(self.watchlist_enabled) is not bool or self.selection_method != 'market_cap_top':
             raise ValueError('감시목록은 불리언·market_cap_top 정책이어야 합니다.')
         for name, low, high in [('watchlist_size',1,100),('focus_size',1,20),('watchlist_refresh_days',1,7),

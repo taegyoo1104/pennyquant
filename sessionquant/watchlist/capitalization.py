@@ -76,6 +76,9 @@ class WatchlistSelector:
     def select(self, batch, universe, now, *, allow_synthetic=False):
         """불완전 입력의 순위를 전체 S&P 500의 확정 순위로 표시하지 않는다."""
         now = utc(now)
+        if isinstance(batch,dict) and batch.get('schema_version') == 2:
+            from .toss_capitalization import select_toss
+            return select_toss(batch,universe,now,size=self.size,allow_synthetic=allow_synthetic)
         members = universe.members(now)
         if not members:
             raise ValueError('S&P 500 편입 정보가 없거나 만료됐습니다.')
@@ -207,7 +210,7 @@ class WatchlistStore:
         if row:
             result['items'] = row['items']
             result['status'] = row['data_status']
-            if now-utc(row['as_of_at']) > self.max_age:
+            if now-utc(row['as_of_at']) > self.max_age or (row.get('valid_until') and now>=utc(row['valid_until'])):
                 result['status'] = 'EXPIRED'
             if not members:
                 result['status'] = 'MEMBERSHIP_UNKNOWN'
