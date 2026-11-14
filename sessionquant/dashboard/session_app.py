@@ -41,6 +41,7 @@ class DashboardData:
     connected: bool = False
     actual_account: dict | None = None
     account_status: dict = field(default_factory=dict)
+    watchlist_state: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -68,7 +69,7 @@ def timestamp(value: Any) -> str:
         if parsed.tzinfo is None:
             return "시간대 확인 필요"
         return parsed.astimezone(SEOUL).strftime("%m.%d %H:%M:%S KST")
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "시각 확인 필요"
 
 
@@ -98,6 +99,7 @@ def load_database(path: str | Path) -> DashboardData:
             return result
         repository = Repository(path)
         result.state = repository.load_state() or {}
+        result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
         result.actual_account=repository.get_control("actual_account_snapshot")
         result.account_status=repository.get_control("account_monitor_status",{}) or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
@@ -297,7 +299,13 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         else:
             st.caption("중요 경제 일정: 미확인. 일정이 없다는 뜻은 아닙니다.")
     with candidates:
-        st.subheader("S&P 500 후보와 진입 근거")
+        from sessionquant.dashboard.watchlist_panel import render_watchlist
+        if view['environment'] == 'PAPER_LOCAL':
+            render_watchlist(data.watchlist_state, data.tables['candidates'])
+        else:
+            st.caption('시총 감시 100·집중 20 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
+        st.subheader("기술 분석 이력과 진입 근거")
+        st.caption('아래 표는 과거 분석 기록을 포함합니다. 현재 감시·집중 여부는 위 목록에서 확인하세요.')
         rows = []
         for row in latest_by_symbol(data.tables["candidates"]).values():
             rows.append({"종목": row.get("symbol"), "점수": row.get("score"), "상태": "진입 신호" if row.get("eligible") and row.get("signal") else "관찰",

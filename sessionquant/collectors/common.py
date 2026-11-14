@@ -54,6 +54,12 @@ async def get_readonly(client: httpx.AsyncClient, url: str, *, limiter: RateLimi
     if not 1 <= attempts <= 5:
         raise ValueError("attempts must be 1..5")
     for attempt in range(attempts):
+        if attempt:
+            # 읽기 수집기가 설정한 예산을 재시도에도 적용한다. 주문 경로는 사용하지 않는다.
+            from ..watchlist.budget import retry_budget
+            budget = retry_budget.get()
+            if budget is not None:
+                budget.take()
         await limiter.wait()
         try:
             response = await client.get(url, **kwargs)
@@ -62,6 +68,11 @@ async def get_readonly(client: httpx.AsyncClient, url: str, *, limiter: RateLimi
                 raise
             await asyncio.sleep(0.25 * 2**attempt)
             continue
+        if response.status_code == 429:
+            from ..watchlist.budget import retry_budget
+            if retry_budget.get() is not None:
+                # 관리형 감시 수집기는 전체 주기를 대기시킨다. 같은 주기에서 재호출하지 않는다.
+                response.raise_for_status()
         if response.status_code in {429, 500, 502, 503, 504} and attempt + 1 < attempts:
             await asyncio.sleep(retry_after(response.headers.get("Retry-After"), 0.25 * 2**attempt))
             continue

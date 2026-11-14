@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from hashlib import sha256
 import json
 
@@ -32,8 +33,9 @@ def event_time(raw: dict) -> datetime:
 class SessionEngine:
     def __init__(self, repository: Repository, universe: UniverseStore, *, strategy: str = "pullback",
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
-                 synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None):
+                 synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None):
         self.control_state=control_state
+        self.watchlist_policy=watchlist_policy
         self.repo, self.universe = repository, universe
         self.strategy, self.synthetic, self.use_news = strategy, synthetic, use_news
         self.use_market_filter = use_market_filter
@@ -249,6 +251,11 @@ class SessionEngine:
                 for symbol in {q.symbol for q in quotes} - {"SPY", "QQQ"}:
                     risk = self.risk_context(now, symbol)
                     decision = self.market.evaluate(symbol, now, news_blocked=bool(risk.get("block_entries") or risk.get("blackout")))
+                    if self.watchlist_policy is not None:
+                        scope_blockers = self.watchlist_policy.entry_blockers(symbol, now)
+                        if scope_blockers:
+                            decision = replace(decision, eligible=False, signal=None,
+                                blockers=tuple(dict.fromkeys([*decision.blockers, *scope_blockers])))
                     decisions.append((decision, risk))
                     self.repo.record("candidates", {"id": symbol, "timestamp": now, **decision.to_dict(), "news_risk": risk})
                 for decision, risk in sorted(decisions, key=lambda item: (-item[0].score, item[0].symbol)):

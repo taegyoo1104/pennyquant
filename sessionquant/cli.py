@@ -42,6 +42,13 @@ def parser():
     news_check.add_argument("--symbol",default="AAPL")
     setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
     setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")
+    for name, desc in [('watchlist-status','시총 감시·집중 목록 상태 조회'),
+                       ('watchlist-refresh','검증 시총 파일로 감시목록 갱신; 외부 API·주문 없음'),
+                       ('watchlist-export','수집 당시 감시·집중 목록 이력 내보내기')]:
+        cmd = sub.add_parser(name,help=desc)
+        cmd.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
+        if name == 'watchlist-export':
+            cmd.add_argument('--output',type=Path,required=True)
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
     run = sub.add_parser("run", help="로컬 MySQL과 토스 읽기 전용 시세로 모의 운영")
     run.add_argument("--config", type=Path, default=Path("config/sessionquant.yaml"), help="운영 설정 YAML")
@@ -62,6 +69,7 @@ def parser():
     replay.add_argument("--db", type=Path, default=Path("data/sessionquant-replay.db"))
     replay.add_argument("--backend", choices=("sqlite", "mysql"), default="sqlite")
     replay.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
+    replay.add_argument("--watchlist-history",type=Path,help="당시 저장된 감시·집중 목록 이력 JSON")
     replay.add_argument("--resume", action="store_true", help="동일 입력과 설정으로 중단 지점 복구")
     backtest.add_argument("--report", type=Path, default=Path("data/session-report.json"))
     universe = sub.add_parser("universe-refresh", help="현재 구성 목록을 오늘부터 유효한 관측으로 저장")
@@ -114,7 +122,12 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == "check-connections":
+        if args.command in {'watchlist-status','watchlist-refresh','watchlist-export'}:
+            from .session_config import load_session_config
+            from .watchlist.commands import command
+            report = asyncio.run(command(load_session_config(args.config),args.command,output=getattr(args,'output',None)))
+            print(json.dumps(report,ensure_ascii=False,indent=2))
+        elif args.command == "check-connections":
             from .connection_checks import check_connections
             print(json.dumps(asyncio.run(check_connections(args.config,offline=args.offline,symbol=args.symbol)),ensure_ascii=False,indent=2))
         elif args.command == "setup-news":
@@ -182,7 +195,7 @@ def main(argv=None):
             synthetic = metadata(args.input).get("synthetic", False) is True
             if args.command == "replay":
                 result = replay_session(args.input, args.db, args.universe, strategy=args.strategy, resume=args.resume,
-                    synthetic=synthetic, backend=args.backend, settings=settings)
+                    synthetic=synthetic, backend=args.backend, settings=settings, watchlist_history=args.watchlist_history)
                 print(json.dumps({"db": str(args.db), "equity": result["state"]["equity"], "fills": len(result["fills"])}, ensure_ascii=False))
             else:
                 from .session_backtest import compare_session

@@ -185,3 +185,34 @@ def test_connection_probe_detects_other_mysql_runtime_namespace(mysql_repositori
     live = mysql_repositories()
     live.set_control('account_monitor_status', {'status': 'ok', 'updated_at': datetime.now(timezone.utc).isoformat()})
     assert active_collector(paper)
+
+
+async def test_real_mysql_watchlist_snapshot_focus_and_fair_order_survive_reconnection(mysql_repositories, tmp_path):
+    """격리된 MySQL 원장에서 합성 100→20 근거와 조회 순서를 다시 읽는다."""
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.session_config import SessionConfig
+    from sessionquant.watchlist.selection import WatchlistManager
+    from watchlist_fixtures import NOW, Provider, cap_batch, observe
+
+    repo = mysql_repositories()
+    universe = UniverseStore(tmp_path / 'members.json')
+    universe.refresh([f'T{i:03}' for i in range(500)], source='SYNTHETIC_FIXTURE',
+                     observed_at=NOW-timedelta(days=1))
+    config = SessionConfig(database_backend='mysql', market_cap_input=tmp_path / 'unused.json')
+    manager = WatchlistManager(repo, universe, config, provider=Provider(cap_batch()), allow_synthetic=True)
+    await manager.refresh(NOW)
+    now = observe(manager)
+    assert manager.focus(now) == [f'T{i:03}' for i in range(400, 420)]
+    manager.scheduler.mark('T400', now)
+    manager.scheduler.mark('T401', now)
+    manager.publish(now)
+
+    reader = mysql_repositories(repo.namespace)
+    restored = WatchlistManager(reader, universe, config, allow_synthetic=True)
+    assert restored.store.at(now)['id'] == manager.store.at(now)['id']
+    assert len(restored.store.status(now, allow_synthetic=True)['items']) == 100
+    assert restored.scheduler.choose(restored.focus(now), 2) == ['T402', 'T403']
+    view = reader.get_control('watchlist_dashboard_v1')
+    assert view['snapshot']['synthetic'] is True and view['focus_count'] == 20
+    assert any(row.get('kind') == 'watchlist_focus' and row['items'] for row in reader.all('pipeline_status'))
+    assert reader.all('orders') == []

@@ -1,0 +1,30 @@
+# 기존 config/sessionquant.yaml에도 아래 감시 설정의 기본값이 자동 적용된다.
+# 이 파일을 실제 운영 설정으로 사용하려면 검증된 시총 파일과 로컬 DB를 먼저 준비한다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-paper-local.db
+universe_path: ../data/sp500-universe.json
+source: toss
+strategy: pullback
+watchlist_enabled: true
+watchlist_size: 100
+focus_size: 20
+selection_method: market_cap_top
+market_cap_input: ../data/market-cap-input.json
+watchlist_refresh_days: 7
+watchlist_data_max_age_seconds: 120
+focus_min_hold_seconds: 300
+# 기존 설정과 호환: 전체 100개의 순환 수가 아닌 집중 후보의 상세 조회 상한이다.
+symbols_per_cycle: 2
+max_api_calls_per_cycle: 24
+light_refresh_seconds: 30
+ranking_refresh_seconds: 60
+poll_seconds: 10
+news_enabled: true
+news_refresh_seconds: 600
+include_alpaca: true
+company_rss_catalog: true
+companies: {}
+portfolio:
+  min_entry_to_exit_minutes: 30
+llm: {}

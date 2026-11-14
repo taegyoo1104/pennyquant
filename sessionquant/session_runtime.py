@@ -50,7 +50,7 @@ def _open(repo_path, backend=None):
 
 
 def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, strategy="pullback", resume=False,
-                   synthetic=False, backend=None, settings=None, use_news=True, use_market_filter=True):
+                   synthetic=False, backend=None, settings=None, use_news=True, use_market_filter=True, watchlist_history=None):
     tape = input_path.read_bytes()
     identity = sha256(tape + b"\x00" + universe_path.read_bytes()).hexdigest()
     records = [json.loads(line) for line in tape.splitlines() if line.strip()]
@@ -70,8 +70,20 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
         if repo.load_state() and not resume:
             raise ValueError("기존 장부를 복구하려면 --resume 또는 새로운 --db를 지정하세요.")
         bind_runtime(repo, source="replay", identity=identity, synthetic=synthetic)
+        watchlist_policy = None
+        if watchlist_history is not None:
+            from .watchlist.selection import HistoricalWatchlistPolicy
+            history = json.loads(Path(watchlist_history).read_text(encoding='utf-8-sig'))
+            watchlist_policy = HistoricalWatchlistPolicy(history, universe, allow_synthetic=synthetic)
+            digest = sha256(Path(watchlist_history).read_bytes()).hexdigest()
+            previous_digest = repo.get_control('watchlist_replay_history_digest')
+            if previous_digest is not None and previous_digest != digest:
+                raise ValueError('감시목록 재생 이력이 변경됐습니다. 별도 실행 공간을 사용하세요.')
+            repo.set_control('watchlist_replay_history_digest', digest)
+        elif repo.get_control('watchlist_replay_history_digest'):
+            raise ValueError('복구할 때 이전 감시목록 이력을 다시 지정하세요.')
         engine = SessionEngine(repo, universe, strategy=strategy, restore=resume, synthetic=synthetic,
-                               settings=settings, use_news=use_news, use_market_filter=use_market_filter)
+                               settings=settings, use_news=use_news, use_market_filter=use_market_filter, watchlist_policy=watchlist_policy)
         index = engine.cursor
         if type(index) is not int or not 0 <= index <= len(records):
             raise ValueError("저장된 재생 커서가 올바르지 않습니다.")
@@ -112,6 +124,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
     market = news = market_task = news_task = account_task = dashboard = None
     notifier = DesktopNotifier(enabled=desktop_notifications)
     engine = None
+    watchlist = None
     with stack:
         try:
             identity = str(config.input_path.resolve()) if config.input_path else "toss-readonly"
@@ -125,12 +138,19 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             control_state=begin_session(repo,mode="paper")
             from .trading_controls import finish_session
             stack.callback(finish_session,repo,control_state)
+            if config.watchlist_enabled:
+                from .watchlist.selection import WatchlistManager
+                watchlist = WatchlistManager(repo, universe, config)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
-                                   restore=bool(repo.load_state()), risk_provider=news,control_state=control_state)
+                                   restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist)
             for snapshot in universe.snapshots:
                 repo.record("universe_history", snapshot)
             if config.source == "toss":
-                market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle)
+                market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
+                    max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
+                    ranking_refresh_seconds=config.ranking_refresh_seconds)
+                if hasattr(market, 'restore_seen'):
+                    market.restore_seen(engine.market.bars)
             if not no_dashboard:
                 app = Path(__file__).parent / "dashboard" / "session_app.py"
                 dashboard = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(app),
@@ -143,8 +163,9 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             while max_cycles is None or cycles < max_cycles:
                 current, monotonic = datetime.now(timezone.utc), time.monotonic()
                 if market and market_task is None and monotonic >= next_market:
-                    market_task = asyncio.create_task(market.poll(list(universe.members(current)),
-                                                      priority_symbols=list(engine.broker.positions)))
+                    priority = list(dict.fromkeys([*engine.broker.positions, *engine.broker.exit_intents,
+                        *(o.intent.symbol for o in engine.broker.get_open_orders())]))
+                    market_task = asyncio.create_task(market.poll(list(universe.members(current)), priority_symbols=priority))
                 if market and account_task is None and monotonic>=next_account:
                     from .account_monitor import fetch_account_snapshot
                     account_task=asyncio.create_task(fetch_account_snapshot(market.client))
@@ -158,7 +179,14 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                         repo.set_control('account_monitor_status',{'status':'error','message':'실계좌 갱신 실패: 이전 조회 기록입니다.','error_type':type(exc).__name__})
                     account_task=None
                 if news and news_task is None and monotonic >= next_news:
-                    symbols = list(dict.fromkeys([*engine.broker.positions, *engine.market.quotes]))
+                    priority = list(dict.fromkeys([*engine.broker.positions, *engine.broker.exit_intents,
+                        *(o.intent.symbol for o in engine.broker.get_open_orders())]))
+                    if watchlist:
+                        contract = watchlist.news_targets(current, priority)
+                        repo.set_control('watchlist_news_contract_v1', contract)
+                        symbols = contract['analysis_symbols']
+                    else:
+                        symbols = list(dict.fromkeys([*priority, *engine.market.quotes]))
                     symbols = [s for s in symbols if s not in {"SPY", "QQQ"}][:20]
                     news_task = asyncio.create_task(news.refresh(symbols, held_symbols=tuple(engine.broker.positions)))
                     next_news = monotonic + config.news_refresh_seconds
@@ -203,6 +231,9 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                                        controls={"sq_input_prefix": sha256(consumed).hexdigest()})
                     cycles += 1
                     next_market = monotonic + config.poll_seconds
+                if watchlist and not market:
+                    await watchlist.refresh(current)
+                    watchlist.publish(current, priority_symbols=list(engine.broker.positions))
                 if monotonic >= next_tick:
                     engine.tick(datetime.now(timezone.utc))
                     for alert in engine.broker.alerts:

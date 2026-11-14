@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "synthetic": false,
+  "source": "검증한 공급자 이름으로 교체",
+  "source_verified": false,
+  "source_documentation": "시총 정의·이용 권한·기준 시각을 확인한 공식 문서",
+  "currency": "USD",
+  "market_cap_basis": "issuer_total",
+  "as_of_at": null,
+  "received_at": null,
+  "known_at": null,
+  "observations": [
+    {
+      "ticker": "AAPL",
+      "issuer_id": null,
+      "issuer_verified": false,
+      "market_cap_usd": null,
+      "data_status": "UNKNOWN"
+    }
+  ]
+}

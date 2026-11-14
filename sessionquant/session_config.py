@@ -19,6 +19,17 @@ class SessionConfig:
     poll_seconds: float = 10.0
     news_refresh_seconds: float = 600.0
     symbols_per_cycle: int = 2
+    watchlist_enabled: bool = True
+    watchlist_size: int = 100
+    focus_size: int = 20
+    selection_method: str = 'market_cap_top'
+    market_cap_input: Path = Path('data/market-cap-input.json')
+    watchlist_refresh_days: int = 7
+    watchlist_data_max_age_seconds: int = 120
+    focus_min_hold_seconds: int = 300
+    max_api_calls_per_cycle: int = 24
+    light_refresh_seconds: int = 30
+    ranking_refresh_seconds: int = 60
     news_enabled: bool = True
     include_alpaca: bool = True
     company_rss_catalog: bool = True
@@ -35,6 +46,16 @@ class SessionConfig:
             raise ValueError("지원하지 않는 전략입니다.")
         if self.source not in {"toss", "file"} or (self.source == "file" and self.input_path is None):
             raise ValueError("source는 toss 또는 file이며, file은 input_path가 필요합니다.")
+        if type(self.watchlist_enabled) is not bool or self.selection_method != 'market_cap_top':
+            raise ValueError('감시목록은 불리언·market_cap_top 정책이어야 합니다.')
+        for name, low, high in [('watchlist_size',1,100),('focus_size',1,20),('watchlist_refresh_days',1,7),
+                               ('watchlist_data_max_age_seconds',10,300),('focus_min_hold_seconds',0,3600),
+                               ('max_api_calls_per_cycle',8,100),('light_refresh_seconds',10,300),('ranking_refresh_seconds',30,600)]:
+            value=getattr(self,name)
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError(f'{name} 값은 {low}~{high} 정수여야 합니다.')
+        if self.focus_size > self.watchlist_size:
+            raise ValueError('집중 분석 수는 감시목록 수보다 클 수 없습니다.')
         for name, minimum in (("poll_seconds", 1), ("news_refresh_seconds", 300)):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < minimum:
@@ -57,7 +78,7 @@ def load_session_config(path: str | Path) -> SessionConfig:
     if not isinstance(payload, dict) or set(payload) - {f.name for f in fields(SessionConfig)}:
         raise ValueError("알 수 없는 SessionQuant 설정 항목이 있습니다.")
     for name, default in (("db_path", "../data/sessionquant-paper-local.db"),
-                          ("universe_path", "../data/sp500-universe.json"), ("input_path", None)):
+                          ("universe_path", "../data/sp500-universe.json"), ("market_cap_input", "../data/market-cap-input.json"), ("input_path", None)):
         value = payload.get(name, default)
         if value is not None:
             if not isinstance(value, str) or not value.strip():
