@@ -24,7 +24,7 @@ pennyquant = "sessionquant.cli:main"
 include = ["sessionquant*", "pennyquant*"]
 
 [tool.setuptools.package-data]
-sessionquant = ["config/*.yaml", "data/*.jsonl"]
+sessionquant = ["config/*.yaml", "config/*.json", "data/*.jsonl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

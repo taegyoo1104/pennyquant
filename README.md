@@ -192,3 +192,14 @@ OpenAI **프로그램 누적 비용 / 이번 달 비용 / 직접 기록한 충�
 ```
 
 토스 시세·실계좌, MySQL, OpenAI 모델 접근, Alpaca·SEC·RSS·공식 기관·Treasury·GDELT·FRED를 검사합니다. 주문이나 LLM 텍스트 생성은 하지 않습니다. 모델 조회 성공은 잔액·실제 생성 성공의 증거가 아닙니다. `--offline`을 붙이면 저장된 설정 여부만 확인합니다. 미등록 RSS는 `not_configured`, 실행 중 토스 엔진을 감지하면 토큰 충돌을 피하려고 `skipped_active_collector`로 표시합니다. 종료 직후에는 마지막 기록이 만료되는 60초 뒤 다시 검사하세요.
+
+
+## 기업 RSS 기본 등록
+
+[검증된 공식 기업 RSS 목록](docs/COMPANY_RSS.md)을 업데이트 후 자동으로 읽습니다. **RSS 등록 범위는 확인 당시 S&P 500 내 시가총액 상위 100개 기업**이며, 그중 현재 수집할 수 있는 공식 피드를 포함합니다. 감시·매매 유니버스는 기존 S&P 500 전체를 사용합니다. 시총 순위 확인 시점·선정 방식과 제외 사유를 문서에 기록했습니다.
+
+기존 `config/sessionquant.yaml`의 사용자 기업별 필드가 기본 목록보다 우선합니다. 전체 기본 목록을 끄려면 `company_rss_catalog: false`, 개별 RSS를 끄려면 해당 기업에 `rss_urls: []`를 지정합니다. 순위는 검증 당시 스냅숏이며 운영 중 자동 변경하지 않습니다. 등록된 전체 연결을 확인하려면 실행합니다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant check-news --connect --provider rss
+```

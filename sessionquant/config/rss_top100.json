@@ -1,0 +1,1922 @@
+{
+  "schema_version": 1,
+  "scope": "rss_only",
+  "observed_at": "2026-11-14T07:33:21.191215+00:00",
+  "observed_at_kst": "2026-11-14T16:33:21.191215+09:00",
+  "market_cap_source": "https://stockanalysis.com/list/sp-500-stocks/",
+  "membership_source": "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+  "ranking_method": "시가총액 열을 USD Decimal 값으로 내림차순 정렬. 지수 비중 순서를 사용하지 않음. 동일 CIK 주식 클래스는 합산하지 않고 제공된 기업 시총 중 최댓값을 사용.",
+  "source_tickers": 503,
+  "source_issuers": 500,
+  "selected_issuers": 100,
+  "selected_tickers": 101,
+  "companies": [
+    {
+      "cik": "0000320193",
+      "primary_symbol": "AAPL",
+      "company_name": "Apple Inc.",
+      "market_cap_usd": "5180000000000",
+      "market_cap_display": "5.18T",
+      "symbols": [
+        "AAPL"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AAPL",
+          "company_name": "Apple Inc.",
+          "market_cap_display": "5.18T",
+          "market_cap_usd": "5180000000000"
+        }
+      ],
+      "rank": 1
+    },
+    {
+      "cik": "0001045810",
+      "primary_symbol": "NVDA",
+      "company_name": "Nvidia",
+      "market_cap_usd": "3930000000000",
+      "market_cap_display": "3.93T",
+      "symbols": [
+        "NVDA"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "NVDA",
+          "company_name": "Nvidia",
+          "market_cap_display": "3.93T",
+          "market_cap_usd": "3930000000000"
+        }
+      ],
+      "rank": 2
+    },
+    {
+      "cik": "0000789019",
+      "primary_symbol": "MSFT",
+      "company_name": "Microsoft",
+      "market_cap_usd": "3890000000000",
+      "market_cap_display": "3.89T",
+      "symbols": [
+        "MSFT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MSFT",
+          "company_name": "Microsoft",
+          "market_cap_display": "3.89T",
+          "market_cap_usd": "3890000000000"
+        }
+      ],
+      "rank": 3
+    },
+    {
+      "cik": "0001652044",
+      "primary_symbol": "GOOGL",
+      "company_name": "Alphabet Inc. (Class A)",
+      "market_cap_usd": "3640000000000",
+      "market_cap_display": "3.64T",
+      "symbols": [
+        "GOOGL",
+        "GOOG"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "GOOGL",
+          "company_name": "Alphabet Inc. (Class A)",
+          "market_cap_display": "3.64T",
+          "market_cap_usd": "3640000000000"
+        },
+        {
+          "symbol": "GOOG",
+          "company_name": "Alphabet Inc. (Class C)",
+          "market_cap_display": "3.62T",
+          "market_cap_usd": "3620000000000"
+        }
+      ],
+      "rank": 4
+    },
+    {
+      "cik": "0001018724",
+      "primary_symbol": "AMZN",
+      "company_name": "Amazon",
+      "market_cap_usd": "2880000000000",
+      "market_cap_display": "2.88T",
+      "symbols": [
+        "AMZN"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AMZN",
+          "company_name": "Amazon",
+          "market_cap_display": "2.88T",
+          "market_cap_usd": "2880000000000"
+        }
+      ],
+      "rank": 5
+    },
+    {
+      "cik": "0001730168",
+      "primary_symbol": "AVGO",
+      "company_name": "Broadcom",
+      "market_cap_usd": "1660000000000",
+      "market_cap_display": "1.66T",
+      "symbols": [
+        "AVGO"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AVGO",
+          "company_name": "Broadcom",
+          "market_cap_display": "1.66T",
+          "market_cap_usd": "1660000000000"
+        }
+      ],
+      "rank": 6
+    },
+    {
+      "cik": "0001326801",
+      "primary_symbol": "META",
+      "company_name": "Meta Platforms",
+      "market_cap_usd": "1640000000000",
+      "market_cap_display": "1.64T",
+      "symbols": [
+        "META"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "META",
+          "company_name": "Meta Platforms",
+          "market_cap_display": "1.64T",
+          "market_cap_usd": "1640000000000"
+        }
+      ],
+      "rank": 7
+    },
+    {
+      "cik": "0001318605",
+      "primary_symbol": "TSLA",
+      "company_name": "Tesla, Inc.",
+      "market_cap_usd": "1540000000000",
+      "market_cap_display": "1.54T",
+      "symbols": [
+        "TSLA"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "TSLA",
+          "company_name": "Tesla, Inc.",
+          "market_cap_display": "1.54T",
+          "market_cap_usd": "1540000000000"
+        }
+      ],
+      "rank": 8
+    },
+    {
+      "cik": "0000059478",
+      "primary_symbol": "LLY",
+      "company_name": "Lilly (Eli)",
+      "market_cap_usd": "1290000000000",
+      "market_cap_display": "1.29T",
+      "symbols": [
+        "LLY"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "LLY",
+          "company_name": "Lilly (Eli)",
+          "market_cap_display": "1.29T",
+          "market_cap_usd": "1290000000000"
+        }
+      ],
+      "rank": 9
+    },
+    {
+      "cik": "0001067983",
+      "primary_symbol": "BRK.B",
+      "company_name": "Berkshire Hathaway",
+      "market_cap_usd": "1260000000000",
+      "market_cap_display": "1.26T",
+      "symbols": [
+        "BRK.B"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "BRK.B",
+          "company_name": "Berkshire Hathaway",
+          "market_cap_display": "1.26T",
+          "market_cap_usd": "1260000000000"
+        }
+      ],
+      "rank": 10
+    },
+    {
+      "cik": "0000104169",
+      "primary_symbol": "WMT",
+      "company_name": "Walmart",
+      "market_cap_usd": "1020000000000",
+      "market_cap_display": "1.02T",
+      "symbols": [
+        "WMT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "WMT",
+          "company_name": "Walmart",
+          "market_cap_display": "1.02T",
+          "market_cap_usd": "1020000000000"
+        }
+      ],
+      "rank": 11
+    },
+    {
+      "cik": "0000019617",
+      "primary_symbol": "JPM",
+      "company_name": "JPMorgan Chase",
+      "market_cap_usd": "919350000000",
+      "market_cap_display": "919.35B",
+      "symbols": [
+        "JPM"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "JPM",
+          "company_name": "JPMorgan Chase",
+          "market_cap_display": "919.35B",
+          "market_cap_usd": "919350000000"
+        }
+      ],
+      "rank": 12
+    },
+    {
+      "cik": "0000723125",
+      "primary_symbol": "MU",
+      "company_name": "Micron Technology",
+      "market_cap_usd": "880600000000",
+      "market_cap_display": "880.60B",
+      "symbols": [
+        "MU"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MU",
+          "company_name": "Micron Technology",
+          "market_cap_display": "880.60B",
+          "market_cap_usd": "880600000000"
+        }
+      ],
+      "rank": 13
+    },
+    {
+      "cik": "0000002488",
+      "primary_symbol": "AMD",
+      "company_name": "Advanced Micro Devices",
+      "market_cap_usd": "875900000000",
+      "market_cap_display": "875.90B",
+      "symbols": [
+        "AMD"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AMD",
+          "company_name": "Advanced Micro Devices",
+          "market_cap_display": "875.90B",
+          "market_cap_usd": "875900000000"
+        }
+      ],
+      "rank": 14
+    },
+    {
+      "cik": "0001403161",
+      "primary_symbol": "V",
+      "company_name": "Visa Inc.",
+      "market_cap_usd": "803110000000",
+      "market_cap_display": "803.11B",
+      "symbols": [
+        "V"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "V",
+          "company_name": "Visa Inc.",
+          "market_cap_display": "803.11B",
+          "market_cap_usd": "803110000000"
+        }
+      ],
+      "rank": 15
+    },
+    {
+      "cik": "0002115436",
+      "primary_symbol": "XOM",
+      "company_name": "ExxonMobil",
+      "market_cap_usd": "695870000000",
+      "market_cap_display": "695.87B",
+      "symbols": [
+        "XOM"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "XOM",
+          "company_name": "ExxonMobil",
+          "market_cap_display": "695.87B",
+          "market_cap_usd": "695870000000"
+        }
+      ],
+      "rank": 16
+    },
+    {
+      "cik": "0000200406",
+      "primary_symbol": "JNJ",
+      "company_name": "Johnson & Johnson",
+      "market_cap_usd": "687890000000",
+      "market_cap_display": "687.89B",
+      "symbols": [
+        "JNJ"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "JNJ",
+          "company_name": "Johnson & Johnson",
+          "market_cap_display": "687.89B",
+          "market_cap_usd": "687890000000"
+        }
+      ],
+      "rank": 17
+    },
+    {
+      "cik": "0001141391",
+      "primary_symbol": "MA",
+      "company_name": "Mastercard",
+      "market_cap_usd": "576010000000",
+      "market_cap_display": "576.01B",
+      "symbols": [
+        "MA"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MA",
+          "company_name": "Mastercard",
+          "market_cap_display": "576.01B",
+          "market_cap_usd": "576010000000"
+        }
+      ],
+      "rank": 18
+    },
+    {
+      "cik": "0001551152",
+      "primary_symbol": "ABBV",
+      "company_name": "AbbVie",
+      "market_cap_usd": "521500000000",
+      "market_cap_display": "521.50B",
+      "symbols": [
+        "ABBV"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ABBV",
+          "company_name": "AbbVie",
+          "market_cap_display": "521.50B",
+          "market_cap_usd": "521500000000"
+        }
+      ],
+      "rank": 19
+    },
+    {
+      "cik": "0000909832",
+      "primary_symbol": "COST",
+      "company_name": "Costco",
+      "market_cap_usd": "490190000000",
+      "market_cap_display": "490.19B",
+      "symbols": [
+        "COST"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "COST",
+          "company_name": "Costco",
+          "market_cap_display": "490.19B",
+          "market_cap_usd": "490190000000"
+        }
+      ],
+      "rank": 20
+    },
+    {
+      "cik": "0000093410",
+      "primary_symbol": "CVX",
+      "company_name": "Chevron Corporation",
+      "market_cap_usd": "429060000000",
+      "market_cap_display": "429.06B",
+      "symbols": [
+        "CVX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "CVX",
+          "company_name": "Chevron Corporation",
+          "market_cap_display": "429.06B",
+          "market_cap_usd": "429060000000"
+        }
+      ],
+      "rank": 21
+    },
+    {
+      "cik": "0000021344",
+      "primary_symbol": "KO",
+      "company_name": "Coca-Cola Company (The)",
+      "market_cap_usd": "426960000000",
+      "market_cap_display": "426.96B",
+      "symbols": [
+        "KO"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "KO",
+          "company_name": "Coca-Cola Company (The)",
+          "market_cap_display": "426.96B",
+          "market_cap_usd": "426960000000"
+        }
+      ],
+      "rank": 22
+    },
+    {
+      "cik": "0001321655",
+      "primary_symbol": "PLTR",
+      "company_name": "Palantir Technologies",
+      "market_cap_usd": "404770000000",
+      "market_cap_display": "404.77B",
+      "symbols": [
+        "PLTR"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PLTR",
+          "company_name": "Palantir Technologies",
+          "market_cap_display": "404.77B",
+          "market_cap_usd": "404770000000"
+        }
+      ],
+      "rank": 23
+    },
+    {
+      "cik": "0000080424",
+      "primary_symbol": "PG",
+      "company_name": "Procter & Gamble",
+      "market_cap_usd": "393560000000",
+      "market_cap_display": "393.56B",
+      "symbols": [
+        "PG"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PG",
+          "company_name": "Procter & Gamble",
+          "market_cap_display": "393.56B",
+          "market_cap_usd": "393560000000"
+        }
+      ],
+      "rank": 24
+    },
+    {
+      "cik": "0001341439",
+      "primary_symbol": "ORCL",
+      "company_name": "Oracle Corporation",
+      "market_cap_usd": "390800000000",
+      "market_cap_display": "390.80B",
+      "symbols": [
+        "ORCL"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ORCL",
+          "company_name": "Oracle Corporation",
+          "market_cap_display": "390.80B",
+          "market_cap_usd": "390800000000"
+        }
+      ],
+      "rank": 25
+    },
+    {
+      "cik": "0000858877",
+      "primary_symbol": "CSCO",
+      "company_name": "Cisco",
+      "market_cap_usd": "376530000000",
+      "market_cap_display": "376.53B",
+      "symbols": [
+        "CSCO"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "CSCO",
+          "company_name": "Cisco",
+          "market_cap_display": "376.53B",
+          "market_cap_usd": "376530000000"
+        }
+      ],
+      "rank": 26
+    },
+    {
+      "cik": "0000731766",
+      "primary_symbol": "UNH",
+      "company_name": "UnitedHealth Group",
+      "market_cap_usd": "365090000000",
+      "market_cap_display": "365.09B",
+      "symbols": [
+        "UNH"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "UNH",
+          "company_name": "UnitedHealth Group",
+          "market_cap_display": "365.09B",
+          "market_cap_usd": "365090000000"
+        }
+      ],
+      "rank": 27
+    },
+    {
+      "cik": "0000310158",
+      "primary_symbol": "MRK",
+      "company_name": "Merck & Co.",
+      "market_cap_usd": "364260000000",
+      "market_cap_display": "364.26B",
+      "symbols": [
+        "MRK"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MRK",
+          "company_name": "Merck & Co.",
+          "market_cap_display": "364.26B",
+          "market_cap_usd": "364260000000"
+        }
+      ],
+      "rank": 28
+    },
+    {
+      "cik": "0000070858",
+      "primary_symbol": "BAC",
+      "company_name": "Bank of America",
+      "market_cap_usd": "352050000000",
+      "market_cap_display": "352.05B",
+      "symbols": [
+        "BAC"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "BAC",
+          "company_name": "Bank of America",
+          "market_cap_display": "352.05B",
+          "market_cap_usd": "352050000000"
+        }
+      ],
+      "rank": 29
+    },
+    {
+      "cik": "0000354950",
+      "primary_symbol": "HD",
+      "company_name": "Home Depot (The)",
+      "market_cap_usd": "347880000000",
+      "market_cap_display": "347.88B",
+      "symbols": [
+        "HD"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "HD",
+          "company_name": "Home Depot (The)",
+          "market_cap_display": "347.88B",
+          "market_cap_usd": "347880000000"
+        }
+      ],
+      "rank": 30
+    },
+    {
+      "cik": "0000040545",
+      "primary_symbol": "GE",
+      "company_name": "GE Aerospace",
+      "market_cap_usd": "342880000000",
+      "market_cap_display": "342.88B",
+      "symbols": [
+        "GE"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "GE",
+          "company_name": "GE Aerospace",
+          "market_cap_display": "342.88B",
+          "market_cap_usd": "342880000000"
+        }
+      ],
+      "rank": 31
+    },
+    {
+      "cik": "0000050863",
+      "primary_symbol": "INTC",
+      "company_name": "Intel",
+      "market_cap_usd": "317090000000",
+      "market_cap_display": "317.09B",
+      "symbols": [
+        "INTC"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "INTC",
+          "company_name": "Intel",
+          "market_cap_display": "317.09B",
+          "market_cap_usd": "317090000000"
+        }
+      ],
+      "rank": 32
+    },
+    {
+      "cik": "0001413329",
+      "primary_symbol": "PM",
+      "company_name": "Philip Morris International",
+      "market_cap_usd": "310110000000",
+      "market_cap_display": "310.11B",
+      "symbols": [
+        "PM"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PM",
+          "company_name": "Philip Morris International",
+          "market_cap_display": "310.11B",
+          "market_cap_usd": "310110000000"
+        }
+      ],
+      "rank": 33
+    },
+    {
+      "cik": "0000895421",
+      "primary_symbol": "MS",
+      "company_name": "Morgan Stanley",
+      "market_cap_usd": "297990000000",
+      "market_cap_display": "297.99B",
+      "symbols": [
+        "MS"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MS",
+          "company_name": "Morgan Stanley",
+          "market_cap_display": "297.99B",
+          "market_cap_usd": "297990000000"
+        }
+      ],
+      "rank": 34
+    },
+    {
+      "cik": "0000006951",
+      "primary_symbol": "AMAT",
+      "company_name": "Applied Materials",
+      "market_cap_usd": "294030000000",
+      "market_cap_display": "294.03B",
+      "symbols": [
+        "AMAT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AMAT",
+          "company_name": "Applied Materials",
+          "market_cap_display": "294.03B",
+          "market_cap_usd": "294030000000"
+        }
+      ],
+      "rank": 35
+    },
+    {
+      "cik": "0000707549",
+      "primary_symbol": "LRCX",
+      "company_name": "Lam Research",
+      "market_cap_usd": "282210000000",
+      "market_cap_display": "282.21B",
+      "symbols": [
+        "LRCX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "LRCX",
+          "company_name": "Lam Research",
+          "market_cap_display": "282.21B",
+          "market_cap_usd": "282210000000"
+        }
+      ],
+      "rank": 36
+    },
+    {
+      "cik": "0000097476",
+      "primary_symbol": "TXN",
+      "company_name": "Texas Instruments",
+      "market_cap_usd": "277420000000",
+      "market_cap_display": "277.42B",
+      "symbols": [
+        "TXN"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "TXN",
+          "company_name": "Texas Instruments",
+          "market_cap_display": "277.42B",
+          "market_cap_usd": "277420000000"
+        }
+      ],
+      "rank": 37
+    },
+    {
+      "cik": "0000886982",
+      "primary_symbol": "GS",
+      "company_name": "Goldman Sachs",
+      "market_cap_usd": "274990000000",
+      "market_cap_display": "274.99B",
+      "symbols": [
+        "GS"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "GS",
+          "company_name": "Goldman Sachs",
+          "market_cap_display": "274.99B",
+          "market_cap_usd": "274990000000"
+        }
+      ],
+      "rank": 38
+    },
+    {
+      "cik": "0000018230",
+      "primary_symbol": "CAT",
+      "company_name": "Caterpillar Inc.",
+      "market_cap_usd": "274410000000",
+      "market_cap_display": "274.41B",
+      "symbols": [
+        "CAT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "CAT",
+          "company_name": "Caterpillar Inc.",
+          "market_cap_display": "274.41B",
+          "market_cap_usd": "274410000000"
+        }
+      ],
+      "rank": 39
+    },
+    {
+      "cik": "0000101829",
+      "primary_symbol": "RTX",
+      "company_name": "RTX Corporation",
+      "market_cap_usd": "267970000000",
+      "market_cap_display": "267.97B",
+      "symbols": [
+        "RTX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "RTX",
+          "company_name": "RTX Corporation",
+          "market_cap_display": "267.97B",
+          "market_cap_usd": "267970000000"
+        }
+      ],
+      "rank": 40
+    },
+    {
+      "cik": "0001327567",
+      "primary_symbol": "PANW",
+      "company_name": "Palo Alto Networks",
+      "market_cap_usd": "263180000000",
+      "market_cap_display": "263.18B",
+      "symbols": [
+        "PANW"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PANW",
+          "company_name": "Palo Alto Networks",
+          "market_cap_display": "263.18B",
+          "market_cap_usd": "263180000000"
+        }
+      ],
+      "rank": 41
+    },
+    {
+      "cik": "0000097745",
+      "primary_symbol": "TMO",
+      "company_name": "Thermo Fisher Scientific",
+      "market_cap_usd": "259440000000",
+      "market_cap_display": "259.44B",
+      "symbols": [
+        "TMO"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "TMO",
+          "company_name": "Thermo Fisher Scientific",
+          "market_cap_display": "259.44B",
+          "market_cap_usd": "259440000000"
+        }
+      ],
+      "rank": 42
+    },
+    {
+      "cik": "0000072971",
+      "primary_symbol": "WFC",
+      "company_name": "Wells Fargo",
+      "market_cap_usd": "258310000000",
+      "market_cap_display": "258.31B",
+      "symbols": [
+        "WFC"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "WFC",
+          "company_name": "Wells Fargo",
+          "market_cap_display": "258.31B",
+          "market_cap_usd": "258310000000"
+        }
+      ],
+      "rank": 43
+    },
+    {
+      "cik": "0001065280",
+      "primary_symbol": "NFLX",
+      "company_name": "Netflix",
+      "market_cap_usd": "255210000000",
+      "market_cap_display": "255.21B",
+      "symbols": [
+        "NFLX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "NFLX",
+          "company_name": "Netflix",
+          "market_cap_display": "255.21B",
+          "market_cap_usd": "255210000000"
+        }
+      ],
+      "rank": 44
+    },
+    {
+      "cik": "0000318154",
+      "primary_symbol": "AMGN",
+      "company_name": "Amgen",
+      "market_cap_usd": "251890000000",
+      "market_cap_display": "251.89B",
+      "symbols": [
+        "AMGN"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AMGN",
+          "company_name": "Amgen",
+          "market_cap_display": "251.89B",
+          "market_cap_usd": "251890000000"
+        }
+      ],
+      "rank": 45
+    },
+    {
+      "cik": "0001596532",
+      "primary_symbol": "ANET",
+      "company_name": "Arista Networks",
+      "market_cap_usd": "249260000000",
+      "market_cap_display": "249.26B",
+      "symbols": [
+        "ANET"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ANET",
+          "company_name": "Arista Networks",
+          "market_cap_display": "249.26B",
+          "market_cap_usd": "249260000000"
+        }
+      ],
+      "rank": 46
+    },
+    {
+      "cik": "0001707925",
+      "primary_symbol": "LIN",
+      "company_name": "Linde plc",
+      "market_cap_usd": "241510000000",
+      "market_cap_display": "241.51B",
+      "symbols": [
+        "LIN"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "LIN",
+          "company_name": "Linde plc",
+          "market_cap_display": "241.51B",
+          "market_cap_usd": "241510000000"
+        }
+      ],
+      "rank": 47
+    },
+    {
+      "cik": "0000051143",
+      "primary_symbol": "IBM",
+      "company_name": "IBM",
+      "market_cap_usd": "233570000000",
+      "market_cap_display": "233.57B",
+      "symbols": [
+        "IBM"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "IBM",
+          "company_name": "IBM",
+          "market_cap_display": "233.57B",
+          "market_cap_usd": "233570000000"
+        }
+      ],
+      "rank": 48
+    },
+    {
+      "cik": "0001535527",
+      "primary_symbol": "CRWD",
+      "company_name": "CrowdStrike",
+      "market_cap_usd": "232530000000",
+      "market_cap_display": "232.53B",
+      "symbols": [
+        "CRWD"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "CRWD",
+          "company_name": "CrowdStrike",
+          "market_cap_display": "232.53B",
+          "market_cap_usd": "232530000000"
+        }
+      ],
+      "rank": 49
+    },
+    {
+      "cik": "0001571996",
+      "primary_symbol": "DELL",
+      "company_name": "Dell Technologies",
+      "market_cap_usd": "219060000000",
+      "market_cap_display": "219.06B",
+      "symbols": [
+        "DELL"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "DELL",
+          "company_name": "Dell Technologies",
+          "market_cap_display": "219.06B",
+          "market_cap_usd": "219060000000"
+        }
+      ],
+      "rank": 50
+    },
+    {
+      "cik": "0000004962",
+      "primary_symbol": "AXP",
+      "company_name": "American Express",
+      "market_cap_usd": "214980000000",
+      "market_cap_display": "214.98B",
+      "symbols": [
+        "AXP"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "AXP",
+          "company_name": "American Express",
+          "market_cap_display": "214.98B",
+          "market_cap_usd": "214980000000"
+        }
+      ],
+      "rank": 51
+    },
+    {
+      "cik": "0001996810",
+      "primary_symbol": "GEV",
+      "company_name": "GE Vernova",
+      "market_cap_usd": "211450000000",
+      "market_cap_display": "211.45B",
+      "symbols": [
+        "GEV"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "GEV",
+          "company_name": "GE Vernova",
+          "market_cap_display": "211.45B",
+          "market_cap_usd": "211450000000"
+        }
+      ],
+      "rank": 52
+    },
+    {
+      "cik": "0000882095",
+      "primary_symbol": "GILD",
+      "company_name": "Gilead Sciences",
+      "market_cap_usd": "208480000000",
+      "market_cap_display": "208.48B",
+      "symbols": [
+        "GILD"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "GILD",
+          "company_name": "Gilead Sciences",
+          "market_cap_display": "208.48B",
+          "market_cap_usd": "208480000000"
+        }
+      ],
+      "rank": 53
+    },
+    {
+      "cik": "0001744489",
+      "primary_symbol": "DIS",
+      "company_name": "Walt Disney Company (The)",
+      "market_cap_usd": "205420000000",
+      "market_cap_display": "205.42B",
+      "symbols": [
+        "DIS"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "DIS",
+          "company_name": "Walt Disney Company (The)",
+          "market_cap_display": "205.42B",
+          "market_cap_usd": "205420000000"
+        }
+      ],
+      "rank": 54
+    },
+    {
+      "cik": "0000831001",
+      "primary_symbol": "C",
+      "company_name": "Citigroup",
+      "market_cap_usd": "205260000000",
+      "market_cap_display": "205.26B",
+      "symbols": [
+        "C"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "C",
+          "company_name": "Citigroup",
+          "market_cap_display": "205.26B",
+          "market_cap_usd": "205260000000"
+        }
+      ],
+      "rank": 55
+    },
+    {
+      "cik": "0000319201",
+      "primary_symbol": "KLAC",
+      "company_name": "KLA Corporation",
+      "market_cap_usd": "198470000000",
+      "market_cap_display": "198.47B",
+      "symbols": [
+        "KLAC"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "KLAC",
+          "company_name": "KLA Corporation",
+          "market_cap_display": "198.47B",
+          "market_cap_usd": "198470000000"
+        }
+      ],
+      "rank": 56
+    },
+    {
+      "cik": "0000077476",
+      "primary_symbol": "PEP",
+      "company_name": "PepsiCo",
+      "market_cap_usd": "198200000000",
+      "market_cap_display": "198.20B",
+      "symbols": [
+        "PEP"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PEP",
+          "company_name": "PepsiCo",
+          "market_cap_display": "198.20B",
+          "market_cap_usd": "198200000000"
+        }
+      ],
+      "rank": 57
+    },
+    {
+      "cik": "0002012383",
+      "primary_symbol": "BLK",
+      "company_name": "BlackRock",
+      "market_cap_usd": "198150000000",
+      "market_cap_display": "198.15B",
+      "symbols": [
+        "BLK"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "BLK",
+          "company_name": "BlackRock",
+          "market_cap_display": "198.15B",
+          "market_cap_usd": "198150000000"
+        }
+      ],
+      "rank": 58
+    },
+    {
+      "cik": "0000820313",
+      "primary_symbol": "APH",
+      "company_name": "Amphenol",
+      "market_cap_usd": "193170000000",
+      "market_cap_display": "193.17B",
+      "symbols": [
+        "APH"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "APH",
+          "company_name": "Amphenol",
+          "market_cap_display": "193.17B",
+          "market_cap_usd": "193170000000"
+        }
+      ],
+      "rank": 59
+    },
+    {
+      "cik": "0000006281",
+      "primary_symbol": "ADI",
+      "company_name": "Analog Devices",
+      "market_cap_usd": "192840000000",
+      "market_cap_display": "192.84B",
+      "symbols": [
+        "ADI"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ADI",
+          "company_name": "Analog Devices",
+          "market_cap_display": "192.84B",
+          "market_cap_usd": "192840000000"
+        }
+      ],
+      "rank": 60
+    },
+    {
+      "cik": "0000732712",
+      "primary_symbol": "VZ",
+      "company_name": "Verizon",
+      "market_cap_usd": "192140000000",
+      "market_cap_display": "192.14B",
+      "symbols": [
+        "VZ"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "VZ",
+          "company_name": "Verizon",
+          "market_cap_display": "192.14B",
+          "market_cap_usd": "192140000000"
+        }
+      ],
+      "rank": 61
+    },
+    {
+      "cik": "0000063908",
+      "primary_symbol": "MCD",
+      "company_name": "McDonald's",
+      "market_cap_usd": "191950000000",
+      "market_cap_display": "191.95B",
+      "symbols": [
+        "MCD"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MCD",
+          "company_name": "McDonald's",
+          "market_cap_display": "191.95B",
+          "market_cap_usd": "191950000000"
+        }
+      ],
+      "rank": 62
+    },
+    {
+      "cik": "0000001800",
+      "primary_symbol": "ABT",
+      "company_name": "Abbott Laboratories",
+      "market_cap_usd": "187950000000",
+      "market_cap_display": "187.95B",
+      "symbols": [
+        "ABT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ABT",
+          "company_name": "Abbott Laboratories",
+          "market_cap_display": "187.95B",
+          "market_cap_usd": "187950000000"
+        }
+      ],
+      "rank": 63
+    },
+    {
+      "cik": "0000804328",
+      "primary_symbol": "QCOM",
+      "company_name": "Qualcomm",
+      "market_cap_usd": "184540000000",
+      "market_cap_display": "184.54B",
+      "symbols": [
+        "QCOM"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "QCOM",
+          "company_name": "Qualcomm",
+          "market_cap_display": "184.54B",
+          "market_cap_usd": "184540000000"
+        }
+      ],
+      "rank": 64
+    },
+    {
+      "cik": "0000315189",
+      "primary_symbol": "DE",
+      "company_name": "Deere & Company",
+      "market_cap_usd": "181600000000",
+      "market_cap_display": "181.60B",
+      "symbols": [
+        "DE"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "DE",
+          "company_name": "Deere & Company",
+          "market_cap_display": "181.60B",
+          "market_cap_usd": "181600000000"
+        }
+      ],
+      "rank": 65
+    },
+    {
+      "cik": "0001283699",
+      "primary_symbol": "TMUS",
+      "company_name": "T-Mobile US",
+      "market_cap_usd": "180020000000",
+      "market_cap_display": "180.02B",
+      "symbols": [
+        "TMUS"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "TMUS",
+          "company_name": "T-Mobile US",
+          "market_cap_display": "180.02B",
+          "market_cap_usd": "180020000000"
+        }
+      ],
+      "rank": 66
+    },
+    {
+      "cik": "0000100885",
+      "primary_symbol": "UNP",
+      "company_name": "Union Pacific Corporation",
+      "market_cap_usd": "179730000000",
+      "market_cap_display": "179.73B",
+      "symbols": [
+        "UNP"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "UNP",
+          "company_name": "Union Pacific Corporation",
+          "market_cap_display": "179.73B",
+          "market_cap_usd": "179730000000"
+        }
+      ],
+      "rank": 67
+    },
+    {
+      "cik": "0000766704",
+      "primary_symbol": "WELL",
+      "company_name": "Welltower",
+      "market_cap_usd": "179340000000",
+      "market_cap_display": "179.34B",
+      "symbols": [
+        "WELL"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "WELL",
+          "company_name": "Welltower",
+          "market_cap_display": "179.34B",
+          "market_cap_usd": "179340000000"
+        }
+      ],
+      "rank": 68
+    },
+    {
+      "cik": "0001108524",
+      "primary_symbol": "CRM",
+      "company_name": "Salesforce",
+      "market_cap_usd": "179280000000",
+      "market_cap_display": "179.28B",
+      "symbols": [
+        "CRM"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "CRM",
+          "company_name": "Salesforce",
+          "market_cap_display": "179.28B",
+          "market_cap_usd": "179280000000"
+        }
+      ],
+      "rank": 69
+    },
+    {
+      "cik": "0000753308",
+      "primary_symbol": "NEE",
+      "company_name": "NextEra Energy",
+      "market_cap_usd": "178520000000",
+      "market_cap_display": "178.52B",
+      "symbols": [
+        "NEE"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "NEE",
+          "company_name": "NextEra Energy",
+          "market_cap_display": "178.52B",
+          "market_cap_usd": "178520000000"
+        }
+      ],
+      "rank": 70
+    },
+    {
+      "cik": "0001163165",
+      "primary_symbol": "COP",
+      "company_name": "ConocoPhillips",
+      "market_cap_usd": "168220000000",
+      "market_cap_display": "168.22B",
+      "symbols": [
+        "COP"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "COP",
+          "company_name": "ConocoPhillips",
+          "market_cap_display": "168.22B",
+          "market_cap_usd": "168220000000"
+        }
+      ],
+      "rank": 71
+    },
+    {
+      "cik": "0000078003",
+      "primary_symbol": "PFE",
+      "company_name": "Pfizer",
+      "market_cap_usd": "164670000000",
+      "market_cap_display": "164.67B",
+      "symbols": [
+        "PFE"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PFE",
+          "company_name": "Pfizer",
+          "market_cap_display": "164.67B",
+          "market_cap_usd": "164670000000"
+        }
+      ],
+      "rank": 72
+    },
+    {
+      "cik": "0000313616",
+      "primary_symbol": "DHR",
+      "company_name": "Danaher Corporation",
+      "market_cap_usd": "163940000000",
+      "market_cap_display": "163.94B",
+      "symbols": [
+        "DHR"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "DHR",
+          "company_name": "Danaher Corporation",
+          "market_cap_display": "163.94B",
+          "market_cap_usd": "163940000000"
+        }
+      ],
+      "rank": 73
+    },
+    {
+      "cik": "0000316709",
+      "primary_symbol": "SCHW",
+      "company_name": "Charles Schwab Corporation",
+      "market_cap_usd": "160480000000",
+      "market_cap_display": "160.48B",
+      "symbols": [
+        "SCHW"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "SCHW",
+          "company_name": "Charles Schwab Corporation",
+          "market_cap_display": "160.48B",
+          "market_cap_usd": "160480000000"
+        }
+      ],
+      "rank": 74
+    },
+    {
+      "cik": "0001035267",
+      "primary_symbol": "ISRG",
+      "company_name": "Intuitive Surgical",
+      "market_cap_usd": "153770000000",
+      "market_cap_display": "153.77B",
+      "symbols": [
+        "ISRG"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ISRG",
+          "company_name": "Intuitive Surgical",
+          "market_cap_display": "153.77B",
+          "market_cap_usd": "153770000000"
+        }
+      ],
+      "rank": 75
+    },
+    {
+      "cik": "0001393818",
+      "primary_symbol": "BX",
+      "company_name": "Blackstone Inc.",
+      "market_cap_usd": "149440000000",
+      "market_cap_display": "149.44B",
+      "symbols": [
+        "BX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "BX",
+          "company_name": "Blackstone Inc.",
+          "market_cap_display": "149.44B",
+          "market_cap_usd": "149440000000"
+        }
+      ],
+      "rank": 76
+    },
+    {
+      "cik": "0000732717",
+      "primary_symbol": "T",
+      "company_name": "AT&T",
+      "market_cap_usd": "149410000000",
+      "market_cap_display": "149.41B",
+      "symbols": [
+        "T"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "T",
+          "company_name": "AT&T",
+          "market_cap_display": "149.41B",
+          "market_cap_usd": "149410000000"
+        }
+      ],
+      "rank": 77
+    },
+    {
+      "cik": "0001467373",
+      "primary_symbol": "ACN",
+      "company_name": "Accenture",
+      "market_cap_usd": "147970000000",
+      "market_cap_display": "147.97B",
+      "symbols": [
+        "ACN"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ACN",
+          "company_name": "Accenture",
+          "market_cap_display": "147.97B",
+          "market_cap_usd": "147970000000"
+        }
+      ],
+      "rank": 78
+    },
+    {
+      "cik": "0000109198",
+      "primary_symbol": "TJX",
+      "company_name": "TJX Companies",
+      "market_cap_usd": "147800000000",
+      "market_cap_display": "147.80B",
+      "symbols": [
+        "TJX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "TJX",
+          "company_name": "TJX Companies",
+          "market_cap_display": "147.80B",
+          "market_cap_usd": "147800000000"
+        }
+      ],
+      "rank": 79
+    },
+    {
+      "cik": "0000896159",
+      "primary_symbol": "CB",
+      "company_name": "Chubb Limited",
+      "market_cap_usd": "143560000000",
+      "market_cap_display": "143.56B",
+      "symbols": [
+        "CB"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "CB",
+          "company_name": "Chubb Limited",
+          "market_cap_display": "143.56B",
+          "market_cap_usd": "143560000000"
+        }
+      ],
+      "rank": 80
+    },
+    {
+      "cik": "0001543151",
+      "primary_symbol": "UBER",
+      "company_name": "Uber",
+      "market_cap_usd": "142300000000",
+      "market_cap_display": "142.30B",
+      "symbols": [
+        "UBER"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "UBER",
+          "company_name": "Uber",
+          "market_cap_display": "142.30B",
+          "market_cap_usd": "142300000000"
+        }
+      ],
+      "rank": 81
+    },
+    {
+      "cik": "0000936468",
+      "primary_symbol": "LMT",
+      "company_name": "Lockheed Martin",
+      "market_cap_usd": "137690000000",
+      "market_cap_display": "137.69B",
+      "symbols": [
+        "LMT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "LMT",
+          "company_name": "Lockheed Martin",
+          "market_cap_display": "137.69B",
+          "market_cap_usd": "137690000000"
+        }
+      ],
+      "rank": 82
+    },
+    {
+      "cik": "0001835632",
+      "primary_symbol": "MRVL",
+      "company_name": "Marvell Technology",
+      "market_cap_usd": "137630000000",
+      "market_cap_display": "137.63B",
+      "symbols": [
+        "MRVL"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MRVL",
+          "company_name": "Marvell Technology",
+          "market_cap_display": "137.63B",
+          "market_cap_usd": "137630000000"
+        }
+      ],
+      "rank": 83
+    },
+    {
+      "cik": "0000064040",
+      "primary_symbol": "SPGI",
+      "company_name": "S&P Global",
+      "market_cap_usd": "137290000000",
+      "market_cap_display": "137.29B",
+      "symbols": [
+        "SPGI"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "SPGI",
+          "company_name": "S&P Global",
+          "market_cap_display": "137.29B",
+          "market_cap_usd": "137290000000"
+        }
+      ],
+      "rank": 84
+    },
+    {
+      "cik": "0001551182",
+      "primary_symbol": "ETN",
+      "company_name": "Eaton Corporation",
+      "market_cap_usd": "137130000000",
+      "market_cap_display": "137.13B",
+      "symbols": [
+        "ETN"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ETN",
+          "company_name": "Eaton Corporation",
+          "market_cap_display": "137.13B",
+          "market_cap_usd": "137130000000"
+        }
+      ],
+      "rank": 85
+    },
+    {
+      "cik": "0000080661",
+      "primary_symbol": "PGR",
+      "company_name": "Progressive Corporation",
+      "market_cap_usd": "136600000000",
+      "market_cap_display": "136.60B",
+      "symbols": [
+        "PGR"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PGR",
+          "company_name": "Progressive Corporation",
+          "market_cap_display": "136.60B",
+          "market_cap_usd": "136600000000"
+        }
+      ],
+      "rank": 86
+    },
+    {
+      "cik": "0000875320",
+      "primary_symbol": "VRTX",
+      "company_name": "Vertex Pharmaceuticals",
+      "market_cap_usd": "136560000000",
+      "market_cap_display": "136.56B",
+      "symbols": [
+        "VRTX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "VRTX",
+          "company_name": "Vertex Pharmaceuticals",
+          "market_cap_display": "136.56B",
+          "market_cap_usd": "136560000000"
+        }
+      ],
+      "rank": 87
+    },
+    {
+      "cik": "0000012927",
+      "primary_symbol": "BA",
+      "company_name": "Boeing",
+      "market_cap_usd": "135910000000",
+      "market_cap_display": "135.91B",
+      "symbols": [
+        "BA"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "BA",
+          "company_name": "Boeing",
+          "market_cap_display": "135.91B",
+          "market_cap_usd": "135910000000"
+        }
+      ],
+      "rank": 88
+    },
+    {
+      "cik": "0001751008",
+      "primary_symbol": "APP",
+      "company_name": "AppLovin",
+      "market_cap_usd": "135540000000",
+      "market_cap_display": "135.54B",
+      "symbols": [
+        "APP"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "APP",
+          "company_name": "AppLovin",
+          "market_cap_display": "135.54B",
+          "market_cap_usd": "135540000000"
+        }
+      ],
+      "rank": 89
+    },
+    {
+      "cik": "0000764180",
+      "primary_symbol": "MO",
+      "company_name": "Altria",
+      "market_cap_usd": "130810000000",
+      "market_cap_display": "130.81B",
+      "symbols": [
+        "MO"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MO",
+          "company_name": "Altria",
+          "market_cap_display": "130.81B",
+          "market_cap_usd": "130810000000"
+        }
+      ],
+      "rank": 90
+    },
+    {
+      "cik": "0000014272",
+      "primary_symbol": "BMY",
+      "company_name": "Bristol Myers Squibb",
+      "market_cap_usd": "129660000000",
+      "market_cap_display": "129.66B",
+      "symbols": [
+        "BMY"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "BMY",
+          "company_name": "Bristol Myers Squibb",
+          "market_cap_display": "129.66B",
+          "market_cap_usd": "129660000000"
+        }
+      ],
+      "rank": 91
+    },
+    {
+      "cik": "0000060667",
+      "primary_symbol": "LOW",
+      "company_name": "Lowe's",
+      "market_cap_usd": "127770000000",
+      "market_cap_display": "127.77B",
+      "symbols": [
+        "LOW"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "LOW",
+          "company_name": "Lowe's",
+          "market_cap_display": "127.77B",
+          "market_cap_usd": "127770000000"
+        }
+      ],
+      "rank": 92
+    },
+    {
+      "cik": "0000927653",
+      "primary_symbol": "MCK",
+      "company_name": "McKesson",
+      "market_cap_usd": "127330000000",
+      "market_cap_display": "127.33B",
+      "symbols": [
+        "MCK"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MCK",
+          "company_name": "McKesson",
+          "market_cap_display": "127.33B",
+          "market_cap_usd": "127330000000"
+        }
+      ],
+      "rank": 93
+    },
+    {
+      "cik": "0002023554",
+      "primary_symbol": "SNDK",
+      "company_name": "Sandisk",
+      "market_cap_usd": "125930000000",
+      "market_cap_display": "125.93B",
+      "symbols": [
+        "SNDK"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "SNDK",
+          "company_name": "Sandisk",
+          "market_cap_display": "125.93B",
+          "market_cap_usd": "125930000000"
+        }
+      ],
+      "rank": 94
+    },
+    {
+      "cik": "0001613103",
+      "primary_symbol": "MDT",
+      "company_name": "Medtronic",
+      "market_cap_usd": "125910000000",
+      "market_cap_display": "125.91B",
+      "symbols": [
+        "MDT"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "MDT",
+          "company_name": "Medtronic",
+          "market_cap_display": "125.91B",
+          "market_cap_usd": "125910000000"
+        }
+      ],
+      "rank": 95
+    },
+    {
+      "cik": "0001045609",
+      "primary_symbol": "PLD",
+      "company_name": "Prologis",
+      "market_cap_usd": "124800000000",
+      "market_cap_display": "124.80B",
+      "symbols": [
+        "PLD"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PLD",
+          "company_name": "Prologis",
+          "market_cap_display": "124.80B",
+          "market_cap_usd": "124800000000"
+        }
+      ],
+      "rank": 96
+    },
+    {
+      "cik": "0000008670",
+      "primary_symbol": "ADP",
+      "company_name": "Automatic Data Processing",
+      "market_cap_usd": "122350000000",
+      "market_cap_display": "122.35B",
+      "symbols": [
+        "ADP"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "ADP",
+          "company_name": "Automatic Data Processing",
+          "market_cap_display": "122.35B",
+          "market_cap_usd": "122350000000"
+        }
+      ],
+      "rank": 97
+    },
+    {
+      "cik": "0000829224",
+      "primary_symbol": "SBUX",
+      "company_name": "Starbucks",
+      "market_cap_usd": "121350000000",
+      "market_cap_display": "121.35B",
+      "symbols": [
+        "SBUX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "SBUX",
+          "company_name": "Starbucks",
+          "market_cap_display": "121.35B",
+          "market_cap_usd": "121350000000"
+        }
+      ],
+      "rank": 98
+    },
+    {
+      "cik": "0001137789",
+      "primary_symbol": "STX",
+      "company_name": "Seagate Technology",
+      "market_cap_usd": "121270000000",
+      "market_cap_display": "121.27B",
+      "symbols": [
+        "STX"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "STX",
+          "company_name": "Seagate Technology",
+          "market_cap_display": "121.27B",
+          "market_cap_usd": "121270000000"
+        }
+      ],
+      "rank": 99
+    },
+    {
+      "cik": "0000076334",
+      "primary_symbol": "PH",
+      "company_name": "Parker Hannifin",
+      "market_cap_usd": "120510000000",
+      "market_cap_display": "120.51B",
+      "symbols": [
+        "PH"
+      ],
+      "share_class_quotes": [
+        {
+          "symbol": "PH",
+          "company_name": "Parker Hannifin",
+          "market_cap_display": "120.51B",
+          "market_cap_usd": "120510000000"
+        }
+      ],
+      "rank": 100
+    }
+  ]
+}

@@ -9,7 +9,7 @@ from sessionquant.news_setup import check_news
 
 
 def config_file(tmp_path):
-    path=tmp_path/'session.yaml'; path.write_text('companies: {}\nllm: {}\n',encoding='utf-8')
+    path=tmp_path/'session.yaml'; path.write_text('company_rss_catalog: false\ncompanies: {}\nllm: {}\n',encoding='utf-8')
     return path
 
 

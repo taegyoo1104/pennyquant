@@ -1,0 +1,4466 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-14T07:41:46.125497+00:00",
+  "scope": "rss_only",
+  "ranking_source": "https://stockanalysis.com/list/sp-500-stocks/",
+  "ranking_observed_at": "2026-11-14T07:33:21.191215+00:00",
+  "checked_issuers": 100,
+  "checked_tickers": 101,
+  "registered_issuers": 63,
+  "registered_tickers": 64,
+  "records": [
+    {
+      "rank": 1,
+      "cik": "0000320193",
+      "symbols": [
+        "AAPL"
+      ],
+      "company_name": "Apple Inc.",
+      "market_cap_usd": "5180000000000",
+      "status": "publication_time_unconfirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.apple.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.apple.com/newsroom/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.apple.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.apple.com/newsroom/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.apple.com/la/newsroom/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.apple.com/newsroom/rss-feed.rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 0
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "cik": "0001045810",
+      "symbols": [
+        "NVDA"
+      ],
+      "company_name": "Nvidia",
+      "market_cap_usd": "3930000000000",
+      "status": "included",
+      "registered_symbols": [
+        "NVDA"
+      ],
+      "registered_feeds": [
+        "https://nvidianews.nvidia.com/cats/press_release.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.nvidia.com/ko-kr/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://nvidianews.nvidia.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.nvidia.com/home/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.nvidia.com/ko-kr/newsroom/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.nvidia.com/investor-resources/rss/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 3,
+      "cik": "0000789019",
+      "symbols": [
+        "MSFT"
+      ],
+      "company_name": "Microsoft",
+      "market_cap_usd": "3890000000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.microsoft.com/ko-kr",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://news.microsoft.com/source/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.microsoft.com/en-us/investor/default",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.microsoft.com/en-us/investor/default",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.microsoft.com/en-us/Investor/earnings/FY-2027-Q1/press-release-webcast",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://blogs.microsoft.com/feed/",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://news.microsoft.com/source/feed/",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "cik": "0001652044",
+      "symbols": [
+        "GOOGL",
+        "GOOG"
+      ],
+      "company_name": "Alphabet Inc. (Class A)",
+      "market_cap_usd": "3640000000000",
+      "status": "included",
+      "registered_symbols": [
+        "GOOGL",
+        "GOOG"
+      ],
+      "registered_feeds": [
+        "https://blog.google/rss/"
+      ],
+      "pages": [
+        {
+          "url": "https://www.abc.xyz",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://blog.google/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://abc.xyz/investor/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://abc.xyz/investor/Earnings/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.abc.xyz",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://blog.google/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://abc.xyz/investor/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://abc.xyz/investor/Earnings/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 5,
+      "cik": "0001018724",
+      "symbols": [
+        "AMZN"
+      ],
+      "company_name": "Amazon",
+      "market_cap_usd": "2880000000000",
+      "status": "included",
+      "registered_symbols": [
+        "AMZN"
+      ],
+      "registered_feeds": [
+        "https://ir.aboutamazon.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.amazon.com",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.aboutamazon.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 6,
+      "cik": "0001730168",
+      "symbols": [
+        "AVGO"
+      ],
+      "company_name": "Broadcom",
+      "market_cap_usd": "1660000000000",
+      "status": "included",
+      "registered_symbols": [
+        "AVGO"
+      ],
+      "registered_feeds": [
+        "https://investors.broadcom.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.broadcom.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.broadcom.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.broadcom.com/rss-feeds",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.broadcom.com/sites/g/files/knoqqb13036/files/favicon-32x32.png",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.broadcom.com/sites/g/files/knoqqb13036/files/css/css_k761E3hHLyokVehlPLE6cBRWM3f1MGk7g6ZD0LpqckQ.css?delta=0&language=en&theme=nir_pid1211&include=eJyNj8EOwkAIRH-o6ab-EGF3SSVloWHRpH_vVg_qwcTbMBngTTGnVP22o8yVUWydlB0ydkrC-T2cgotp_7bCTDL602zoGwVUDIQsVraEinL0AMdgXceWQ7mix1_xDoFZ6Ee2ESo4FWuNdPhs-nF7x_XFd4p5YAdpQD-0DAhVegHvXJfLsiS7kztXmvr4Ti2d7R660W4R",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 7,
+      "cik": "0001326801",
+      "symbols": [
+        "META"
+      ],
+      "company_name": "Meta Platforms",
+      "market_cap_usd": "1640000000000",
+      "status": "included",
+      "registered_symbols": [
+        "META"
+      ],
+      "registered_feeds": [
+        "https://www.meta.com/blog/rss/"
+      ],
+      "pages": [
+        {
+          "url": "https://www.meta.com/kr/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://about.fb.com/",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 8,
+      "cik": "0001318605",
+      "symbols": [
+        "TSLA"
+      ],
+      "company_name": "Tesla, Inc.",
+      "market_cap_usd": "1540000000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.tesla.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.tesla.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 9,
+      "cik": "0000059478",
+      "symbols": [
+        "LLY"
+      ],
+      "company_name": "Lilly (Eli)",
+      "market_cap_usd": "1290000000000",
+      "status": "included",
+      "registered_symbols": [
+        "LLY"
+      ],
+      "registered_feeds": [
+        "https://investor.lilly.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.lilly.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.lilly.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.lilly.com/sites/g/files/knoqqb111696/files/favicon-elililly.ico",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.lilly.com/sites/g/files/knoqqb111696/files/css/css_qmBCYvcAUsJr1hBpiFiwlo38skd4Kpd_DpINZdDfyMQ.css?delta=0&language=en&theme=nir_pid1228&include=eJyNj0EKwzAMBD9UYppTfyPWtkhNbCnIaiG_r9Nc2kOht2VYSaOkxiHbY0OdckHV5SLFKKJzOEJJKv0buWqNsDdssJWdMhwUq6Y1QFD37mTwIsuYMkp3mP9V7-SIlX90G0PIOGlrLIMXlY_dG5bT7wjT0HYWp75LGhIifApvJV_n-Rb0yWYl86WP69zC8d0LhvppRA",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.lilly.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 10,
+      "cik": "0001067983",
+      "symbols": [
+        "BRK.B"
+      ],
+      "company_name": "Berkshire Hathaway",
+      "market_cap_usd": "1260000000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.berkshirehathaway.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.berkshirehathaway.com/bhenergy/bhenergypresentations.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.berkshirehathaway.com/bhenergy/BHE2026InvestPresent.pdf",
+          "http_status": null,
+          "error_type": "ValueError"
+        },
+        {
+          "url": "https://www.berkshirehathaway.com/bhenergy/BHE2025InvestPresent.pdf",
+          "http_status": null,
+          "error_type": "ValueError"
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 11,
+      "cik": "0000104169",
+      "symbols": [
+        "WMT"
+      ],
+      "company_name": "Walmart",
+      "market_cap_usd": "1020000000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.stock.walmart.com",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://stock.walmart.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 12,
+      "cik": "0000019617",
+      "symbols": [
+        "JPM"
+      ],
+      "company_name": "JPMorgan Chase",
+      "market_cap_usd": "919350000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.jpmorganchase.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.jpmorganchase.com/newsroom/from-the-desk-of",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.jpmorganchase.com/newsroom/stories/realizing-potential-through-perseverance",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.jpmorganchase.com/ir",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.jpmorganchase.com/ir/news",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.jpmorganchase.com/rss/news.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 13,
+      "cik": "0000723125",
+      "symbols": [
+        "MU"
+      ],
+      "company_name": "Micron Technology",
+      "market_cap_usd": "880600000000",
+      "status": "included",
+      "registered_symbols": [
+        "MU"
+      ],
+      "registered_feeds": [
+        "https://investors.micron.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.micron.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.micron.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.micron.com/about/press/news",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.micron.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.micron.com/GlobalBranding.ashx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.micron.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 14,
+      "cik": "0000002488",
+      "symbols": [
+        "AMD"
+      ],
+      "company_name": "Advanced Micro Devices",
+      "market_cap_usd": "875900000000",
+      "status": "included",
+      "registered_symbols": [
+        "AMD"
+      ],
+      "registered_feeds": [
+        "https://ir.amd.com/news-events/press-releases/rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.amd.com/ko.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.amd.com/news-events/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.amd.com/en/newsroom/press-release-search.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.amd.com/news/open-rack-blueprint-scale-agentic-ai/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.amd.com/news-events/press-releases/detail/1305/amd-showcases-6th-gen-amd-epyc-processors-to-lead-next-era-of-ai-and-enterprise-computing",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.amd.com/news-events/press-releases/rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 15,
+      "cik": "0001403161",
+      "symbols": [
+        "V"
+      ],
+      "company_name": "Visa Inc.",
+      "market_cap_usd": "803110000000",
+      "status": "included",
+      "registered_symbols": [
+        "V"
+      ],
+      "registered_feeds": [
+        "https://investor.visa.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.visa.com/en-us",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.visa.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://corporate.visa.com/en/sites/visa-perspectives/newsroom.html",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.visa.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.visa.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.visa.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 16,
+      "cik": "0002115436",
+      "symbols": [
+        "XOM"
+      ],
+      "company_name": "ExxonMobil",
+      "market_cap_usd": "695870000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://corporate.exxonmobil.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://corporate.exxonmobil.com/news",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.exxonmobil.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.exxonmobil.com/stock-info/dividends",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.exxonmobil.com",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://corporate.exxonmobil.com/rss",
+          "status": "unavailable",
+          "http_status": 302,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://investor.exxonmobil.com/news-events/press-releases/rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 17,
+      "cik": "0000200406",
+      "symbols": [
+        "JNJ"
+      ],
+      "company_name": "Johnson & Johnson",
+      "market_cap_usd": "687890000000",
+      "status": "included",
+      "registered_symbols": [
+        "JNJ"
+      ],
+      "registered_feeds": [
+        "https://www.jnj.com/media-center/press-releases.rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.jnj.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.jnj.com/media-center/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.investor.jnj.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 18,
+      "cik": "0001141391",
+      "symbols": [
+        "MA"
+      ],
+      "company_name": "Mastercard",
+      "market_cap_usd": "576010000000",
+      "status": "included",
+      "registered_symbols": [
+        "MA"
+      ],
+      "registered_feeds": [
+        "https://investor.mastercard.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.mastercard.com/kr/ko.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mastercard.com/financials-and-sec-filings/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mastercard.com/overview/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mastercard.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mastercard.com/GlobalBranding.ashx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.mastercard.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 19,
+      "cik": "0001551152",
+      "symbols": [
+        "ABBV"
+      ],
+      "company_name": "AbbVie",
+      "market_cap_usd": "521500000000",
+      "status": "included",
+      "registered_symbols": [
+        "ABBV"
+      ],
+      "registered_feeds": [
+        "https://news.abbvie.com/?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.abbvie.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://news.abbvie.com/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 20,
+      "cik": "0000909832",
+      "symbols": [
+        "COST"
+      ],
+      "company_name": "Costco",
+      "market_cap_usd": "490190000000",
+      "status": "included",
+      "registered_symbols": [
+        "COST"
+      ],
+      "registered_feeds": [
+        "https://investor.costco.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.costco.com",
+          "http_status": null,
+          "error_type": "ValueError"
+        },
+        {
+          "url": "https://investor.costco.com/news/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.costco.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.costco.com/GlobalBranding.ashx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.costco.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 21,
+      "cik": "0000093410",
+      "symbols": [
+        "CVX"
+      ],
+      "company_name": "Chevron Corporation",
+      "market_cap_usd": "429060000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.chevron.com",
+          "http_status": 403,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.chevron.com/stories/rss",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 22,
+      "cik": "0000021344",
+      "symbols": [
+        "KO"
+      ],
+      "company_name": "Coca-Cola Company (The)",
+      "market_cap_usd": "426960000000",
+      "status": "included",
+      "registered_symbols": [
+        "KO"
+      ],
+      "registered_feeds": [
+        "https://investors.coca-colacompany.com/news-events/press-releases/rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.coca-colacompany.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.coca-colacompany.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.coca-colacompany.com/media-center/coca-cola-reports-third-quarter-2026-results",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 23,
+      "cik": "0001321655",
+      "symbols": [
+        "PLTR"
+      ],
+      "company_name": "Palantir Technologies",
+      "market_cap_usd": "404770000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.palantir.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.palantir.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 302,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 24,
+      "cik": "0000080424",
+      "symbols": [
+        "PG"
+      ],
+      "company_name": "Procter & Gamble",
+      "market_cap_usd": "393560000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.pginvestor.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://us.pg.com/newsroom/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pginvestor.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pginvestor.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://news.pg.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://news.pg.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 25,
+      "cik": "0001341439",
+      "symbols": [
+        "ORCL"
+      ],
+      "company_name": "Oracle Corporation",
+      "market_cap_usd": "390800000000",
+      "status": "included",
+      "registered_symbols": [
+        "ORCL"
+      ],
+      "registered_feeds": [
+        "https://www.oracle.com/corporate/press/rss/rss-pr.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.oracle.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.oracle.com/corporate/press/rss/rss-pr.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 13
+        }
+      ]
+    },
+    {
+      "rank": 26,
+      "cik": "0000858877",
+      "symbols": [
+        "CSCO"
+      ],
+      "company_name": "Cisco",
+      "market_cap_usd": "376530000000",
+      "status": "included",
+      "registered_symbols": [
+        "CSCO"
+      ],
+      "registered_feeds": [
+        "https://newsroom.cisco.com/c/services/i/servlets/newsroom/rssfeed.json?feed=press-releases"
+      ],
+      "pages": [
+        {
+          "url": "https://www.cisco.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.cisco.com/c/r/newsroom/en/us/index.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.cisco.com/c/r/newsroom/en/us/rss-feeds.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.cisco.com/etc/designs/r/newsroom/clientlibs/clientlib-hidecreateContact.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.cisco.com/etc/designs/r/newsroom/clientlibs/clientlib-base.min.css",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 27,
+      "cik": "0000731766",
+      "symbols": [
+        "UNH"
+      ],
+      "company_name": "UnitedHealth Group",
+      "market_cap_usd": "365090000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.unitedhealthgroup.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.unitedhealthgroup.com/newsroom.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.unitedhealthgroup.com/newsroom/media-resources.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.unitedhealthgroup.com/newsroom/news.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.unitedhealthgroup.com/newsroom/research-reports.html",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.unitedhealthgroup.com/newsroom.rss",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 28,
+      "cik": "0000310158",
+      "symbols": [
+        "MRK"
+      ],
+      "company_name": "Merck & Co.",
+      "market_cap_usd": "364260000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.merck.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.merck.com/news/",
+          "http_status": 404,
+          "error_type": null
+        },
+        {
+          "url": "https://www.merck.com/investor-relations/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.merck.com/investor-relations/events-and-presentations/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.merck.com/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.merck.com%2Finvestor-relations%2F",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.merck.com/news/feed/",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 29,
+      "cik": "0000070858",
+      "symbols": [
+        "BAC"
+      ],
+      "company_name": "Bank of America",
+      "market_cap_usd": "352050000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.bankofamerica.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.bankofamerica.com/content/newsroom/home",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.bankofamerica.com/content/favicon.ico",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.bankofamerica.com/content/manifest.json",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://newsroom.bankofamerica.com/rss.xml",
+          "status": "unavailable",
+          "http_status": null,
+          "error_type": "DataQualityError",
+          "events": null
+        },
+        {
+          "url": "https://newsroom.bankofamerica.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": null,
+          "error_type": "DataQualityError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 30,
+      "cik": "0000354950",
+      "symbols": [
+        "HD"
+      ],
+      "company_name": "Home Depot (The)",
+      "market_cap_usd": "347880000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.homedepot.com",
+          "http_status": 403,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.homedepot.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://corporate.homedepot.com/page/newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.homedepot.com/investor-resources/contact-investor-relations",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://corporate.homedepot.com/page/newsroom?data-onclick=open-modal-url&url=https%3A//players.brightcove.net/5042138603001/default_default/index.html%3FvideoId%3D6105646181001",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.homedepot.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://ir.homedepot.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 31,
+      "cik": "0000040545",
+      "symbols": [
+        "GE"
+      ],
+      "company_name": "GE Aerospace",
+      "market_cap_usd": "342880000000",
+      "status": "included",
+      "registered_symbols": [
+        "GE"
+      ],
+      "registered_feeds": [
+        "https://www.geaerospace.com/news/rss.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.geaerospace.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.geaerospace.com/news/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.geaerospace.com/investor-relations",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.geaerospace.com/investor-relations/stock",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.geaerospace.com/investor-relations/events-reports",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.geaerospace.com/news/rss.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 32,
+      "cik": "0000050863",
+      "symbols": [
+        "INTC"
+      ],
+      "company_name": "Intel",
+      "market_cap_usd": "317090000000",
+      "status": "included",
+      "registered_symbols": [
+        "INTC"
+      ],
+      "registered_feeds": [
+        "https://www.intc.com/news-events/press-releases/rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.intel.co.kr/content/www/kr/ko/homepage.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.intc.com/news-events/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.intel.co.kr/content/www/kr/ko/products/details/processors/atom.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.intel.com/ko/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.intel.com/corporate/intel-named-official-compute-partner-of-mclaren-racing",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.intc.com/news-events/press-releases/rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 12
+        }
+      ]
+    },
+    {
+      "rank": 33,
+      "cik": "0001413329",
+      "symbols": [
+        "PM"
+      ],
+      "company_name": "Philip Morris International",
+      "market_cap_usd": "310110000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.pmi.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pmi.com/investor-relations/overview",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pmi.com/investor-relations/overview",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pmi.com/investor-relations/reports-filings",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.pmi.com/media-center/press-releases/rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 34,
+      "cik": "0000895421",
+      "symbols": [
+        "MS"
+      ],
+      "company_name": "Morgan Stanley",
+      "market_cap_usd": "297990000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.morganstanley.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.morganstanley.com/about-us-ir",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.morganstanley.com/about-us-newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.morganstanley.com/im/en-us/individual-investor/capabilities/alternatives.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.morganstanley.com/im/en-us/individual-investor/capabilities/digital-assets.html",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.morganstanley.com/about-us-newsroom/rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 35,
+      "cik": "0000006951",
+      "symbols": [
+        "AMAT"
+      ],
+      "company_name": "Applied Materials",
+      "market_cap_usd": "294030000000",
+      "status": "included",
+      "registered_symbols": [
+        "AMAT"
+      ],
+      "registered_feeds": [
+        "https://ir.appliedmaterials.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.appliedmaterials.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.appliedmaterials.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.appliedmaterials.com/kr/ko/newsroom.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.appliedmaterials.com/investor-overview/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.appliedmaterials.com",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.appliedmaterials.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 36,
+      "cik": "0000707549",
+      "symbols": [
+        "LRCX"
+      ],
+      "company_name": "Lam Research",
+      "market_cap_usd": "282210000000",
+      "status": "included",
+      "registered_symbols": [
+        "LRCX"
+      ],
+      "registered_feeds": [
+        "https://newsroom.lamresearch.com/press-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.lamresearch.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.lamresearch.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.lamresearch.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.lamresearch.com/press-releases",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.lamresearch.com/rss",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://newsroom.lamresearch.com/news-releases?pagetemplate=rss",
+          "status": "unavailable",
+          "http_status": 302,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://newsroom.lamresearch.com/press-releases?pagetemplate=rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 5
+        }
+      ]
+    },
+    {
+      "rank": 37,
+      "cik": "0000097476",
+      "symbols": [
+        "TXN"
+      ],
+      "company_name": "Texas Instruments",
+      "market_cap_usd": "277420000000",
+      "status": "included",
+      "registered_symbols": [
+        "TXN"
+      ],
+      "registered_feeds": [
+        "https://investor.ti.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.ti.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.ti.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.ti.com/sites/g/files/knoqqb104636/files/favicon%20%282%29.ico",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.ti.com/sites/g/files/knoqqb104636/files/css/css_q_5_QEc74K-whtYYDEC-YSeihJAqDo2kNp0B32L__yw.css?delta=0&language=en&theme=nir_pid1482&include=eJyNj0EKAjEMRS80TFFceJvw24ax2CZDGoW5vR1nowvB3efxk7wkNQ7ZHivqnAuqLpMUo4jOYQ8lqfRv5Ko1wt6wwe7slOGgWDXdAwR1604GL7KMKaN0g_lf9U6OWPlHtzGEjJO2xjJ4UfnYvWI5_PYwD21nceqbpCEhwofwWvLpcj0HfbJZyTz1cZ1b2L97AYcwaUY",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.ti.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 38,
+      "cik": "0000886982",
+      "symbols": [
+        "GS"
+      ],
+      "company_name": "Goldman Sachs",
+      "market_cap_usd": "274990000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.goldmansachs.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.goldmansachs.com/investor-relations",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.goldmansachs.com/pressroom/press-releases/2026/gs-partner-class-2026",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.goldmansachs.com/investor-relations/financials",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.goldmansachs.com/pressroom",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.goldmansachs.com/rss/press-releases.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 39,
+      "cik": "0000018230",
+      "symbols": [
+        "CAT"
+      ],
+      "company_name": "Caterpillar Inc.",
+      "market_cap_usd": "274410000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.caterpillar.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.caterpillar.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.caterpillar.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.caterpillar.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.caterpillar.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.caterpillar.com/en/news/caterpillarNews.rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 40,
+      "cik": "0000101829",
+      "symbols": [
+        "RTX"
+      ],
+      "company_name": "RTX Corporation",
+      "market_cap_usd": "267970000000",
+      "status": "included",
+      "registered_symbols": [
+        "RTX"
+      ],
+      "registered_feeds": [
+        "https://www.rtx.com/rss-feeds/news"
+      ],
+      "pages": [
+        {
+          "url": "https://www.rtx.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 41,
+      "cik": "0001327567",
+      "symbols": [
+        "PANW"
+      ],
+      "company_name": "Palo Alto Networks",
+      "market_cap_usd": "263180000000",
+      "status": "included",
+      "registered_symbols": [
+        "PANW"
+      ],
+      "registered_feeds": [
+        "https://investors.paloaltonetworks.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.paloaltonetworks.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.paloaltonetworks.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.paloaltonetworks.com/company/newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.paloaltonetworks.com/investor-resources/rss-feeds",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.paloaltonetworks.com/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 42,
+      "cik": "0000097745",
+      "symbols": [
+        "TMO"
+      ],
+      "company_name": "Thermo Fisher Scientific",
+      "market_cap_usd": "259440000000",
+      "status": "included",
+      "registered_symbols": [
+        "TMO"
+      ],
+      "registered_feeds": [
+        "https://ir.thermofisher.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.thermofisher.com/kr/ko/home.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.thermofisher.com/home/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.thermofisher.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 43,
+      "cik": "0000072971",
+      "symbols": [
+        "WFC"
+      ],
+      "company_name": "Wells Fargo",
+      "market_cap_usd": "258310000000",
+      "status": "included",
+      "registered_symbols": [
+        "WFC"
+      ],
+      "registered_feeds": [
+        "https://newsroom.wf.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.wellsfargo.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.wf.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.wf.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.wf.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://newsroom.wf.com/press-releases/rss",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://newsroom.wf.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 44,
+      "cik": "0001065280",
+      "symbols": [
+        "NFLX"
+      ],
+      "company_name": "Netflix",
+      "market_cap_usd": "255210000000",
+      "status": "included",
+      "registered_symbols": [
+        "NFLX"
+      ],
+      "registered_feeds": [
+        "https://ir.netflix.net/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.netflix.com/kr-en/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.netflix.net/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 45,
+      "cik": "0000318154",
+      "symbols": [
+        "AMGN"
+      ],
+      "company_name": "Amgen",
+      "market_cap_usd": "251890000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.amgen.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.amgen.com/newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.amgen.com/newsroom/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.amgen.com/newsroom/company-statements",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.amgen.com/newsroom/-/media/Themes/Global/Global/Global/images/migration/Common/Icon/favicon.png",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.amgen.com/newsroom/press-releases/rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 46,
+      "cik": "0001596532",
+      "symbols": [
+        "ANET"
+      ],
+      "company_name": "Arista Networks",
+      "market_cap_usd": "249260000000",
+      "status": "included",
+      "registered_symbols": [
+        "ANET"
+      ],
+      "registered_feeds": [
+        "https://investors.arista.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.arista.com/en/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.arista.com/custom_ui/css/cvAtomic.css?7bb7fe6172f9c2f5cdd252d98dd7a9d6",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.arista.com",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.arista.com/en/company/news/press-release/24818-pr-20261007",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.arista.com/en/company/news/press-release",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.arista.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 47,
+      "cik": "0001707925",
+      "symbols": [
+        "LIN"
+      ],
+      "company_name": "Linde plc",
+      "market_cap_usd": "241510000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.linde.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.linkedin.com/feed/update/urn:li:activity:7445522230979244034",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.linde.com/investors",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.linde.com/investors/why-linde",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.linde.com/investors/regulated-information",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.linde.com/news-media/press-releases/rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 48,
+      "cik": "0000051143",
+      "symbols": [
+        "IBM"
+      ],
+      "company_name": "IBM",
+      "market_cap_usd": "233570000000",
+      "status": "included",
+      "registered_symbols": [
+        "IBM"
+      ],
+      "registered_feeds": [
+        "https://kr.newsroom.ibm.com/announcements?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.ibm.com/kr-ko",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.ibm.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://kr.newsroom.ibm.com/announcements?item=122843",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://kr.newsroom.ibm.com/announcements?item=122842",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://kr.newsroom.ibm.com/index.php?s=20324&rsspage=20295",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 49,
+      "cik": "0001535527",
+      "symbols": [
+        "CRWD"
+      ],
+      "company_name": "CrowdStrike",
+      "market_cap_usd": "232530000000",
+      "status": "included",
+      "registered_symbols": [
+        "CRWD"
+      ],
+      "registered_feeds": [
+        "https://ir.crowdstrike.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.crowdstrike.com/en-us/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.crowdstrike.com/en-us/press-releases/crowdstrike-scales-project-quiltworks-across-europe-advancing-industry-response-to-frontier-ai-risk/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.crowdstrike.com/en-us/press-releases/crowdstrike-unveils-new-innovations-to-secure-every-area-of-cloud-risk/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.crowdstrike.com/en-us/press-releases/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.crowdstrike.com/en-us/press-releases/crowdstrike-falcon-iq-operationalizes-project-quiltworks-at-machine-speed/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.crowdstrike.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 50,
+      "cik": "0001571996",
+      "symbols": [
+        "DELL"
+      ],
+      "company_name": "Dell Technologies",
+      "market_cap_usd": "219060000000",
+      "status": "included",
+      "registered_symbols": [
+        "DELL"
+      ],
+      "registered_feeds": [
+        "https://investors.delltechnologies.com/news-events/press-releases/rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.dell.com/ko-kr",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.delltechnologies.com/rss-feeds",
+          "http_status": 404,
+          "error_type": null
+        },
+        {
+          "url": "https://www.dell.com/ko-kr/newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.delltechnologies.com",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.dell.com/ko-kr/newsroom",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.delltechnologies.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://investors.delltechnologies.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://investors.delltechnologies.com/news-events/press-releases/rss",
+          "status": "ok",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 51,
+      "cik": "0000004962",
+      "symbols": [
+        "AXP"
+      ],
+      "company_name": "American Express",
+      "market_cap_usd": "214980000000",
+      "status": "included",
+      "registered_symbols": [
+        "AXP"
+      ],
+      "registered_feeds": [
+        "https://ir.americanexpress.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.americanexpress.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.americanexpress.com/investor-relations/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.americanexpress.com/en-us/newsroom/?inav=en_us_footer_About_Newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.americanexpress.com/investor-relations/default.aspx?inav=en_us_footer_about_investor_relations",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.americanexpress.com/investor-relations/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.americanexpress.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 52,
+      "cik": "0001996810",
+      "symbols": [
+        "GEV"
+      ],
+      "company_name": "GE Vernova",
+      "market_cap_usd": "211450000000",
+      "status": "included",
+      "registered_symbols": [
+        "GEV"
+      ],
+      "registered_feeds": [
+        "https://www.gevernova.com/news/subscribe/all/rss.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.gevernova.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.gevernova.com/news/media-hub?type%5Bpress_release%5D=press_release",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.gevernova.com/investors",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 53,
+      "cik": "0000882095",
+      "symbols": [
+        "GILD"
+      ],
+      "company_name": "Gilead Sciences",
+      "market_cap_usd": "208480000000",
+      "status": "included",
+      "registered_symbols": [
+        "GILD"
+      ],
+      "registered_feeds": [
+        "https://investors.gilead.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.gilead.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.gilead.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.gilead.com/overview/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.gilead.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.gilead.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.gilead.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 54,
+      "cik": "0001744489",
+      "symbols": [
+        "DIS"
+      ],
+      "company_name": "Walt Disney Company (The)",
+      "market_cap_usd": "205420000000",
+      "status": "included",
+      "registered_symbols": [
+        "DIS"
+      ],
+      "registered_feeds": [
+        "https://thewaltdisneycompany.com/feed/"
+      ],
+      "pages": [
+        {
+          "url": "https://thewaltdisneycompany.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://thewaltdisneycompany.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.thewaltdisneycompany.com/overview/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.thewaltdisneycompany.com/news/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://thewaltdisneycompany.com/feed/",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 100
+        }
+      ]
+    },
+    {
+      "rank": 55,
+      "cik": "0000831001",
+      "symbols": [
+        "C"
+      ],
+      "company_name": "Citigroup",
+      "market_cap_usd": "205260000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.citigroup.com/global",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.citigroup.com/global/investors/quarterly-earnings",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.citigroup.com/rcs/citigpa/storage/public/Earnings/Q32026/2026prqtr3rslt.pdf",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.citigroup.com/citi/news/rss.xml",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 56,
+      "cik": "0000319201",
+      "symbols": [
+        "KLAC"
+      ],
+      "company_name": "KLA Corporation",
+      "market_cap_usd": "198470000000",
+      "status": "included",
+      "registered_symbols": [
+        "KLAC"
+      ],
+      "registered_feeds": [
+        "https://ir.kla.com/news-events/press-releases/rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.kla.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.kla.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.kla.com/news-events/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.kla.com/news-events/investor-day-2026",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://ir.kla.com/news-events/press-releases/detail/524/kla-declares-regular-cash-dividend",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.kla.com/news-events/press-releases/rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 57,
+      "cik": "0000077476",
+      "symbols": [
+        "PEP"
+      ],
+      "company_name": "PepsiCo",
+      "market_cap_usd": "198200000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.pepsico.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pepsico.com/investors",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pepsico.com/newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pepsico.com/en/investors",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pepsico.com/es-MX/investors",
+          "http_status": 404,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.pepsico.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 58,
+      "cik": "0002012383",
+      "symbols": [
+        "BLK"
+      ],
+      "company_name": "BlackRock",
+      "market_cap_usd": "198150000000",
+      "status": "included",
+      "registered_symbols": [
+        "BLK"
+      ],
+      "registered_feeds": [
+        "https://ir.blackrock.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.blackrock.com/kr",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackrock.com/_astro/investor-attestation-O6d8_66c.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackrock.com/corporate/investor-relations/larry-fink-annual-chairmans-letter",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackrock.com/corporate/home",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackrock.com/corporate/newsroom/media/press-releases",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.blackrock.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 59,
+      "cik": "0000820313",
+      "symbols": [
+        "APH"
+      ],
+      "company_name": "Amphenol",
+      "market_cap_usd": "193170000000",
+      "status": "included",
+      "registered_symbols": [
+        "APH"
+      ],
+      "registered_feeds": [
+        "https://investors.amphenol.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.amphenol.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.amphenol.com:443/home/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.amphenol.com/home/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.amphenol.com:443/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.amphenol.com:443/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.amphenol.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 60,
+      "cik": "0000006281",
+      "symbols": [
+        "ADI"
+      ],
+      "company_name": "Analog Devices",
+      "market_cap_usd": "192840000000",
+      "status": "included",
+      "registered_symbols": [
+        "ADI"
+      ],
+      "registered_feeds": [
+        "https://investor.analog.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.analog.com/en/index.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.analog.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://assets2.analog.com/cms-assets/css/pages/styles/newsroompage.bundle.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.analog.com/en/newsroom.html?icid=homepage_card_featured-resources_newsroom_ww_all",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.analog.com/investor-resources/rss-feeds",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 61,
+      "cik": "0000732712",
+      "symbols": [
+        "VZ"
+      ],
+      "company_name": "Verizon",
+      "market_cap_usd": "192140000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.verizon.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.verizon.com/about/rss-feeds/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://www.verizon.com/about/rss-feed/news-releases",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 62,
+      "cik": "0000063908",
+      "symbols": [
+        "MCD"
+      ],
+      "company_name": "McDonald's",
+      "market_cap_usd": "191950000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.mcdonalds.com/us/en-us.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://corporate.mcdonalds.com/corpmcd/investors.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.mcdonalds.com/us/en-us.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://corporate.mcdonalds.com/corpmcd/our-stories/press-releases.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.mcdonalds.com/us/en-us.html",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://corporate.mcdonalds.com/corpmcd/our-stories.rss",
+          "status": "unavailable",
+          "http_status": 302,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 63,
+      "cik": "0000001800",
+      "symbols": [
+        "ABT"
+      ],
+      "company_name": "Abbott Laboratories",
+      "market_cap_usd": "187950000000",
+      "status": "included",
+      "registered_symbols": [
+        "ABT"
+      ],
+      "registered_feeds": [
+        "https://abbottinvestor.gcs-web.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.abbott.com/en-us/homepage",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://abbott.mediaroom.com/news-releases?pagetemplate=rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://abbottinvestor.gcs-web.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 64,
+      "cik": "0000804328",
+      "symbols": [
+        "QCOM"
+      ],
+      "company_name": "Qualcomm",
+      "market_cap_usd": "184540000000",
+      "status": "included",
+      "registered_symbols": [
+        "QCOM"
+      ],
+      "registered_feeds": [
+        "https://investor.qualcomm.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.qualcomm.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.qualcomm.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://static.cloud.coveo.com/atomic/v2/themes/coveo.css",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.qualcomm.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 65,
+      "cik": "0000315189",
+      "symbols": [
+        "DE"
+      ],
+      "company_name": "Deere & Company",
+      "market_cap_usd": "181600000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.deere.com/en-us/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.deere.com/en/news/rss/",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 66,
+      "cik": "0001283699",
+      "symbols": [
+        "TMUS"
+      ],
+      "company_name": "T-Mobile US",
+      "market_cap_usd": "180020000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.t-mobile.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.t-mobile.com/news/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.t-mobile.com/news?INTNAV=fNav%3AAboutT-Mobile%3ANews",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.t-mobile.com?INTNAV=fNav%3AAInvestorRelations",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.t-mobile.com/news",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.t-mobile.com/news/feed",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 67,
+      "cik": "0000100885",
+      "symbols": [
+        "UNP"
+      ],
+      "company_name": "Union Pacific Corporation",
+      "market_cap_usd": "179730000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.up.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.unionpacific.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.unionpacific.com/events-presentations",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.unionpacific.com/investor-relations/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.unionpacific.com/sites/g/files/knoqqb101761/files/favicon_0.png",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.up.com/aboutup/community/inside_track/rss/index.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 68,
+      "cik": "0000766704",
+      "symbols": [
+        "WELL"
+      ],
+      "company_name": "Welltower",
+      "market_cap_usd": "179340000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.welltower.com",
+          "http_status": null,
+          "error_type": "unsafe_redirect"
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://welltower.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 69,
+      "cik": "0001108524",
+      "symbols": [
+        "CRM"
+      ],
+      "company_name": "Salesforce",
+      "market_cap_usd": "179280000000",
+      "status": "included",
+      "registered_symbols": [
+        "CRM"
+      ],
+      "registered_feeds": [
+        "https://investor.salesforce.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.salesforce.com/kr/?ir=1&bc=OTH",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.salesforce.com/news/?bc=OTH",
+          "http_status": 500,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.salesforce.com/overview/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.salesforce.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 70,
+      "cik": "0000753308",
+      "symbols": [
+        "NEE"
+      ],
+      "company_name": "NextEra Energy",
+      "market_cap_usd": "178520000000",
+      "status": "included",
+      "registered_symbols": [
+        "NEE"
+      ],
+      "registered_feeds": [
+        "https://newsroom.nexteraenergy.com/news-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.nexteraenergy.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.investor.nexteraenergy.com",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.nexteraenergy.com/",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://newsroom.nexteraenergy.com/news-releases?pagetemplate=rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 5
+        }
+      ]
+    },
+    {
+      "rank": 71,
+      "cik": "0001163165",
+      "symbols": [
+        "COP"
+      ],
+      "company_name": "ConocoPhillips",
+      "market_cap_usd": "168220000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.conocophillips.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.conocophillips.com/investor-relations/sec-filings/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.conocophillips.com/investor-relations/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.conocophillips.com/investor-relations/stock-information/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.conocophillips.com/investor-relations/investor-presentations/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.conocophillips.com/news-media/story/rss/",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 72,
+      "cik": "0000078003",
+      "symbols": [
+        "PFE"
+      ],
+      "company_name": "Pfizer",
+      "market_cap_usd": "164670000000",
+      "status": "included",
+      "registered_symbols": [
+        "PFE"
+      ],
+      "registered_feeds": [
+        "https://investors.pfizer.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.pfizer.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pfizer.com/newsroom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pfizer.com/newsroom/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pfizer.com/newsroom/media-assets",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.pfizer.com/newsroom/updates-and-statements",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.pfizer.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 73,
+      "cik": "0000313616",
+      "symbols": [
+        "DHR"
+      ],
+      "company_name": "Danaher Corporation",
+      "market_cap_usd": "163940000000",
+      "status": "included",
+      "registered_symbols": [
+        "DHR"
+      ],
+      "registered_feeds": [
+        "https://investors.danaher.com/press-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.danaher.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.danaher.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.danaher.com/newsroom",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 74,
+      "cik": "0000316709",
+      "symbols": [
+        "SCHW"
+      ],
+      "company_name": "Charles Schwab Corporation",
+      "market_cap_usd": "160480000000",
+      "status": "included",
+      "registered_symbols": [
+        "SCHW"
+      ],
+      "registered_feeds": [
+        "https://pressroom.aboutschwab.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.aboutschwab.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.aboutschwab.com/investor-relations",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.aboutschwab.com/investors",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.aboutschwab.com/media",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://pressroom.aboutschwab.com/",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://pressroom.aboutschwab.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 75,
+      "cik": "0001035267",
+      "symbols": [
+        "ISRG"
+      ],
+      "company_name": "Intuitive Surgical",
+      "market_cap_usd": "153770000000",
+      "status": "included",
+      "registered_symbols": [
+        "ISRG"
+      ],
+      "registered_feeds": [
+        "https://isrg.gcs-web.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.intuitive.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://isrg.gcs-web.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 76,
+      "cik": "0001393818",
+      "symbols": [
+        "BX"
+      ],
+      "company_name": "Blackstone Inc.",
+      "market_cap_usd": "149440000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.blackstone.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackstone.com/our-clients/overview/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackstone.com/news/press/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackstone.com/news/press/blackstone-and-leading-canadian-institutional-investors-announce-3-1b-investment-in-mitsubishi-corporations-interest-in-lng-canada/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.blackstone.com/news/press/",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.blackstone.com/feed/",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 0
+        }
+      ]
+    },
+    {
+      "rank": 77,
+      "cik": "0000732717",
+      "symbols": [
+        "T"
+      ],
+      "company_name": "AT&T",
+      "market_cap_usd": "149410000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.att.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://about.att.com/rss/att-top-news.xml",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 78,
+      "cik": "0001467373",
+      "symbols": [
+        "ACN"
+      ],
+      "company_name": "Accenture",
+      "market_cap_usd": "147970000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.accenture.com/en",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.accenture.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.accenture.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.accenture.com/styles/styles.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://newsroom.accenture.com/news/2026/accenture-reports-fourth-quarter-and-full-year-fiscal-2026-results",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://newsroom.accenture.com/news/rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://newsroom.accenture.com/rss.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 79,
+      "cik": "0000109198",
+      "symbols": [
+        "TJX"
+      ],
+      "company_name": "TJX Companies",
+      "market_cap_usd": "147800000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.tjx.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.tjx.com/investors/governance/executive-officers",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.tjx.com/investors",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.tjx.com/investors/press-releases",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.tjx.com/",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.tjx.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 80,
+      "cik": "0000896159",
+      "symbols": [
+        "CB"
+      ],
+      "company_name": "Chubb Limited",
+      "market_cap_usd": "143560000000",
+      "status": "included",
+      "registered_symbols": [
+        "CB"
+      ],
+      "registered_feeds": [
+        "https://news.chubb.com/news-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.chubb.com/us-en/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.chubb.com/home/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.chubb.com/us-en/news/newsroom.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.chubb.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.chubb.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://news.chubb.com/news-releases?pagetemplate=rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 15
+        }
+      ]
+    },
+    {
+      "rank": 81,
+      "cik": "0001543151",
+      "symbols": [
+        "UBER"
+      ],
+      "company_name": "Uber",
+      "market_cap_usd": "142300000000",
+      "status": "included",
+      "registered_symbols": [
+        "UBER"
+      ],
+      "registered_feeds": [
+        "https://investor.uber.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.uber.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.uber.com/us/en/newsroom/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.uber.com/home/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.uber.com/lb/en/newsroom/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.uber.com/ee/ru/newsroom/",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.uber.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 82,
+      "cik": "0000936468",
+      "symbols": [
+        "LMT"
+      ],
+      "company_name": "Lockheed Martin",
+      "market_cap_usd": "137690000000",
+      "status": "included",
+      "registered_symbols": [
+        "LMT"
+      ],
+      "registered_feeds": [
+        "https://news.lockheedmartin.com/news-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.lockheedmartin.com",
+          "http_status": 403,
+          "error_type": null
+        },
+        {
+          "url": "https://news.lockheedmartin.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.lockheedmartin.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.lockheedmartin.com/investor-overview",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.lockheedmartin.com/sites/g/files/knoqqb111261/files/favicon.ico",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://news.lockheedmartin.com/news-releases?pagetemplate=rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 5
+        }
+      ]
+    },
+    {
+      "rank": 83,
+      "cik": "0001835632",
+      "symbols": [
+        "MRVL"
+      ],
+      "company_name": "Marvell Technology",
+      "market_cap_usd": "137630000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.marvell.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.marvell.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.marvell.com/company/newsroom.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.marvell.com",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.marvell.com/_assets/_c8b5c7be7627f26c20be25056bbe4c06/marvell/files/theme/site-files/20250828/www.marvell.com/etc.clientlibs/marvell-com/clientlibs/clientlib-base.min.css",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.marvell.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://investor.marvell.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 84,
+      "cik": "0000064040",
+      "symbols": [
+        "SPGI"
+      ],
+      "company_name": "S&P Global",
+      "market_cap_usd": "137290000000",
+      "status": "included",
+      "registered_symbols": [
+        "SPGI"
+      ],
+      "registered_feeds": [
+        "https://investor.spglobal.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.spglobal.com/en",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.spglobal.com/contact-investor-relations/rss-feeds/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.spglobal.com/investor-relations-overview/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.spglobal.com/investor-presentations/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.spglobal.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.spglobal.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 85,
+      "cik": "0001551182",
+      "symbols": [
+        "ETN"
+      ],
+      "company_name": "Eaton Corporation",
+      "market_cap_usd": "137130000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.eaton.com/country.html",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.eaton.com/etc.clientlibs/eaton/clientlibs/clientlib-atomic.lc-2f6e846f1c3db879d7c6577c0b5251d1-lc.min.css",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://www.eaton.com/us/en-us/company/news-insights/news-releases.rss.xml",
+          "status": "unavailable",
+          "http_status": null,
+          "error_type": "DataQualityError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 86,
+      "cik": "0000080661",
+      "symbols": [
+        "PGR"
+      ],
+      "company_name": "Progressive Corporation",
+      "market_cap_usd": "136600000000",
+      "status": "included",
+      "registered_symbols": [
+        "PGR"
+      ],
+      "registered_feeds": [
+        "https://progressive.mediaroom.com/news-releases/?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.progressive.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://progressive.mediaroom.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.progressive.com/home/default.aspx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 87,
+      "cik": "0000875320",
+      "symbols": [
+        "VRTX"
+      ],
+      "company_name": "Vertex Pharmaceuticals",
+      "market_cap_usd": "136560000000",
+      "status": "included",
+      "registered_symbols": [
+        "VRTX"
+      ],
+      "registered_feeds": [
+        "https://investors.vrtx.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.vrtx.com",
+          "http_status": 403,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.vrtx.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 88,
+      "cik": "0000012927",
+      "symbols": [
+        "BA"
+      ],
+      "company_name": "Boeing",
+      "market_cap_usd": "135910000000",
+      "status": "included",
+      "registered_symbols": [
+        "BA"
+      ],
+      "registered_feeds": [
+        "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.boeing.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://boeing.mediaroom.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://boeing.mediaroom.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 5
+        }
+      ]
+    },
+    {
+      "rank": 89,
+      "cik": "0001751008",
+      "symbols": [
+        "APP"
+      ],
+      "company_name": "AppLovin",
+      "market_cap_usd": "135540000000",
+      "status": "included",
+      "registered_symbols": [
+        "APP"
+      ],
+      "registered_feeds": [
+        "https://investors.applovin.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.applovin.com/en",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.applovin.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.applovin.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.applovin.com/GlobalBranding.ashx",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.applovin.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://investors.applovin.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 90,
+      "cik": "0000764180",
+      "symbols": [
+        "MO"
+      ],
+      "company_name": "Altria",
+      "market_cap_usd": "130810000000",
+      "status": "included",
+      "registered_symbols": [
+        "MO"
+      ],
+      "registered_feeds": [
+        "https://investor.altria.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.altria.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.altria.com/press-releases/email-alerts-and-rss-newsfeeds/default.aspx?src=topnav",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.altria.com/investors/at-a-glance?src=topnav",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.altria.com/investors/2028-enterprise-goals?src=topnav",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.altria.com/press-releases/email-alerts-and-rss-newsfeeds/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 91,
+      "cik": "0000014272",
+      "symbols": [
+        "BMY"
+      ],
+      "company_name": "Bristol Myers Squibb",
+      "market_cap_usd": "129660000000",
+      "status": "included",
+      "registered_symbols": [
+        "BMY"
+      ],
+      "registered_feeds": [
+        "https://news.bms.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.bms.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.facebook.com/BristolMyersSquibb",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.bms.com/investors.html",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.bms.com/news-and-media/press-releases.html",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://news.bms.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 2046
+        }
+      ]
+    },
+    {
+      "rank": 92,
+      "cik": "0000060667",
+      "symbols": [
+        "LOW"
+      ],
+      "company_name": "Lowe's",
+      "market_cap_usd": "127770000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.lowes.com",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.lowes.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 403,
+          "error_type": "HTTPStatusError",
+          "events": null
+        }
+      ]
+    },
+    {
+      "rank": 93,
+      "cik": "0000927653",
+      "symbols": [
+        "MCK"
+      ],
+      "company_name": "McKesson",
+      "market_cap_usd": "127330000000",
+      "status": "included",
+      "registered_symbols": [
+        "MCK"
+      ],
+      "registered_feeds": [
+        "https://investor.mckesson.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.mckesson.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mckesson.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mckesson.com/financials/quarterly-results/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mckesson.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.mckesson.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.mckesson.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 94,
+      "cik": "0002023554",
+      "symbols": [
+        "SNDK"
+      ],
+      "company_name": "Sandisk",
+      "market_cap_usd": "125930000000",
+      "status": "included",
+      "registered_symbols": [
+        "SNDK"
+      ],
+      "registered_feeds": [
+        "https://investor.sandisk.com/rss/news-releases.xml"
+      ],
+      "pages": [
+        {
+          "url": "https://www.sandisk.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.sandisk.com/company/newsroom/our-technology",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.sandisk.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.sandisk.com/company/newsroom/our-technology/ssd-preconditioning-with-sandisk-sprandom",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.sandisk.com/company/newsroom/our-technology/ultraqlc-ssds-for-ai",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.sandisk.com/rss/news-releases.xml",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 95,
+      "cik": "0001613103",
+      "symbols": [
+        "MDT"
+      ],
+      "company_name": "Medtronic",
+      "market_cap_usd": "125910000000",
+      "status": "included",
+      "registered_symbols": [
+        "MDT"
+      ],
+      "registered_feeds": [
+        "https://news.medtronic.com/press-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.medtronic.com/kr-ko/index.html",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://news.medtronic.com/news-releases?pagetemplate=rss",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://news.medtronic.com/press-releases?pagetemplate=rss",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 5
+        }
+      ]
+    },
+    {
+      "rank": 96,
+      "cik": "0001045609",
+      "symbols": [
+        "PLD"
+      ],
+      "company_name": "Prologis",
+      "market_cap_usd": "124800000000",
+      "status": "included",
+      "registered_symbols": [
+        "PLD"
+      ],
+      "registered_feeds": [
+        "https://ir.prologis.com/news-events/press-releases/rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.prologis.com",
+          "http_status": 405,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://ir.prologis.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://ir.prologis.com/press-releases/rss",
+          "status": "unavailable",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://ir.prologis.com/news-events/press-releases/rss",
+          "status": "ok",
+          "http_status": 301,
+          "error_type": "HTTPStatusError",
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 97,
+      "cik": "0000008670",
+      "symbols": [
+        "ADP"
+      ],
+      "company_name": "Automatic Data Processing",
+      "market_cap_usd": "122350000000",
+      "status": "included",
+      "registered_symbols": [
+        "ADP"
+      ],
+      "registered_feeds": [
+        "https://mediacenter.adp.com/press-releases?pagetemplate=rss"
+      ],
+      "pages": [
+        {
+          "url": "https://www.adp.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://mediacenter.adp.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.adp.com/",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://www.adp.com/resources/what-others-say/testimonials/n/northwood-agility-compliance-northwood-investors",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": []
+    },
+    {
+      "rank": 98,
+      "cik": "0000829224",
+      "symbols": [
+        "SBUX"
+      ],
+      "company_name": "Starbucks",
+      "market_cap_usd": "121350000000",
+      "status": "included",
+      "registered_symbols": [
+        "SBUX"
+      ],
+      "registered_feeds": [
+        "https://about.starbucks.com/feed/"
+      ],
+      "pages": [
+        {
+          "url": "https://www.starbucks.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://about.starbucks.com/",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://www.nestlecoffeepartnerssl.com/our-brands/we-proudly-serve-starbucks",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investor.starbucks.com",
+          "http_status": 503,
+          "error_type": null
+        },
+        {
+          "url": "https://about.starbucks.com/press/press-releases/",
+          "http_status": 503,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://about.starbucks.com/feed/",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 99,
+      "cik": "0001137789",
+      "symbols": [
+        "STX"
+      ],
+      "company_name": "Seagate Technology",
+      "market_cap_usd": "121270000000",
+      "status": "included",
+      "registered_symbols": [
+        "STX"
+      ],
+      "registered_feeds": [
+        "https://investors.seagate.com/rss/pressrelease.aspx"
+      ],
+      "pages": [
+        {
+          "url": "https://www.seagate.com",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.seagate.com/overview/default.aspx",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.seagate.com/css/evergreen/dist/default/evergreen.1.0.0.min.css",
+          "http_status": 200,
+          "error_type": null
+        },
+        {
+          "url": "https://investors.seagate.com/GlobalBranding.ashx",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investors.seagate.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": 404,
+          "error_type": "HTTPStatusError",
+          "events": null
+        },
+        {
+          "url": "https://investors.seagate.com/rss/pressrelease.aspx",
+          "status": "ok",
+          "http_status": null,
+          "error_type": null,
+          "events": 10
+        }
+      ]
+    },
+    {
+      "rank": 100,
+      "cik": "0000076334",
+      "symbols": [
+        "PH"
+      ],
+      "company_name": "Parker Hannifin",
+      "market_cap_usd": "120510000000",
+      "status": "working_feed_not_confirmed",
+      "registered_symbols": [],
+      "registered_feeds": [],
+      "pages": [
+        {
+          "url": "https://www.parker.com/kr/ko/home.html",
+          "http_status": 200,
+          "error_type": null
+        }
+      ],
+      "additional_feed_checks": [
+        {
+          "url": "https://investor.parker.com/rss/pressrelease.aspx",
+          "status": "unavailable",
+          "http_status": null,
+          "error_type": "ProxyError",
+          "events": null
+        },
+        {
+          "url": "https://investor.parker.com/rss/news-releases.xml",
+          "status": "unavailable",
+          "http_status": null,
+          "error_type": "ProxyError",
+          "events": null
+        }
+      ]
+    }
+  ]
+}

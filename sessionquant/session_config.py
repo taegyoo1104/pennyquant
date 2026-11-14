@@ -21,6 +21,7 @@ class SessionConfig:
     symbols_per_cycle: int = 2
     news_enabled: bool = True
     include_alpaca: bool = True
+    company_rss_catalog: bool = True
     companies: dict = field(default_factory=dict)
     portfolio: dict = field(default_factory=dict)
     llm: dict = field(default_factory=dict)
@@ -40,11 +41,14 @@ class SessionConfig:
                 raise ValueError(f"{name}은 {minimum}초 이상이어야 합니다.")
         if type(self.symbols_per_cycle) is not int or not 1 <= self.symbols_per_cycle <= 10:
             raise ValueError("symbols_per_cycle은 1~10의 정수여야 합니다.")
-        if type(self.news_enabled) is not bool or type(self.include_alpaca) is not bool:
+        if (type(self.news_enabled) is not bool or type(self.include_alpaca) is not bool
+                or type(self.company_rss_catalog) is not bool):
             raise ValueError("뉴스 사용 설정은 true 또는 false여야 합니다.")
         for name in ("companies", "portfolio", "llm"):
             if not isinstance(getattr(self, name), dict):
                 raise ValueError(f"{name}은 설정 객체여야 합니다.")
+        from .news.catalog import merge_companies
+        object.__setattr__(self, 'companies', merge_companies(self.companies, enabled=self.company_rss_catalog))
 
 
 def load_session_config(path: str | Path) -> SessionConfig:

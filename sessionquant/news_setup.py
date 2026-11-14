@@ -1,5 +1,6 @@
 """뉴스 연결 점검. 주문·유료 텍스트 생성 없이 키 설정과 읽기 응답만 확인한다."""
 import os
+import asyncio
 from urllib.parse import quote
 import httpx
 from .models import symbol_valid
@@ -24,6 +25,9 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
             'monthly_soft_usd':str(llm.monthly_soft_budget_usd),'monthly_hard_usd':str(llm.monthly_hard_budget_usd)},
         'configured':{k:bool(os.getenv(k)) for k in ('OPENAI_API_KEY','FRED_API_KEY','APCA_API_KEY_ID','APCA_API_SECRET_KEY','SEC_USER_AGENT')},
         'official_feeds':{k:v[1] for k,v in OFFICIAL_FEEDS.items()},
+        'company_rss_catalog_enabled':config.company_rss_catalog,
+        'company_rss_catalog_scope':'sp500_top100_market_cap' if config.company_rss_catalog else 'disabled',
+        'company_rss_issuer_count':len({c.get('cik') or ticker for ticker,c in config.companies.items() if c.get('rss_urls')}),
         'company_rss_count':sum(len(c.get('rss_urls',[])) for c in config.companies.values()),'connections':{}}
     if not connect: return report
     providers=('openai','fred','alpaca','sec','rss','official','treasury','gdelt') if provider=='all' else (provider,)
@@ -62,16 +66,33 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
                 result={'status':'ok','symbol':symbol,'filings':len(rows)}
             elif name=='rss':
                 from .collectors.rss_collector import RSSCollector
-                client=RSSCollector(); clients.append(client); feeds=[]
-                for ticker,company in config.companies.items():
-                    for url in company.get('rss_urls',[]):
-                        if len(feeds)>=10: break
+                client=RSSCollector(); clients.append(client)
+                semaphore=asyncio.Semaphore(4)
+                tasks={}
+                async def probe(url):
+                    async with semaphore:
                         try:
-                            rows=await client.fetch(url,source='company_rss',symbols=(ticker,),verified=False)
-                            feeds.append({'symbol':ticker,'status':'ok','events':len(rows)})
+                            rows=await client.fetch(url,source='company_rss',verified=False)
+                            return {'status':'ok','events':len(rows)}
+                        except httpx.HTTPStatusError as exc:
+                            return {'status':'unavailable','http_status':exc.response.status_code}
                         except (httpx.HTTPError,ValueError,RuntimeError):
-                            feeds.append({'symbol':ticker,'status':'unavailable'})
-                result={'status':'checked' if feeds else 'not_configured','feeds':feeds}
+                            return {'status':'unavailable'}
+                checks=[(ticker,url) for ticker,company in config.companies.items() for url in company.get('rss_urls',[])]
+                for _,url in checks:
+                    if url not in tasks: tasks[url]=asyncio.create_task(probe(url))
+                # 같은 발행사의 복수 주식 클래스는 피드를 한 번만 읽고 종목별 결과를 표시한다.
+                try:
+                    await asyncio.gather(*tasks.values())
+                    feeds=[{'symbol':ticker,**tasks[url].result()} for ticker,url in checks]
+                    successes=sum(row['status']=='ok' for row in feeds)
+                    status=('ok' if successes==len(feeds) else 'partial' if successes else 'unavailable') if feeds else 'not_configured'
+                    result={'status':status,'feeds':feeds,
+                        'checked_feeds':len(feeds),'configured_feeds':len(checks),'unique_requests':len(tasks)}
+                finally:
+                    for task in tasks.values():
+                        if not task.done(): task.cancel()
+                    await asyncio.gather(*tasks.values(),return_exceptions=True)
             elif name=='official':
                 client=OfficialNewsClient(); clients.append(client)
                 rows=await client.fetch(); result={'status':aggregate_status(client.status),'events':len(rows),'feeds':client.status}

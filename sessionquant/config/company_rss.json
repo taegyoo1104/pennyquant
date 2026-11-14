@@ -1,0 +1,2051 @@
+{
+  "schema_version": 1,
+  "universe_source": "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+  "universe_count": 503,
+  "universe_members": [
+    "A",
+    "AAPL",
+    "ABBV",
+    "ABNB",
+    "ABT",
+    "ACGL",
+    "ACN",
+    "ADBE",
+    "ADI",
+    "ADM",
+    "ADP",
+    "ADSK",
+    "AEE",
+    "AEP",
+    "AES",
+    "AFL",
+    "AIG",
+    "AIZ",
+    "AJG",
+    "AKAM",
+    "ALB",
+    "ALGN",
+    "ALL",
+    "ALLE",
+    "AMAT",
+    "AMCR",
+    "AMD",
+    "AME",
+    "AMGN",
+    "AMP",
+    "AMT",
+    "AMZN",
+    "ANET",
+    "AON",
+    "AOS",
+    "APA",
+    "APD",
+    "APH",
+    "APO",
+    "APP",
+    "APTV",
+    "ARE",
+    "ARES",
+    "ATO",
+    "AVGO",
+    "AVY",
+    "AWK",
+    "AXON",
+    "AXP",
+    "AZO",
+    "BA",
+    "BAC",
+    "BALL",
+    "BAX",
+    "BBY",
+    "BDX",
+    "BE",
+    "BEN",
+    "BF.B",
+    "BG",
+    "BIIB",
+    "BKNG",
+    "BKR",
+    "BLK",
+    "BMY",
+    "BNY",
+    "BR",
+    "BRK.B",
+    "BRO",
+    "BSX",
+    "BX",
+    "BXP",
+    "C",
+    "CAH",
+    "CARR",
+    "CASY",
+    "CAT",
+    "CB",
+    "CBOE",
+    "CBRE",
+    "CCI",
+    "CCL",
+    "CDNS",
+    "CDW",
+    "CEG",
+    "CF",
+    "CFG",
+    "CHD",
+    "CHRW",
+    "CHTR",
+    "CI",
+    "CIEN",
+    "CINF",
+    "CL",
+    "CLX",
+    "CMCSA",
+    "CME",
+    "CMG",
+    "CMI",
+    "CMS",
+    "CNC",
+    "CNP",
+    "COF",
+    "COHR",
+    "COIN",
+    "COO",
+    "COP",
+    "COR",
+    "COST",
+    "CPAY",
+    "CPRT",
+    "CPT",
+    "CRH",
+    "CRL",
+    "CRM",
+    "CRWD",
+    "CSCO",
+    "CSGP",
+    "CSX",
+    "CTAS",
+    "CTSH",
+    "CVNA",
+    "CVS",
+    "CVX",
+    "D",
+    "DAL",
+    "DASH",
+    "DD",
+    "DDOG",
+    "DE",
+    "DECK",
+    "DELL",
+    "DG",
+    "DGX",
+    "DHI",
+    "DHR",
+    "DIS",
+    "DLR",
+    "DLTR",
+    "DOC",
+    "DOV",
+    "DOW",
+    "DPZ",
+    "DRI",
+    "DTE",
+    "DUK",
+    "DVA",
+    "DVN",
+    "DXCM",
+    "EBAY",
+    "ECHO",
+    "ECL",
+    "ED",
+    "EFX",
+    "EG",
+    "EIX",
+    "EL",
+    "ELV",
+    "EME",
+    "EMR",
+    "EOG",
+    "EQIX",
+    "EQT",
+    "ERIE",
+    "ES",
+    "ESS",
+    "ETN",
+    "ETR",
+    "EVRG",
+    "EW",
+    "EXC",
+    "EXE",
+    "EXPD",
+    "EXPE",
+    "EXR",
+    "F",
+    "FANG",
+    "FAST",
+    "FCX",
+    "FDS",
+    "FDX",
+    "FDXF",
+    "FE",
+    "FERG",
+    "FFIV",
+    "FICO",
+    "FIS",
+    "FISV",
+    "FITB",
+    "FIX",
+    "FLEX",
+    "FOX",
+    "FOXA",
+    "FRT",
+    "FSLR",
+    "FTNT",
+    "FTV",
+    "GD",
+    "GDDY",
+    "GE",
+    "GEHC",
+    "GEN",
+    "GEV",
+    "GILD",
+    "GIS",
+    "GL",
+    "GLW",
+    "GM",
+    "GNRC",
+    "GOOG",
+    "GOOGL",
+    "GPC",
+    "GPN",
+    "GRMN",
+    "GS",
+    "GWW",
+    "HAL",
+    "HAS",
+    "HBAN",
+    "HCA",
+    "HD",
+    "HIG",
+    "HII",
+    "HLT",
+    "HON",
+    "HONA",
+    "HOOD",
+    "HPE",
+    "HPQ",
+    "HRL",
+    "HSIC",
+    "HST",
+    "HSY",
+    "HUBB",
+    "HUM",
+    "HWM",
+    "IBKR",
+    "IBM",
+    "ICE",
+    "IDXX",
+    "IEX",
+    "IFF",
+    "ILMN",
+    "INCY",
+    "INTC",
+    "INTU",
+    "INVH",
+    "IP",
+    "IQV",
+    "IR",
+    "IRM",
+    "ISRG",
+    "IT",
+    "ITW",
+    "IVZ",
+    "J",
+    "JBHT",
+    "JBL",
+    "JCI",
+    "JKHY",
+    "JNJ",
+    "JPM",
+    "KDP",
+    "KEY",
+    "KEYS",
+    "KHC",
+    "KIM",
+    "KKR",
+    "KLAC",
+    "KMB",
+    "KMI",
+    "KO",
+    "KR",
+    "L",
+    "LDOS",
+    "LEN",
+    "LH",
+    "LHX",
+    "LII",
+    "LIN",
+    "LITE",
+    "LLY",
+    "LMT",
+    "LNT",
+    "LOW",
+    "LRCX",
+    "LULU",
+    "LUV",
+    "LVS",
+    "LYB",
+    "LYV",
+    "MA",
+    "MAA",
+    "MAR",
+    "MAS",
+    "MCD",
+    "MCHP",
+    "MCK",
+    "MCO",
+    "MDLZ",
+    "MDT",
+    "MET",
+    "META",
+    "MGM",
+    "MKC",
+    "MLM",
+    "MMM",
+    "MNST",
+    "MO",
+    "MOS",
+    "MPC",
+    "MPWR",
+    "MRK",
+    "MRNA",
+    "MRSH",
+    "MRVL",
+    "MS",
+    "MSCI",
+    "MSFT",
+    "MSI",
+    "MTB",
+    "MTD",
+    "MU",
+    "NCLH",
+    "NDAQ",
+    "NDSN",
+    "NEE",
+    "NEM",
+    "NFLX",
+    "NI",
+    "NKE",
+    "NOC",
+    "NOW",
+    "NRG",
+    "NSC",
+    "NTAP",
+    "NTRS",
+    "NUE",
+    "NVDA",
+    "NVR",
+    "NWS",
+    "NWSA",
+    "NXPI",
+    "O",
+    "ODFL",
+    "OKE",
+    "OKTA",
+    "OMC",
+    "ON",
+    "ORCL",
+    "ORLY",
+    "OTIS",
+    "OXY",
+    "P",
+    "PANW",
+    "PAYX",
+    "PCAR",
+    "PCG",
+    "PEG",
+    "PEP",
+    "PFE",
+    "PFG",
+    "PG",
+    "PGR",
+    "PH",
+    "PHM",
+    "PKG",
+    "PLD",
+    "PLTR",
+    "PM",
+    "PNC",
+    "PNR",
+    "PNW",
+    "PODD",
+    "PPG",
+    "PPL",
+    "PRU",
+    "PSA",
+    "PSX",
+    "PTC",
+    "PWR",
+    "PYPL",
+    "Q",
+    "QCOM",
+    "RCL",
+    "RDDT",
+    "REG",
+    "REGN",
+    "RF",
+    "RJF",
+    "RL",
+    "RMD",
+    "ROK",
+    "ROL",
+    "ROP",
+    "ROST",
+    "RSG",
+    "RTX",
+    "RVTY",
+    "SBAC",
+    "SBUX",
+    "SCHW",
+    "SHW",
+    "SJM",
+    "SKYD",
+    "SLB",
+    "SMCI",
+    "SNA",
+    "SNDK",
+    "SNPS",
+    "SO",
+    "SOLV",
+    "SPG",
+    "SPGI",
+    "SRE",
+    "STE",
+    "STLD",
+    "STT",
+    "STX",
+    "STZ",
+    "SW",
+    "SWK",
+    "SWKS",
+    "SYF",
+    "SYK",
+    "SYY",
+    "T",
+    "TDG",
+    "TDY",
+    "TECH",
+    "TEL",
+    "TER",
+    "TFC",
+    "TGT",
+    "TJX",
+    "TKO",
+    "TMO",
+    "TMUS",
+    "TPL",
+    "TPR",
+    "TRGP",
+    "TRMB",
+    "TROW",
+    "TRV",
+    "TSCO",
+    "TSLA",
+    "TSN",
+    "TT",
+    "TTWO",
+    "TWLO",
+    "TXN",
+    "TXT",
+    "TYL",
+    "UAL",
+    "UBER",
+    "UDR",
+    "UHS",
+    "ULTA",
+    "UNH",
+    "UNP",
+    "UPS",
+    "URI",
+    "USB",
+    "V",
+    "VEEV",
+    "VICI",
+    "VLO",
+    "VLTO",
+    "VMC",
+    "VMRK",
+    "VRSK",
+    "VRSN",
+    "VRT",
+    "VRTX",
+    "VST",
+    "VTR",
+    "VTRS",
+    "VYLR",
+    "VZ",
+    "WAB",
+    "WAT",
+    "WDAY",
+    "WDC",
+    "WEC",
+    "WELL",
+    "WFC",
+    "WM",
+    "WMB",
+    "WMT",
+    "WRB",
+    "WSM",
+    "WST",
+    "WTW",
+    "WY",
+    "WYNN",
+    "XEL",
+    "XOM",
+    "XYL",
+    "XYZ",
+    "YUM",
+    "ZBH",
+    "ZBRA",
+    "ZTS"
+  ],
+  "universe_snapshot_sha256": "eab3b8c8cdafb4bd186cc1a4d650a9ffa64e1a4099d0053ca7ed5ef6f0c0cc8a",
+  "homepage_discovery_source": "https://github.com/JerBouma/FinanceDatabase/tree/main/database/equities",
+  "generated_at": "2026-11-14T07:41:46.125497+00:00",
+  "generated_at_kst": "2026-11-14T16:41:46.125497+09:00",
+  "scope": "sp500_top100_market_cap_rss",
+  "ranking_snapshot": "rss_top100.json",
+  "ranking_source": "https://stockanalysis.com/list/sp-500-stocks/",
+  "ranking_observed_at": "2026-11-14T07:33:21.191215+00:00",
+  "eligible_issuers": 100,
+  "eligible_symbols": [
+    "AAPL",
+    "ABBV",
+    "ABT",
+    "ACN",
+    "ADI",
+    "ADP",
+    "AMAT",
+    "AMD",
+    "AMGN",
+    "AMZN",
+    "ANET",
+    "APH",
+    "APP",
+    "AVGO",
+    "AXP",
+    "BA",
+    "BAC",
+    "BLK",
+    "BMY",
+    "BRK.B",
+    "BX",
+    "C",
+    "CAT",
+    "CB",
+    "COP",
+    "COST",
+    "CRM",
+    "CRWD",
+    "CSCO",
+    "CVX",
+    "DE",
+    "DELL",
+    "DHR",
+    "DIS",
+    "ETN",
+    "GE",
+    "GEV",
+    "GILD",
+    "GOOG",
+    "GOOGL",
+    "GS",
+    "HD",
+    "IBM",
+    "INTC",
+    "ISRG",
+    "JNJ",
+    "JPM",
+    "KLAC",
+    "KO",
+    "LIN",
+    "LLY",
+    "LMT",
+    "LOW",
+    "LRCX",
+    "MA",
+    "MCD",
+    "MCK",
+    "MDT",
+    "META",
+    "MO",
+    "MRK",
+    "MRVL",
+    "MS",
+    "MSFT",
+    "MU",
+    "NEE",
+    "NFLX",
+    "NVDA",
+    "ORCL",
+    "PANW",
+    "PEP",
+    "PFE",
+    "PG",
+    "PGR",
+    "PH",
+    "PLD",
+    "PLTR",
+    "PM",
+    "QCOM",
+    "RTX",
+    "SBUX",
+    "SCHW",
+    "SNDK",
+    "SPGI",
+    "STX",
+    "T",
+    "TJX",
+    "TMO",
+    "TMUS",
+    "TSLA",
+    "TXN",
+    "UBER",
+    "UNH",
+    "UNP",
+    "V",
+    "VRTX",
+    "VZ",
+    "WELL",
+    "WFC",
+    "WMT",
+    "XOM"
+  ],
+  "search_scope": "시가총액 상위 100개 발행사의 공개 공식 사이트·IR·뉴스룸과 연결된 RSS 조사. 모든 RSS의 부재를 증명하지 않음.",
+  "companies": {
+    "ABBV": {
+      "company_name": "AbbVie",
+      "cik": "0001551152",
+      "rss_urls": [
+        "https://news.abbvie.com/?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "ABT": {
+      "company_name": "Abbott Laboratories",
+      "cik": "0000001800",
+      "rss_urls": [
+        "https://abbottinvestor.gcs-web.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "ADI": {
+      "company_name": "Analog Devices",
+      "cik": "0000006281",
+      "rss_urls": [
+        "https://investor.analog.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "ADP": {
+      "company_name": "Automatic Data Processing",
+      "cik": "0000008670",
+      "rss_urls": [
+        "https://mediacenter.adp.com/press-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "AMAT": {
+      "company_name": "Applied Materials",
+      "cik": "0000006951",
+      "rss_urls": [
+        "https://ir.appliedmaterials.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "AMD": {
+      "company_name": "Advanced Micro Devices",
+      "cik": "0000002488",
+      "rss_urls": [
+        "https://ir.amd.com/news-events/press-releases/rss"
+      ],
+      "rss_verified": true
+    },
+    "AMZN": {
+      "company_name": "Amazon",
+      "cik": "0001018724",
+      "rss_urls": [
+        "https://ir.aboutamazon.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "ANET": {
+      "company_name": "Arista Networks",
+      "cik": "0001596532",
+      "rss_urls": [
+        "https://investors.arista.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "APH": {
+      "company_name": "Amphenol",
+      "cik": "0000820313",
+      "rss_urls": [
+        "https://investors.amphenol.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "APP": {
+      "company_name": "AppLovin",
+      "cik": "0001751008",
+      "rss_urls": [
+        "https://investors.applovin.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "AVGO": {
+      "company_name": "Broadcom",
+      "cik": "0001730168",
+      "rss_urls": [
+        "https://investors.broadcom.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "AXP": {
+      "company_name": "American Express",
+      "cik": "0000004962",
+      "rss_urls": [
+        "https://ir.americanexpress.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "BA": {
+      "company_name": "Boeing",
+      "cik": "0000012927",
+      "rss_urls": [
+        "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "BLK": {
+      "company_name": "BlackRock",
+      "cik": "0002012383",
+      "rss_urls": [
+        "https://ir.blackrock.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "BMY": {
+      "company_name": "Bristol Myers Squibb",
+      "cik": "0000014272",
+      "rss_urls": [
+        "https://news.bms.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "CB": {
+      "company_name": "Chubb Limited",
+      "cik": "0000896159",
+      "rss_urls": [
+        "https://news.chubb.com/news-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "COST": {
+      "company_name": "Costco",
+      "cik": "0000909832",
+      "rss_urls": [
+        "https://investor.costco.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "CRM": {
+      "company_name": "Salesforce",
+      "cik": "0001108524",
+      "rss_urls": [
+        "https://investor.salesforce.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "CRWD": {
+      "company_name": "CrowdStrike",
+      "cik": "0001535527",
+      "rss_urls": [
+        "https://ir.crowdstrike.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "CSCO": {
+      "company_name": "Cisco",
+      "cik": "0000858877",
+      "rss_urls": [
+        "https://newsroom.cisco.com/c/services/i/servlets/newsroom/rssfeed.json?feed=press-releases"
+      ],
+      "rss_verified": true
+    },
+    "DELL": {
+      "company_name": "Dell Technologies",
+      "cik": "0001571996",
+      "rss_urls": [
+        "https://investors.delltechnologies.com/news-events/press-releases/rss"
+      ],
+      "rss_verified": true
+    },
+    "DHR": {
+      "company_name": "Danaher Corporation",
+      "cik": "0000313616",
+      "rss_urls": [
+        "https://investors.danaher.com/press-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "DIS": {
+      "company_name": "Walt Disney Company (The)",
+      "cik": "0001744489",
+      "rss_urls": [
+        "https://thewaltdisneycompany.com/feed/"
+      ],
+      "rss_verified": true
+    },
+    "GE": {
+      "company_name": "GE Aerospace",
+      "cik": "0000040545",
+      "rss_urls": [
+        "https://www.geaerospace.com/news/rss.xml"
+      ],
+      "rss_verified": true
+    },
+    "GEV": {
+      "company_name": "GE Vernova",
+      "cik": "0001996810",
+      "rss_urls": [
+        "https://www.gevernova.com/news/subscribe/all/rss.xml"
+      ],
+      "rss_verified": true
+    },
+    "GILD": {
+      "company_name": "Gilead Sciences",
+      "cik": "0000882095",
+      "rss_urls": [
+        "https://investors.gilead.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "GOOG": {
+      "company_name": "Alphabet Inc. (Class C)",
+      "cik": "0001652044",
+      "rss_urls": [
+        "https://blog.google/rss/"
+      ],
+      "rss_verified": true
+    },
+    "GOOGL": {
+      "company_name": "Alphabet Inc. (Class A)",
+      "cik": "0001652044",
+      "rss_urls": [
+        "https://blog.google/rss/"
+      ],
+      "rss_verified": true
+    },
+    "IBM": {
+      "company_name": "IBM",
+      "cik": "0000051143",
+      "rss_urls": [
+        "https://kr.newsroom.ibm.com/announcements?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "INTC": {
+      "company_name": "Intel",
+      "cik": "0000050863",
+      "rss_urls": [
+        "https://www.intc.com/news-events/press-releases/rss"
+      ],
+      "rss_verified": true
+    },
+    "ISRG": {
+      "company_name": "Intuitive Surgical",
+      "cik": "0001035267",
+      "rss_urls": [
+        "https://isrg.gcs-web.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "JNJ": {
+      "company_name": "Johnson & Johnson",
+      "cik": "0000200406",
+      "rss_urls": [
+        "https://www.jnj.com/media-center/press-releases.rss"
+      ],
+      "rss_verified": true
+    },
+    "KLAC": {
+      "company_name": "KLA Corporation",
+      "cik": "0000319201",
+      "rss_urls": [
+        "https://ir.kla.com/news-events/press-releases/rss"
+      ],
+      "rss_verified": true
+    },
+    "KO": {
+      "company_name": "Coca-Cola Company (The)",
+      "cik": "0000021344",
+      "rss_urls": [
+        "https://investors.coca-colacompany.com/news-events/press-releases/rss"
+      ],
+      "rss_verified": true
+    },
+    "LLY": {
+      "company_name": "Lilly (Eli)",
+      "cik": "0000059478",
+      "rss_urls": [
+        "https://investor.lilly.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "LMT": {
+      "company_name": "Lockheed Martin",
+      "cik": "0000936468",
+      "rss_urls": [
+        "https://news.lockheedmartin.com/news-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "LRCX": {
+      "company_name": "Lam Research",
+      "cik": "0000707549",
+      "rss_urls": [
+        "https://newsroom.lamresearch.com/press-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "MA": {
+      "company_name": "Mastercard",
+      "cik": "0001141391",
+      "rss_urls": [
+        "https://investor.mastercard.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "MCK": {
+      "company_name": "McKesson",
+      "cik": "0000927653",
+      "rss_urls": [
+        "https://investor.mckesson.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "MDT": {
+      "company_name": "Medtronic",
+      "cik": "0001613103",
+      "rss_urls": [
+        "https://news.medtronic.com/press-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "META": {
+      "company_name": "Meta Platforms",
+      "cik": "0001326801",
+      "rss_urls": [
+        "https://www.meta.com/blog/rss/"
+      ],
+      "rss_verified": true
+    },
+    "MO": {
+      "company_name": "Altria",
+      "cik": "0000764180",
+      "rss_urls": [
+        "https://investor.altria.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "MU": {
+      "company_name": "Micron Technology",
+      "cik": "0000723125",
+      "rss_urls": [
+        "https://investors.micron.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "NEE": {
+      "company_name": "NextEra Energy",
+      "cik": "0000753308",
+      "rss_urls": [
+        "https://newsroom.nexteraenergy.com/news-releases?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "NFLX": {
+      "company_name": "Netflix",
+      "cik": "0001065280",
+      "rss_urls": [
+        "https://ir.netflix.net/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "NVDA": {
+      "company_name": "Nvidia",
+      "cik": "0001045810",
+      "rss_urls": [
+        "https://nvidianews.nvidia.com/cats/press_release.xml"
+      ],
+      "rss_verified": true
+    },
+    "ORCL": {
+      "company_name": "Oracle Corporation",
+      "cik": "0001341439",
+      "rss_urls": [
+        "https://www.oracle.com/corporate/press/rss/rss-pr.xml"
+      ],
+      "rss_verified": true
+    },
+    "PANW": {
+      "company_name": "Palo Alto Networks",
+      "cik": "0001327567",
+      "rss_urls": [
+        "https://investors.paloaltonetworks.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "PFE": {
+      "company_name": "Pfizer",
+      "cik": "0000078003",
+      "rss_urls": [
+        "https://investors.pfizer.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "PGR": {
+      "company_name": "Progressive Corporation",
+      "cik": "0000080661",
+      "rss_urls": [
+        "https://progressive.mediaroom.com/news-releases/?pagetemplate=rss"
+      ],
+      "rss_verified": true
+    },
+    "PLD": {
+      "company_name": "Prologis",
+      "cik": "0001045609",
+      "rss_urls": [
+        "https://ir.prologis.com/news-events/press-releases/rss"
+      ],
+      "rss_verified": true
+    },
+    "QCOM": {
+      "company_name": "Qualcomm",
+      "cik": "0000804328",
+      "rss_urls": [
+        "https://investor.qualcomm.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "RTX": {
+      "company_name": "RTX Corporation",
+      "cik": "0000101829",
+      "rss_urls": [
+        "https://www.rtx.com/rss-feeds/news"
+      ],
+      "rss_verified": true
+    },
+    "SBUX": {
+      "company_name": "Starbucks",
+      "cik": "0000829224",
+      "rss_urls": [
+        "https://about.starbucks.com/feed/"
+      ],
+      "rss_verified": true
+    },
+    "SCHW": {
+      "company_name": "Charles Schwab Corporation",
+      "cik": "0000316709",
+      "rss_urls": [
+        "https://pressroom.aboutschwab.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "SNDK": {
+      "company_name": "Sandisk",
+      "cik": "0002023554",
+      "rss_urls": [
+        "https://investor.sandisk.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "SPGI": {
+      "company_name": "S&P Global",
+      "cik": "0000064040",
+      "rss_urls": [
+        "https://investor.spglobal.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "STX": {
+      "company_name": "Seagate Technology",
+      "cik": "0001137789",
+      "rss_urls": [
+        "https://investors.seagate.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "TMO": {
+      "company_name": "Thermo Fisher Scientific",
+      "cik": "0000097745",
+      "rss_urls": [
+        "https://ir.thermofisher.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "TXN": {
+      "company_name": "Texas Instruments",
+      "cik": "0000097476",
+      "rss_urls": [
+        "https://investor.ti.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "UBER": {
+      "company_name": "Uber",
+      "cik": "0001543151",
+      "rss_urls": [
+        "https://investor.uber.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "V": {
+      "company_name": "Visa Inc.",
+      "cik": "0001403161",
+      "rss_urls": [
+        "https://investor.visa.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    },
+    "VRTX": {
+      "company_name": "Vertex Pharmaceuticals",
+      "cik": "0000875320",
+      "rss_urls": [
+        "https://investors.vrtx.com/rss/news-releases.xml"
+      ],
+      "rss_verified": true
+    },
+    "WFC": {
+      "company_name": "Wells Fargo",
+      "cik": "0000072971",
+      "rss_urls": [
+        "https://newsroom.wf.com/rss/pressrelease.aspx"
+      ],
+      "rss_verified": true
+    }
+  },
+  "verification": {
+    "ABBV": {
+      "verified_at": "2026-11-14T06:05:05.956126+00:00",
+      "feed_url": "https://news.abbvie.com/?pagetemplate=rss",
+      "source_page": "https://www.abbvie.com",
+      "discovery_chain": [
+        "https://www.abbvie.com",
+        "https://news.abbvie.com/?pagetemplate=rss"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-08T17:45:00+00:00",
+      "scope": "official_company_news",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "ABT": {
+      "verified_at": "2026-11-14T07:39:05.825638+00:00",
+      "feed_url": "https://abbottinvestor.gcs-web.com/rss/news-releases.xml",
+      "source_page": "https://abbottinvestor.gcs-web.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://abbottinvestor.gcs-web.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-02T14:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "ADI": {
+      "verified_at": "2026-11-14T06:05:29.692995+00:00",
+      "feed_url": "https://investor.analog.com/rss/news-releases.xml",
+      "source_page": "https://investor.analog.com/investor-resources/rss-feeds",
+      "discovery_chain": [
+        "https://investor.analog.com/",
+        "https://investor.analog.com/investor-resources/rss-feeds",
+        "https://investor.analog.com/rss/news-releases.xml"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-09T21:01:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "ADP": {
+      "verified_at": "2026-11-14T06:05:13.775754+00:00",
+      "feed_url": "https://mediacenter.adp.com/press-releases?pagetemplate=rss",
+      "source_page": "https://mediacenter.adp.com/",
+      "discovery_chain": [
+        "https://mediacenter.adp.com/",
+        "https://mediacenter.adp.com/press-releases?pagetemplate=rss"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-11T13:00:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "AMAT": {
+      "verified_at": "2026-11-14T07:36:20.490961+00:00",
+      "feed_url": "https://ir.appliedmaterials.com/rss/news-releases.xml",
+      "source_page": "https://ir.appliedmaterials.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://ir.appliedmaterials.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-12T21:01:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "AMD": {
+      "verified_at": "2026-11-14T07:35:23.019828+00:00",
+      "feed_url": "https://ir.amd.com/news-events/press-releases/rss",
+      "source_page": "https://ir.amd.com/news-events/press-releases/rss",
+      "discovery_chain": [
+        "https://ir.amd.com/news-events/press-releases/rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-10T17:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "AMZN": {
+      "verified_at": "2026-11-14T07:35:23.622596+00:00",
+      "feed_url": "https://ir.aboutamazon.com/rss/pressrelease.aspx",
+      "source_page": "https://ir.aboutamazon.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://ir.aboutamazon.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-29T20:01:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "ANET": {
+      "verified_at": "2026-11-14T07:36:26.276337+00:00",
+      "feed_url": "https://investors.arista.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.arista.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.arista.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-03T21:05:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "APH": {
+      "verified_at": "2026-11-14T07:36:28.530801+00:00",
+      "feed_url": "https://investors.amphenol.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.amphenol.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.amphenol.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-28T12:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "APP": {
+      "verified_at": "2026-11-14T07:39:06.000680+00:00",
+      "feed_url": "https://investors.applovin.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.applovin.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.applovin.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-04T21:05:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "AVGO": {
+      "verified_at": "2026-11-14T06:05:23.496765+00:00",
+      "feed_url": "https://investors.broadcom.com/rss/news-releases.xml",
+      "source_page": "https://investors.broadcom.com/rss-feeds",
+      "discovery_chain": [
+        "https://investors.broadcom.com/",
+        "https://investors.broadcom.com/rss-feeds",
+        "https://investors.broadcom.com/rss/news-releases.xml"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-09T14:00:08+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "AXP": {
+      "verified_at": "2026-11-14T07:36:19.168442+00:00",
+      "feed_url": "https://ir.americanexpress.com/rss/pressrelease.aspx",
+      "source_page": "https://ir.americanexpress.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://ir.americanexpress.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-27T20:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "BA": {
+      "verified_at": "2026-11-14T07:35:23.977388+00:00",
+      "feed_url": "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+      "source_page": "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss",
+      "discovery_chain": [
+        "https://boeing.mediaroom.com/news-releases-statements?pagetemplate=rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-04T08:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "BLK": {
+      "verified_at": "2026-11-14T07:36:18.785214+00:00",
+      "feed_url": "https://ir.blackrock.com/rss/pressrelease.aspx",
+      "source_page": "https://ir.blackrock.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://ir.blackrock.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-14T10:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "BMY": {
+      "verified_at": "2026-11-14T07:36:23.010751+00:00",
+      "feed_url": "https://news.bms.com/rss/pressrelease.aspx",
+      "source_page": "https://news.bms.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://news.bms.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 2046,
+      "latest_published_at": "2026-11-12T11:59:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "CB": {
+      "verified_at": "2026-11-14T07:36:29.264726+00:00",
+      "feed_url": "https://news.chubb.com/news-releases?pagetemplate=rss",
+      "source_page": "https://news.chubb.com/news-releases?pagetemplate=rss",
+      "discovery_chain": [
+        "https://news.chubb.com/news-releases?pagetemplate=rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 15,
+      "latest_published_at": "2026-10-20T20:10:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "COST": {
+      "verified_at": "2026-11-14T07:36:18.738864+00:00",
+      "feed_url": "https://investor.costco.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.costco.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.costco.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-10T21:15:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "CRM": {
+      "verified_at": "2026-11-14T07:36:20.813733+00:00",
+      "feed_url": "https://investor.salesforce.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.salesforce.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.salesforce.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-10T21:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "CRWD": {
+      "verified_at": "2026-11-14T07:36:26.330119+00:00",
+      "feed_url": "https://ir.crowdstrike.com/rss/news-releases.xml",
+      "source_page": "https://ir.crowdstrike.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://ir.crowdstrike.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-12T13:35:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "CSCO": {
+      "verified_at": "2026-11-14T06:05:30.147260+00:00",
+      "feed_url": "https://newsroom.cisco.com/c/services/i/servlets/newsroom/rssfeed.json?feed=press-releases",
+      "source_page": "https://newsroom.cisco.com/c/r/newsroom/en/us/rss-feeds.html",
+      "discovery_chain": [
+        "https://www.cisco.com",
+        "https://newsroom.cisco.com/c/r/newsroom/en/us/index.html",
+        "https://newsroom.cisco.com/c/r/newsroom/en/us/rss-feeds.html",
+        "https://newsroom.cisco.com/c/services/i/servlets/newsroom/rssfeed.json?feed=press-releases"
+      ],
+      "events_at_verification": 20,
+      "latest_published_at": "2026-11-12T21:05:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "DELL": {
+      "verified_at": "2026-11-14T07:36:28.129731+00:00",
+      "feed_url": "https://investors.delltechnologies.com/news-events/press-releases/rss",
+      "source_page": "https://investors.delltechnologies.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://investors.delltechnologies.com/rss/news-releases.xml",
+        "https://investors.delltechnologies.com/news-events/press-releases/rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-11T14:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "DHR": {
+      "verified_at": "2026-11-14T06:05:07.916403+00:00",
+      "feed_url": "https://investors.danaher.com/press-releases?pagetemplate=rss",
+      "source_page": "https://investors.danaher.com/",
+      "discovery_chain": [
+        "https://www.danaher.com",
+        "https://investors.danaher.com/",
+        "https://investors.danaher.com/press-releases?pagetemplate=rss"
+      ],
+      "events_at_verification": 20,
+      "latest_published_at": "2026-11-02T21:30:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "DIS": {
+      "verified_at": "2026-11-14T07:35:24.034544+00:00",
+      "feed_url": "https://thewaltdisneycompany.com/feed/",
+      "source_page": "https://thewaltdisneycompany.com/feed/",
+      "discovery_chain": [
+        "https://thewaltdisneycompany.com/feed/"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 100,
+      "latest_published_at": "2026-11-13T22:32:37+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_company_news"
+    },
+    "GE": {
+      "verified_at": "2026-11-14T07:39:06.629998+00:00",
+      "feed_url": "https://www.geaerospace.com/news/rss.xml",
+      "source_page": "https://www.geaerospace.com/news/rss.xml",
+      "discovery_chain": [
+        "https://www.geaerospace.com/news/rss.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2025-04-29T14:35:44+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_company_news"
+    },
+    "GEV": {
+      "verified_at": "2026-11-14T06:05:09.685177+00:00",
+      "feed_url": "https://www.gevernova.com/news/subscribe/all/rss.xml",
+      "source_page": "https://www.gevernova.com/news/media-hub?type%5Bpress_release%5D=press_release",
+      "discovery_chain": [
+        "https://www.gevernova.com",
+        "https://www.gevernova.com/news/media-hub?type%5Bpress_release%5D=press_release",
+        "https://www.gevernova.com/news/subscribe/all/rss.xml"
+      ],
+      "events_at_verification": 20,
+      "latest_published_at": "2026-11-10T13:54:04+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "GILD": {
+      "verified_at": "2026-11-14T07:36:21.471779+00:00",
+      "feed_url": "https://investors.gilead.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.gilead.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.gilead.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-12T13:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "GOOG": {
+      "verified_at": "2026-11-14T06:05:18.331923+00:00",
+      "feed_url": "https://blog.google/rss/",
+      "source_page": "https://blog.google/",
+      "discovery_chain": [
+        "https://blog.google/",
+        "https://blog.google/rss/"
+      ],
+      "events_at_verification": 20,
+      "latest_published_at": "2026-11-13T20:30:00+00:00",
+      "scope": "official_company_news",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "GOOGL": {
+      "verified_at": "2026-11-14T06:05:18.340586+00:00",
+      "feed_url": "https://blog.google/rss/",
+      "source_page": "https://blog.google/",
+      "discovery_chain": [
+        "https://blog.google/",
+        "https://blog.google/rss/"
+      ],
+      "events_at_verification": 20,
+      "latest_published_at": "2026-11-13T20:30:00+00:00",
+      "scope": "official_company_news",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "IBM": {
+      "verified_at": "2026-11-14T06:05:31.969639+00:00",
+      "feed_url": "https://kr.newsroom.ibm.com/announcements?pagetemplate=rss",
+      "source_page": "https://kr.newsroom.ibm.com/announcements?item=122843",
+      "discovery_chain": [
+        "https://www.ibm.com/kr-ko",
+        "https://kr.newsroom.ibm.com/announcements?item=122843",
+        "https://kr.newsroom.ibm.com/announcements?pagetemplate=rss"
+      ],
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-04T02:26:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "INTC": {
+      "verified_at": "2026-11-14T07:35:23.085229+00:00",
+      "feed_url": "https://www.intc.com/news-events/press-releases/rss",
+      "source_page": "https://www.intc.com/news-events/press-releases/rss",
+      "discovery_chain": [
+        "https://www.intc.com/news-events/press-releases/rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 12,
+      "latest_published_at": "2026-11-12T20:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "ISRG": {
+      "verified_at": "2026-11-14T07:36:21.432017+00:00",
+      "feed_url": "https://isrg.gcs-web.com/rss/news-releases.xml",
+      "source_page": "https://isrg.gcs-web.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://isrg.gcs-web.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-02T21:15:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "JNJ": {
+      "verified_at": "2026-11-14T06:05:19.212830+00:00",
+      "feed_url": "https://www.jnj.com/media-center/press-releases.rss",
+      "source_page": "https://www.jnj.com/media-center/press-releases",
+      "discovery_chain": [
+        "https://www.jnj.com",
+        "https://www.jnj.com/media-center/press-releases",
+        "https://www.jnj.com/media-center/press-releases.rss"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-10T21:30:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "KLAC": {
+      "verified_at": "2026-11-14T07:36:21.025979+00:00",
+      "feed_url": "https://ir.kla.com/news-events/press-releases/rss",
+      "source_page": "https://ir.kla.com/news-events/press-releases/rss",
+      "discovery_chain": [
+        "https://ir.kla.com/news-events/press-releases/rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-05T21:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "KO": {
+      "verified_at": "2026-11-14T06:05:19.043242+00:00",
+      "feed_url": "https://investors.coca-colacompany.com/news-events/press-releases/rss",
+      "source_page": "https://investors.coca-colacompany.com/",
+      "discovery_chain": [
+        "https://investors.coca-colacompany.com/",
+        "https://investors.coca-colacompany.com/news-events/press-releases/rss"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-11T15:00:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "LLY": {
+      "verified_at": "2026-11-14T07:35:23.051047+00:00",
+      "feed_url": "https://investor.lilly.com/rss/news-releases.xml",
+      "source_page": "https://investor.lilly.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://investor.lilly.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-12T20:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "LMT": {
+      "verified_at": "2026-11-14T07:35:23.995804+00:00",
+      "feed_url": "https://news.lockheedmartin.com/news-releases?pagetemplate=rss",
+      "source_page": "https://news.lockheedmartin.com/news-releases?pagetemplate=rss",
+      "discovery_chain": [
+        "https://news.lockheedmartin.com/news-releases?pagetemplate=rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-10T16:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "LRCX": {
+      "verified_at": "2026-11-14T07:39:05.102373+00:00",
+      "feed_url": "https://newsroom.lamresearch.com/press-releases?pagetemplate=rss",
+      "source_page": "https://newsroom.lamresearch.com/press-releases?pagetemplate=rss",
+      "discovery_chain": [
+        "https://newsroom.lamresearch.com/press-releases?pagetemplate=rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-12T13:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "MA": {
+      "verified_at": "2026-11-14T07:36:19.311679+00:00",
+      "feed_url": "https://investor.mastercard.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.mastercard.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.mastercard.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-29T12:01:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "MCK": {
+      "verified_at": "2026-11-14T07:36:21.929171+00:00",
+      "feed_url": "https://investor.mckesson.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.mckesson.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.mckesson.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-04T21:10:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "MDT": {
+      "verified_at": "2026-11-14T07:39:05.586849+00:00",
+      "feed_url": "https://news.medtronic.com/press-releases?pagetemplate=rss",
+      "source_page": "https://news.medtronic.com/press-releases?pagetemplate=rss",
+      "discovery_chain": [
+        "https://news.medtronic.com/press-releases?pagetemplate=rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-04T21:15:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "META": {
+      "verified_at": "2026-11-14T06:05:11.826570+00:00",
+      "feed_url": "https://www.meta.com/blog/rss/",
+      "source_page": "https://www.meta.com/kr/",
+      "discovery_chain": [
+        "https://www.meta.com/kr/",
+        "https://www.meta.com/blog/rss/"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-13T14:00:18+00:00",
+      "scope": "official_company_news",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "MO": {
+      "verified_at": "2026-11-14T06:05:29.152115+00:00",
+      "feed_url": "https://investor.altria.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.altria.com/press-releases/email-alerts-and-rss-newsfeeds/default.aspx?src=topnav",
+      "discovery_chain": [
+        "https://www.altria.com",
+        "https://investor.altria.com/press-releases/email-alerts-and-rss-newsfeeds/default.aspx?src=topnav",
+        "https://investor.altria.com/rss/pressrelease.aspx"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-29T11:00:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "MU": {
+      "verified_at": "2026-11-14T07:35:23.110944+00:00",
+      "feed_url": "https://investors.micron.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.micron.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.micron.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-12T21:01:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "NEE": {
+      "verified_at": "2026-11-14T07:36:26.742667+00:00",
+      "feed_url": "https://newsroom.nexteraenergy.com/news-releases?pagetemplate=rss",
+      "source_page": "https://newsroom.nexteraenergy.com/news-releases?pagetemplate=rss",
+      "discovery_chain": [
+        "https://newsroom.nexteraenergy.com/news-releases?pagetemplate=rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-11T16:45:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "NFLX": {
+      "verified_at": "2026-11-14T07:39:05.058528+00:00",
+      "feed_url": "https://ir.netflix.net/rss/pressrelease.aspx",
+      "source_page": "https://ir.netflix.net/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://ir.netflix.net/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-09-14T16:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "NVDA": {
+      "verified_at": "2026-11-14T06:05:28.956122+00:00",
+      "feed_url": "https://nvidianews.nvidia.com/cats/press_release.xml",
+      "source_page": "https://investor.nvidia.com/investor-resources/rss/default.aspx",
+      "discovery_chain": [
+        "https://www.nvidia.com/ko-kr/",
+        "https://investor.nvidia.com/home/default.aspx",
+        "https://investor.nvidia.com/investor-resources/rss/default.aspx",
+        "https://nvidianews.nvidia.com/cats/press_release.xml"
+      ],
+      "events_at_verification": 20,
+      "latest_published_at": "2026-11-12T13:48:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "ORCL": {
+      "verified_at": "2026-11-14T07:36:20.298795+00:00",
+      "feed_url": "https://www.oracle.com/corporate/press/rss/rss-pr.xml",
+      "source_page": "https://www.oracle.com/corporate/press/rss/rss-pr.xml",
+      "discovery_chain": [
+        "https://www.oracle.com/corporate/press/rss/rss-pr.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 13,
+      "latest_published_at": "2026-11-13T14:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "PANW": {
+      "verified_at": "2026-11-14T06:05:30.888836+00:00",
+      "feed_url": "https://investors.paloaltonetworks.com/rss/news-releases.xml",
+      "source_page": "https://investors.paloaltonetworks.com/investor-resources/rss-feeds",
+      "discovery_chain": [
+        "https://www.paloaltonetworks.com",
+        "https://investors.paloaltonetworks.com/",
+        "https://investors.paloaltonetworks.com/investor-resources/rss-feeds",
+        "https://investors.paloaltonetworks.com/rss/news-releases.xml"
+      ],
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-03T13:30:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "PFE": {
+      "verified_at": "2026-11-14T07:36:25.776514+00:00",
+      "feed_url": "https://investors.pfizer.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.pfizer.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.pfizer.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-11T21:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "PGR": {
+      "verified_at": "2026-11-14T06:05:11.796367+00:00",
+      "feed_url": "https://progressive.mediaroom.com/news-releases/?pagetemplate=rss",
+      "source_page": "https://progressive.mediaroom.com",
+      "discovery_chain": [
+        "https://www.progressive.com",
+        "https://progressive.mediaroom.com",
+        "https://progressive.mediaroom.com/news-releases/?pagetemplate=rss"
+      ],
+      "events_at_verification": 5,
+      "latest_published_at": "2026-11-10T16:00:00+00:00",
+      "scope": "official_ir_or_press_release",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "PLD": {
+      "verified_at": "2026-11-14T07:39:06.321763+00:00",
+      "feed_url": "https://ir.prologis.com/news-events/press-releases/rss",
+      "source_page": "https://ir.prologis.com/press-releases/rss",
+      "discovery_chain": [
+        "https://ir.prologis.com/press-releases/rss",
+        "https://ir.prologis.com/news-events/press-releases/rss"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-28T12:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "QCOM": {
+      "verified_at": "2026-11-14T07:35:23.526391+00:00",
+      "feed_url": "https://investor.qualcomm.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.qualcomm.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.qualcomm.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-04T21:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "RTX": {
+      "verified_at": "2026-11-14T06:04:49.876825+00:00",
+      "feed_url": "https://www.rtx.com/rss-feeds/news",
+      "source_page": "https://www.rtx.com",
+      "discovery_chain": [
+        "https://www.rtx.com",
+        "https://www.rtx.com/rss-feeds/news"
+      ],
+      "events_at_verification": 50,
+      "latest_published_at": "2026-11-09T13:00:00+00:00",
+      "scope": "official_company_news",
+      "http_status": 200,
+      "parser_verified": true
+    },
+    "SBUX": {
+      "verified_at": "2026-11-14T07:36:21.512757+00:00",
+      "feed_url": "https://about.starbucks.com/feed/",
+      "source_page": "https://about.starbucks.com/feed/",
+      "discovery_chain": [
+        "https://about.starbucks.com/feed/"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-09T11:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_company_news"
+    },
+    "SCHW": {
+      "verified_at": "2026-11-14T07:36:22.983991+00:00",
+      "feed_url": "https://pressroom.aboutschwab.com/rss/pressrelease.aspx",
+      "source_page": "https://pressroom.aboutschwab.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://pressroom.aboutschwab.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-13T13:45:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "SNDK": {
+      "verified_at": "2026-11-14T07:36:28.809758+00:00",
+      "feed_url": "https://investor.sandisk.com/rss/news-releases.xml",
+      "source_page": "https://investor.sandisk.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://investor.sandisk.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-29T20:05:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "SPGI": {
+      "verified_at": "2026-11-14T07:36:19.742540+00:00",
+      "feed_url": "https://investor.spglobal.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.spglobal.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.spglobal.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-27T11:21:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "STX": {
+      "verified_at": "2026-11-14T07:39:05.979230+00:00",
+      "feed_url": "https://investors.seagate.com/rss/pressrelease.aspx",
+      "source_page": "https://investors.seagate.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investors.seagate.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-10T11:01:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "TMO": {
+      "verified_at": "2026-11-14T07:36:21.173875+00:00",
+      "feed_url": "https://ir.thermofisher.com/rss/pressrelease.aspx",
+      "source_page": "https://ir.thermofisher.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://ir.thermofisher.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-13T21:30:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "TXN": {
+      "verified_at": "2026-11-14T07:36:20.316523+00:00",
+      "feed_url": "https://investor.ti.com/rss/news-releases.xml",
+      "source_page": "https://investor.ti.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://investor.ti.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-10-27T01:15:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "UBER": {
+      "verified_at": "2026-11-14T07:36:21.133529+00:00",
+      "feed_url": "https://investor.uber.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.uber.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.uber.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-12T14:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "V": {
+      "verified_at": "2026-11-14T07:36:19.261023+00:00",
+      "feed_url": "https://investor.visa.com/rss/pressrelease.aspx",
+      "source_page": "https://investor.visa.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://investor.visa.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-05T14:43:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "VRTX": {
+      "verified_at": "2026-11-14T07:36:22.221933+00:00",
+      "feed_url": "https://investors.vrtx.com/rss/news-releases.xml",
+      "source_page": "https://investors.vrtx.com/rss/news-releases.xml",
+      "discovery_chain": [
+        "https://investors.vrtx.com/rss/news-releases.xml"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-04T21:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    },
+    "WFC": {
+      "verified_at": "2026-11-14T07:39:06.971131+00:00",
+      "feed_url": "https://newsroom.wf.com/rss/pressrelease.aspx",
+      "source_page": "https://newsroom.wf.com/rss/pressrelease.aspx",
+      "discovery_chain": [
+        "https://newsroom.wf.com/rss/pressrelease.aspx"
+      ],
+      "discovery_method": "official_company_feed_endpoint",
+      "events_at_verification": 10,
+      "latest_published_at": "2026-11-13T13:00:00+00:00",
+      "http_status": 200,
+      "parser_verified": true,
+      "scope": "official_ir_or_press_release"
+    }
+  }
+}
