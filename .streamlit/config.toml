@@ -6,7 +6,7 @@ secondaryBackgroundColor = "#132438"
 textColor = "#e9f1f7"
 
 [server]
-address = "0.0.0.0"
+address = "127.0.0.1"
 headless = true
 
 [browser]

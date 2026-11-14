@@ -1,0 +1,18 @@
+# 로컬 MySQL을 사용하는 S&P 500 모의매매 설정. 실제 주문은 지원하지 않는다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-paper-local.db
+universe_path: ../data/sp500-universe.json
+strategy: pullback
+source: toss
+poll_seconds: 10
+symbols_per_cycle: 2
+news_enabled: true
+news_refresh_seconds: 600
+include_alpaca: true
+# 기업별 RSS는 해당 기업의 공식 IR 피드인지 확인한 뒤 추가한다.
+companies: {}
+# 금액·비율은 문자열로 작성하여 Decimal 변환 시 정밀도를 보존한다.
+portfolio: {}
+# 모델 접근 권한과 비용은 본인 OpenAI 계정에서 별도 확인한다.
+llm: {}

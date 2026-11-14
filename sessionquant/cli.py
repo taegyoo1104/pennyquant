@@ -1,148 +1,171 @@
+"""SessionQuant의 한국어 명령행. Phase 0~4에서는 실제 주문을 허용하지 않는다."""
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
-import importlib.metadata
+import asyncio
+from importlib.metadata import version
 import json
 from pathlib import Path
 import sys
 
-from .config.settings import load_settings
+from .legacy_cli import metadata
 
 
-def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="PennyQuant research and market-first trading; paper by default")
-    root.add_argument("--config", type=Path, help="YAML settings")
-    commands = root.add_subparsers(dest="command", required=True)
-    commands.add_parser("doctor", help="Offline dependency/configuration check; no credentials printed")
-    check = commands.add_parser("check-toss", help="Read-only Toss authentication and one-symbol price check; never prints credentials")
-    check.add_argument("--symbol", default="AAPL", help="Symbol for a read-only price lookup")
-    run_toss = commands.add_parser("run-toss", help="Run Toss-only observed-price monitoring and its local dashboard")
-    run_toss.add_argument("--symbols", default="AAPL,MSFT", help="Comma-separated US symbols; at most 20")
-    run_toss.add_argument("--interval", type=float, default=3, help="Polling interval seconds, minimum 1")
-    run_toss.add_argument("--db", type=Path, default=Path("data/toss-monitor.db"))
-    run_toss.add_argument("--port", type=int, default=8501, help="Local dashboard port")
-    run_toss.add_argument("--no-dashboard", action="store_true", help="Collect prices without launching Streamlit")
-    run_toss.add_argument("--max-polls", type=int, help="Stop after this many polls; default runs until Ctrl+C")
-    system = commands.add_parser("run-system", help="Market candidates -> SEC/RSS -> LLM -> strategies and risk management")
-    system.add_argument("--pipeline-config", type=Path, default=Path("config/pipeline.example.yaml"))
-    system.add_argument("--port", type=int, default=8501)
-    system.add_argument("--no-dashboard", action="store_true")
-    system.add_argument("--max-cycles", type=int)
-    system.add_argument("--no-desktop-notifications", action="store_true")
-    system.add_argument("--live", action="store_true", help="Use actual broker orders; requires verified market input and explicit acknowledgement")
-    system.add_argument("--acknowledge-live-orders", action="store_true", help="Acknowledge that --live submits actual orders")
-    system_demo = commands.add_parser("demo-system", help="Offline synthetic system fixture; no network, LLM charges or actual orders")
-    system_demo.add_argument("--out", type=Path, default=Path("data/system-demo"))
-    system_demo.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
-    demo = commands.add_parser("demo", help="Generate synthetic tape, replay and compare four strategies")
-    demo.add_argument("--out", type=Path, default=Path("data"))
-    demo.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
-    backtest = commands.add_parser("backtest", help="Receipt-ordered event-driven comparison")
-    backtest.add_argument("--input", type=Path, required=True)
-    backtest.add_argument("--report", type=Path, default=Path("data/report.json"))
-    backtest.add_argument("--label", default="user supplied; provenance unverified")
-    replay = commands.add_parser("replay", help="Paper execution against a normalized recorded stream")
-    replay.add_argument("--input", type=Path, required=True)
-    replay.add_argument("--db", type=Path, default=Path("data/pennyquant.db"))
-    replay.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
-    replay.add_argument("--resume", action="store_true")
-    replay.add_argument("--speed", type=float, default=0, help="0=unpaced, >0 receipt-time replay speed (idle gaps capped at 5s)")
-    follow = commands.add_parser("paper", help="Continuously consume a normalized live JSONL producer file")
-    follow.add_argument("--input", type=Path, required=True)
-    follow.add_argument("--db", type=Path, default=Path("data/pennyquant.db"))
-    follow.add_argument("--strategy", choices=["momentum", "pullback", "gap_breakout", "vwap"], default="pullback")
-    collect = commands.add_parser("collect", help="Read-only provider probes/normalized data capture")
-    collect.add_argument("provider", choices=["toss", "alpaca", "sec", "rss"])
-    collect.add_argument("--symbols", default="AAPL", help="Comma-separated symbols")
-    collect.add_argument("--output", type=Path, required=True)
-    collect.add_argument("--cik", help="SEC CIK")
-    collect.add_argument("--url", help="RSS HTTPS URL")
-    collect.add_argument("--poll", type=float, default=0, help="Toss quote sampling seconds, 0=one snapshot")
-    collect.add_argument("--stream", action="store_true", help="Use documented Toss/Alpaca WebSocket instead of REST")
-    collect.add_argument("--realtime-verified", action="store_true", help="Alpaca only: operator has verified account real-time news entitlement")
+def parser():
+    root = argparse.ArgumentParser(prog="sessionquant", description="S&P 500 장중 전략·소수점 모의매매·MySQL·뉴스 위험 분석")
+    sub = root.add_subparsers(dest="command", required=True)
+    sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
+    run = sub.add_parser("run", help="로컬 MySQL과 토스 읽기 전용 시세로 모의 운영")
+    run.add_argument("--config", type=Path, default=Path("config/sessionquant.yaml"), help="운영 설정 YAML")
+    run.add_argument("--no-dashboard", action="store_true", help="대시보드 없이 실행")
+    run.add_argument("--port", type=int, default=8501, help="로컬 대시보드 포트")
+    run.add_argument("--max-cycles", type=int, help="지정한 시세 수집 횟수 후 종료")
+    run.add_argument("--no-desktop-notifications", action="store_true", help="바탕화면 알림 끄기")
+    demo = sub.add_parser("demo", help="외부 API 없이 합성 자료로 전략·주문·청산 검증")
+    demo.add_argument("--out", type=Path, default=Path("data/session-demo"), help="새 출력 폴더")
+    demo.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
+    demo.add_argument("--backend", choices=("sqlite", "mysql"), default="sqlite", help="합성 검증 자료의 저장소")
+    replay = sub.add_parser("replay", help="수신 시각을 보존한 자료로 모의 주문 재생")
+    backtest = sub.add_parser("backtest", help="동일 자료·비용으로 전략 및 추가매수 효과 비교")
+    for cmd in (replay, backtest):
+        cmd.add_argument("--input", required=True, type=Path, help="정규화된 JSONL 자료")
+        cmd.add_argument("--universe", required=True, type=Path, help="시점별 S&P 500 구성 이력")
+        cmd.add_argument("--config", type=Path, help="위험·수수료 설정 YAML")
+    replay.add_argument("--db", type=Path, default=Path("data/sessionquant-replay.db"))
+    replay.add_argument("--backend", choices=("sqlite", "mysql"), default="sqlite")
+    replay.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
+    replay.add_argument("--resume", action="store_true", help="동일 입력과 설정으로 중단 지점 복구")
+    backtest.add_argument("--report", type=Path, default=Path("data/session-report.json"))
+    universe = sub.add_parser("universe-refresh", help="현재 구성 목록을 오늘부터 유효한 관측으로 저장")
+    universe.add_argument("--output", type=Path, default=Path("data/sp500-universe.json"))
+    for command, help_text in (("db-check", "DB 연결·스키마 확인"), ("db-stats", "실제 저장 행 수·용량 확인"),
+                               ("db-prune", "시세 보관 기간 정리 미리보기"), ("db-migrate", "기존 SQLite를 빈 MySQL 실행 공간으로 복사")):
+        db = sub.add_parser(command, help=help_text)
+        db.add_argument("--db", type=Path, default=Path("data/sessionquant-paper-local.db"))
+        db.add_argument("--backend", choices=("mysql", "sqlite"), default="mysql")
+        if command == "db-migrate":
+            db.add_argument("--source", required=True, type=Path, help="보존할 기존 SQLite 파일")
+        if command == "db-prune":
+            db.add_argument("--days", type=int, default=7)
+            db.add_argument("--kinds", default="price_samples,quote_snapshots", help="정리할 관측 자료 종류")
+            db.add_argument("--apply", action="store_true", help="미리보기 후 실제 삭제")
+    dashboard = sub.add_parser("dashboard", help="저장된 모의 운영 결과를 한국어 화면으로 열기")
+    dashboard.add_argument("--db", type=Path, default=Path("data/sessionquant-paper-local.db"))
+    dashboard.add_argument("--port", type=int, default=8501)
+    dashboard.add_argument("--backend", choices=("sqlite", "mysql"), default="mysql")
+    evaluation = sub.add_parser("llm-evaluate", help="동일 라벨 자료로 모델 비교; 기본은 호출 없는 미리보기")
+    evaluation.add_argument("--input", type=Path, required=True)
+    evaluation.add_argument("--output", type=Path, default=Path("data/model-evaluation.json"))
+    evaluation.add_argument("--execute", action="store_true", help="실제 API 호출과 토큰 과금 허용")
+    calendar = sub.add_parser("calendar-import", help="확인된 공식 경제 발표 일정 가져오기")
+    calendar.add_argument("--input", type=Path, required=True)
+    calendar.add_argument("--db", type=Path, default=Path("data/sessionquant-paper-local.db"))
+    calendar.add_argument("--backend", choices=("mysql", "sqlite"), default="mysql")
+    sub.add_parser("check-toss", help="토스 인증·시세 읽기 전용 연결 검사")
+    sub.add_parser("collect", help="기존 기업 뉴스·시세 수집 명령; collect --help로 옵션 확인")
+    sub.add_parser("legacy", help="기존 PennyQuant 기록·분석 명령; 실제 주문은 차단")
     return root
 
 
-def metadata(path: Path) -> dict:
-    manifest = path.with_suffix(".meta.json")
-    return json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
-
-
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if any(x in {"--live", "--acknowledge-live-orders"} for x in argv):
+        print("SessionQuant Phase 0~4에서는 실제 주문을 실행할 수 없습니다.", file=sys.stderr)
+        return 2
+    # 기존 자료 재생과 수집 명령은 식별자·장부 형식을 바꾸지 않고 유지한다.
+    if argv and argv[0] in {"legacy", "check-toss", "collect", "run-toss", "run-system", "demo-system", "paper"}:
+        from .legacy_cli import main as legacy_main
+        return legacy_main(argv[1:] if argv[0] == "legacy" else argv)
     args = parser().parse_args(argv)
     try:
-        settings = load_settings(args.config)
-        if args.command == "check-toss":
-            import asyncio
-            from .connection import run_check
-            return asyncio.run(run_check(args.symbol))
-        elif args.command == "run-toss":
-            import asyncio
-            from .toss_app import run_toss_app
-            return asyncio.run(run_toss_app(args))
-        elif args.command == "run-system":
-            import asyncio
-            from .system_app import run_system_app
-            if args.config is None:
-                settings = load_settings(Path(__file__).parent / "config" / "strategy.yaml")
-            return asyncio.run(run_system_app(args, settings))
-        elif args.command == "demo-system":
-            from .system_demo import write_system_demo
-            if args.config is None:
-                settings = load_settings(Path(__file__).parent / "config" / "strategy.yaml")
-            db = write_system_demo(args.out, settings, args.strategy)
-            print(f"Synthetic offline system demo: {db}. Fixed analysis fixtures, no actual news, LLM calls or live orders.")
-        elif args.command == "doctor":
-            packages = ("httpx", "websockets", "PyYAML", "pandas", "numpy", "streamlit", "exchange-calendars")
-            print(json.dumps({"python": sys.version.split()[0], "mode": settings.mode,
-                "live_orders_enabled": False, "packages": {p: importlib.metadata.version(p) for p in packages}}, indent=2))
+        import os
+        os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
+        if args.command == "doctor":
+            print(json.dumps({"project": "SessionQuant", "version": "2.0.0", "python": sys.version.split()[0],
+                "environment": "PAPER_LOCAL", "live_orders_enabled": False,
+                "packages": {p: version(p) for p in ("httpx", "streamlit", "exchange-calendars", "PyMySQL")}},
+                ensure_ascii=False, indent=2))
+        elif args.command == "llm-evaluate":
+            from .macro.evaluation import evaluate_models
+            print(json.dumps(asyncio.run(evaluate_models(args.input,args.output,execute=args.execute)),ensure_ascii=False,indent=2))
+        elif args.command == "calendar-import":
+            from .macro.models import EconomicEvent
+            from .macro.sources import official_url
+            from .database.repository import Repository
+            from .models import utc
+            rows=json.loads(args.input.read_text(encoding="utf-8"))
+            events=[EconomicEvent(**{**row,"scheduled_at":utc(row["scheduled_at"]),"known_at":utc(row["known_at"])}) for row in rows]
+            if any(not official_url(event.source_url) or event.verified is not True for event in events):
+                raise ValueError("확인한 공식 경제 일정이 필요합니다")
+            from dataclasses import asdict
+            repo=Repository(args.db,backend=args.backend)
+            try:
+                with repo.engine_lease(),repo.transaction():
+                    for event in events: repo.record("economic_events",asdict(event))
+            finally: repo.close()
+            print(f"공식 발표 일정 {len(events)}개를 저장했습니다.")
+        elif args.command == "run":
+            from .session_config import load_session_config
+            from .session_runtime import run_session
+            return asyncio.run(run_session(load_session_config(args.config), no_dashboard=args.no_dashboard,
+                port=args.port, max_cycles=args.max_cycles, desktop_notifications=not args.no_desktop_notifications))
+        elif args.command == "universe-refresh":
+            from .market.universe import UniverseStore
+            result = asyncio.run(UniverseStore(args.output).refresh_public())
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(f"현재 목록을 저장했습니다: {args.output}. 과거 백테스트의 구성 이력으로 소급하지 않습니다.")
         elif args.command == "demo":
-            from .demo import write_demo
-            from .runtime import replay
-            from .backtest.engine import compare, write_report
-            db = args.out / "pennyquant.db"
-            if db.exists():
-                raise ValueError("demo DB exists; choose a new --out directory for a fresh run")
-            tape = args.out / "synthetic.jsonl"
-            events = write_demo(tape)
-            replay(tape, db, settings, args.strategy, synthetic=True, label="SYNTHETIC_FIXTURE")
-            report = compare(events, settings, synthetic=True, label="SYNTHETIC_FIXTURE")
-            write_report(report, args.out / "report.json")
-            print(f"Synthetic demo complete. DB: {db}; report: {args.out / 'report.md'}. Not market performance.")
-        elif args.command == "backtest":
-            from .events import read_events
-            from .backtest.engine import compare, write_report
-            meta = metadata(args.input)
-            report = compare(read_events(args.input), settings, synthetic=meta.get("synthetic", False),
-                             label=meta.get("source_label", args.label))
-            write_report(report, args.report)
-            print(f"Wrote {args.report} and {args.report.with_suffix('.md')}")
-        elif args.command == "replay":
-            from .runtime import replay
-            meta = metadata(args.input)
-            replay(args.input, args.db, settings, args.strategy, resume=args.resume, speed=args.speed,
-                   synthetic=meta.get("synthetic", False), label=meta.get("source_label", "recorded user input"))
-            print(f"Paper replay complete: {args.db}")
-        elif args.command == "paper":
-            from .runtime import follow
-            follow(args.input, args.db, settings, args.strategy)
-        elif args.command == "collect":
-            import asyncio
-            from .capture import collect
-            asyncio.run(collect(args))
+            from .session_demo import write_session_demo
+            result = write_session_demo(args.out, strategy=args.strategy, backend=args.backend)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("합성 검증을 완료했습니다. 실제 시세·투자 성과·실제 주문이 아닙니다.")
+        elif args.command in {"replay", "backtest"}:
+            from .portfolio.models import PortfolioSettings
+            from .session_config import load_session_config
+            from .session_runtime import replay_session
+            settings = PortfolioSettings(**load_session_config(args.config).portfolio) if args.config else PortfolioSettings()
+            synthetic = metadata(args.input).get("synthetic", False) is True
+            if args.command == "replay":
+                result = replay_session(args.input, args.db, args.universe, strategy=args.strategy, resume=args.resume,
+                    synthetic=synthetic, backend=args.backend, settings=settings)
+                print(json.dumps({"db": str(args.db), "equity": result["state"]["equity"], "fills": len(result["fills"])}, ensure_ascii=False))
+            else:
+                from .session_backtest import compare_session
+                compare_session(args.input, args.universe, args.report, settings=settings, synthetic=synthetic)
+                print(f"성과와 비용 비교 보고서: {args.report} / {args.report.with_suffix('.md')}")
+        elif args.command.startswith("db-"):
+            from .database.operations import check_database, migrate_sqlite, prune_database
+            from .database.repository import Repository
+            os.environ["SQ_DB_BACKEND"] = args.backend
+            if args.command == "db-migrate":
+                result = migrate_sqlite(args.source, args.db)
+            elif args.command == "db-prune":
+                result = prune_database(args.db, args.days, tuple(x.strip() for x in args.kinds.split(",")), apply=args.apply)
+            elif args.command == "db-check":
+                result = check_database(args.db)
+            else:
+                repo = Repository(args.db)
+                try:
+                    result = repo.storage_stats()
+                finally:
+                    repo.close()
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        elif args.command == "dashboard":
+            import subprocess
+            from .notifications import dashboard_environment
+            if not 1024 <= args.port <= 65535:
+                raise ValueError("대시보드 포트는 1024~65535여야 합니다.")
+            os.environ["SQ_DB_BACKEND"] = args.backend
+            app = Path(__file__).parent / "dashboard" / "session_app.py"
+            return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app),
+                "--server.address", "127.0.0.1", "--server.port", str(args.port), "--", "--db", str(args.db)],
+                env=dashboard_environment(database=True))
         return 0
-    except (ValueError, RuntimeError, OSError, ImportError) as exc:
-        print(f"PennyQuant: {exc}", file=sys.stderr)
+    except (ValueError, RuntimeError, OSError, ImportError, KeyError, TypeError) as exc:
+        print(f"SessionQuant: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        if args.command == "run-toss":
-            message = "Toss monitoring stopped."
-        elif args.command == "run-system":
-            message = "System stopped; persisted system state and alerts are retained."
-        else:
-            message = "Stopped; persisted paper state is retained."
-        print(message, file=sys.stderr)
+        print("운영을 중지했습니다. 저장된 주문·포지션 상태는 다음 실행에서 복구됩니다.", file=sys.stderr)
         return 130
 
 

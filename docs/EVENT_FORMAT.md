@@ -1,41 +1,43 @@
-# 정규화 이벤트 입력
+# 시장 입력과 모델 평가 자료
 
-UTF-8 JSONL이며 한 줄에 `{ "kind": "...", "data": {...} }`를 기록하고 개행을 끝에 붙입니다. 허용 kind는 `news`, `quote`, `snapshot`, `bar`입니다. 생산자는 파일에 단독으로 쓰고 수신 시각으로 정렬합니다. 거래 수량·호가 수량은 음수가 아닌 정수, 가격은 유한한 양수, 불리언은 실제 JSON true/false여야 합니다. NaN·시간대 없는 시각을 쓰지 마세요.
+`run`의 기본 소스 `toss`는 읽기 전용 관측이다. 미국 종목의 계좌별 거래 가능·소수점 지원 자료를 API에서 확인할 수 없으면 WATCH를 유지한다. 다음 입력은 확인한 자료 공급자가 만든 JSONL을 사용하는 경로다. 합성 값을 실제 관측 파일에 붙이지 않는다.
 
-모든 시각은 UTC 오프셋이 있는 ISO 8601로 작성합니다. `timestamp`는 시장 이벤트 시각, `received_at`은 시스템이 실제로 수신한 시각입니다. **1분봉 timestamp는 봉 종료 시각**입니다. 발표 시각은 뉴스의 `published_at`에 별도로 기록합니다.
+`config/sessionquant.yaml`을 별도로 복사하고 `source: file`, `input_path: ../data/verified-events.jsonl`을 설정한다. 경로는 설정 파일 기준이다. 모든 이벤트는 `{"kind":"...","data":{...}}` 한 줄이며 사용 가능 시각 오름차순으로 기록한다. 시각에는 UTC `+00:00` 또는 명시적 시간대가 있어야 한다.
 
-## 호가
+| kind | data 필드 | 사용 가능 시각 |
+|---|---|---|
+| bar | symbol,timestamp,received_at,open,high,low,close,volume | received_at |
+| quote | symbol,timestamp,received_at,bid,ask,bid_size,ask_size,tradable,halted,exchange | received_at |
+| eligibility | symbol,checked_at,source,tradable,fractional,halted,corporate_action,exchange,volume_history_verified | checked_at |
+| rvol | symbol,value,observed_at,verified | observed_at |
+| news | id,symbols,title,body,source,url,published_at,received_at,verified,real_time | received_at |
+| risk_context | scope(company/macro),symbol 또는 *,available_at,source,verified,block_entries,major_adverse,blackout,reasons | available_at |
 
-```json
-{"kind":"quote","data":{"symbol":"DEMO","timestamp":"2026-11-13T14:35:00+00:00","received_at":"2026-11-13T14:35:00.050+00:00","bid":2.178,"ask":2.182,"bid_size":100,"ask_size":100,"tradable":true,"halted":false,"exchange":"NASDAQ"}}
+`bar.timestamp`는 확정된 1분봉의 **종료 시각**이다. 임의의 5분봉을 1분봉으로 입력하지 않는다. 기업행동 비교 가능성을 확인한 과거 20거래일이 없으면 외부의 검증된 RVOL을 제공하거나 미확인 상태로 둔다. eligibility의 미확인 필드는 `null`이며 새로운 매수를 차단한다. SPY·QQQ의 봉과 최신 호가도 같은 파일에 필요하다. 뉴스 위험 이벤트는 본 시스템에서 검증·분석이 완료된 결과를 기록 재생할 때 사용하며 원문 기사의 수신 시각으로 완료 시각을 앞당기면 안 된다.
+
+처리한 파일의 접두부가 바뀌거나 잘리면 복구를 거부한다. 재생에서는 입력과 유니버스 파일 해시를 함께 확인한다. 기존 기록을 수정하려면 새 실험 DB를 사용한다.
+
+## 경제 발표 일정
+
+공식 발표를 확인한 일정은 JSON 배열로 준비한다. 각 항목은 `id,name,scheduled_at,known_at,source_url,importance,verified`를 갖는다. `importance`는 `HIGH`, `verified`는 실제로 확인한 경우에만 `true`다. 공식 HTTPS URL을 요구한다. 일정 공급을 자동으로 보장하지 않으며 등록되지 않은 일정은 미확인이다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant calendar-import --input config/economic-calendar.json
 ```
 
-위 수치는 형식 설명용입니다. `tradable=true`, `halted=false`, `exchange`는 신뢰할 수 있는 최신 원천으로 확인해야 합니다. `bid`는 매도 가능한 가격, `ask`는 매수 가능한 가격입니다. 같은 symbol·시장 timestamp는 같은 호가 잔량 예산으로 취급해 재수신으로 체결 가능 수량을 늘리지 않습니다.
+엔진을 종료한 뒤 가져오고 재시작한다. 확인된 중요 발표 전후 15분은 신규 진입을 제한한다.
 
-## 스캐너 snapshot
+## 모델 비교
 
-```json
-{"kind":"snapshot","data":{"quote":{"symbol":"DEMO","timestamp":"2026-11-13T14:35:00+00:00","received_at":"2026-11-13T14:35:00.050+00:00","bid":2.178,"ask":2.182,"bid_size":100,"ask_size":100,"tradable":true,"halted":false,"exchange":"NASDAQ"},"prev_close":1.75,"cumulative_volume":1500000,"dollar_volume":3100000,"relative_volume":null,"day_high":2.25,"corporate_action":false,"dilution_risk":false}}
+기본 분석 모델은 기존 `gpt-4.1-mini`를 유지한다. 후보 모델과 한국어 프롬프트의 실제 정확도는 API 키가 없어 이번 개발에서 비교하지 않았다. 내부 영어 프롬프트를 유지하며, 모델 비교 도구는 기본적으로 유료 호출을 하지 않는다.
+
+평가 JSONL은 각 줄에 `ticker`, `expected_sentiment`(POSITIVE/NEGATIVE/NEUTRAL/MIXED/UNKNOWN), `data`(위 news 형식)를 넣는다. 부정문·과거·루머·확정 공시 등을 균형 있게 라벨링한다. 평가는 과거 본문을 현재 평가 시각으로 바꿔 분류기만 비교하며 거래 엔진에 입력하지 않는다.
+
+```powershell
+# 호출 없는 입력 점검
+.\venv\Scripts\python.exe -m sessionquant llm-evaluate --input data/evaluation.jsonl
+# 실제 호출과 과금은 본인 PC에서 명시적으로 선택
+.\venv\Scripts\python.exe -m sessionquant llm-evaluate --input data/evaluation.jsonl --execute
 ```
 
-quote 필드는 호가와 동일합니다. `relative_volume=null`이면 진입을 차단합니다. 당일 거래대금을 현재가×누적 거래량으로 대체하거나 RVOL을 당일 거래량/일평균 거래량으로 대체하지 마세요. 과거 같은 세션 경과시각의 누적 거래량 평균이 기준입니다. 당일 고가·기업행동·중대한 희석 여부도 당시 확인한 사실을 기록합니다.
-
-## 완료된 1분봉
-
-```json
-{"kind":"bar","data":{"symbol":"DEMO","timestamp":"2026-11-13T14:35:00+00:00","received_at":"2026-11-13T14:35:00.100+00:00","open":2.15,"high":2.19,"low":2.14,"close":2.18,"volume":2500}}
-```
-
-봉의 실제 종료와 수신 이후에만 전략이 사용합니다. 중복·수정 봉은 이미 관측한 봉을 덮어쓰지 않습니다. 1분 간격의 필요한 구간이 빠지면 신호를 만들지 않습니다. 주문은 신호 생성에 쓴 호가나 봉에서 체결되지 않고, 생성 이후의 실제 quote가 있어야 합니다.
-
-## 뉴스
-
-```json
-{"kind":"news","data":{"id":"provider:article-id","symbols":["DEMO"],"title":"SYNTHETIC example: FDA approves treatment","published_at":"2026-11-13T14:29:00+00:00","received_at":"2026-11-13T14:29:01+00:00","source":"SYNTHETIC_FIXTURE","url":"https://example.invalid/article","body":"","verified":true,"real_time":true}}
-```
-
-기사 ID·티커·출처·시간을 실제 원천에서 기록합니다. `real_time=true`는 해당 권한과 실제 수신 경로를 확인한 경우에만 사용합니다. REST 과거 기사와 SEC/RSS 보조 수집은 false입니다. 양의 이벤트도 이후 시장 반응·유동성·전략·위험 조건이 모두 맞아야 주문 후보가 됩니다.
-
-## 파일 메타데이터
-
-`events.jsonl` 옆 `events.meta.json`에 `synthetic`, `source_label` 등을 기록할 수 있습니다. 이 메타데이터는 사람이 읽을 출처 표시이며 실시간 권한을 증명하거나 거래 조건을 완화하지 않습니다. 합성 테이프를 외부 실제 관측 파일로 재분류하지 마세요. 예시 전체 파일은 `examples/synthetic.jsonl`입니다.
+결과는 모델별 라벨 일치율·오류·실제 토큰·지연·설정 단가에 따른 추정 비용을 저장한다. 기본 도구는 최대 20개 사례이며 비교용 호출은 운영 월간 예산과 별개다. 접근 권한이 없는 모델은 오류로 기록된다. 보고서를 검토한 뒤 운영 YAML의 `llm.primary_model`을 `gpt-6-luna` 등으로 선택할 수 있다. 한국어 프롬프트는 별도 평가 자료로 검증하기 전 자동 전환하지 않는다.

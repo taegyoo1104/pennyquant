@@ -174,7 +174,7 @@ def load_database(path: Path) -> tuple[Any, dict, dict[str, list[dict]], str | N
         return None, {}, tables, None
     repo = None
     try:
-        from pennyquant.database.repository import KINDS, Repository
+        from sessionquant.database.repository import KINDS, Repository
         repo = Repository(path)
         state = repo.load_state() or {}
         for name in names:
@@ -419,8 +419,8 @@ def trading_tab(account: dict, state: dict, tables: dict[str, list[dict]]) -> No
     costs = None
     if state.get("settings"):
         try:
-            from pennyquant.config.settings import Settings
-            from pennyquant.trading.costs import FeeSchedule
+            from sessionquant.config.settings import Settings
+            from sessionquant.trading.costs import FeeSchedule
             settings = Settings(**state["settings"])
             if settings.fee_model != "legacy" or settings.exit_price_policy == "net":
                 costs = FeeSchedule(settings)

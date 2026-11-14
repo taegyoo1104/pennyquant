@@ -21,6 +21,20 @@ def test_notification_is_local_and_deduplicated(capsys):
     assert capsys.readouterr().out.count("일일 손실 한도") == 1
 
 
+def test_mysql_dashboard_receives_only_its_database_password(monkeypatch):
+    """MySQL 화면은 연결하되 거래·LLM 비밀정보는 자식에게 전달하지 않는다."""
+    monkeypatch.setenv("SQ_DB_BACKEND", "mysql")
+    monkeypatch.setenv("SQ_MYSQL_PASSWORD", "database-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "model-secret")
+    monkeypatch.setenv("TOSS_CLIENT_SECRET", "broker-secret")
+    assert "SQ_MYSQL_PASSWORD" not in dashboard_environment()
+    env = dashboard_environment(database=True)
+    assert env["SQ_MYSQL_PASSWORD"] == "database-secret"
+    assert "OPENAI_API_KEY" not in env and "TOSS_CLIENT_SECRET" not in env
+    monkeypatch.setenv("SQ_DB_BACKEND", "sqlite")
+    assert "SQ_MYSQL_PASSWORD" not in dashboard_environment(database=True)
+
+
 def test_windows_notification_message_cannot_escape_script(monkeypatch):
     calls = []
     monkeypatch.setattr("sessionquant.notifications.sys.platform", "win32")
