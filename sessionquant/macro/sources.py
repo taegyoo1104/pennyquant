@@ -28,6 +28,39 @@ def official_url(url: str) -> bool:
         host == domain or host.endswith("." + domain) for domain in OFFICIAL_DOMAINS)
 
 
+def source_error(exc):
+    """요청 URL·본문·인증 값을 제외한 실패 정보만 남긴다."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return {"http_status": exc.response.status_code, "error_type": "HTTPStatusError"}
+    return {"error_type": type(exc).__name__}
+
+
+class FREDRequestError(RuntimeError):
+    """서버의 키 포함 가능 메시지를 고정된 진단 코드로 변환한다."""
+    def __init__(self, response):
+        message = ""
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                message = str(body.get("error_message", ""))[:4000].lower()
+        except ValueError:
+            pass
+        if "api_key" in message:
+            self.code = "invalid_api_key_format" if "32 character" in message else "api_key_rejected"
+            hint = "FRED My Account의 API Keys에서 발급한 키를 확인하고 .env의 FRED_API_KEY를 수정하세요."
+        elif "realtime_start" in message or "realtime_end" in message:
+            self.code = "invalid_realtime_window"
+            hint = "PC 날짜·시간과 FRED 기준일 요청을 확인하세요. 임의로 최신 데이터로 대체하지 않습니다."
+        elif "series_id" in message:
+            self.code = "invalid_series_id"
+            hint = "FRED 시리즈 식별자와 제공 여부를 확인하세요."
+        else:
+            self.code = "request_rejected"
+            hint = "FRED 키·요청 인수·서버 상태를 확인하세요."
+        self.http_status = response.status_code
+        super().__init__(hint)
+
+
 class OfficialNewsClient:
     def __init__(self, *, rss=None, feeds: dict | None = None, enrich: bool = False):
         self.rss = rss or RSSCollector()
@@ -55,8 +88,8 @@ class OfficialNewsClient:
                                                  event.published_at, event.received_at, topic, True,
                                                  source_family=key))
                 self.status.append({"provider": key, "code": "ok", "count": len(events)})
-            except (httpx.HTTPError, ValueError, RuntimeError, TypeError):
-                self.status.append({"provider": key, "code": "feed_unavailable"})
+            except (httpx.HTTPError, ValueError, RuntimeError, TypeError) as exc:
+                self.status.append({"provider": key, "code": "feed_unavailable", **source_error(exc)})
         return articles
 
     async def aclose(self):
@@ -92,8 +125,8 @@ class GDELTClient:
                         articles.append(article)
                         seen.add(article.id)
                 self.status.append({"provider": "gdelt", "topic": topic, "code": "ok"})
-            except (httpx.HTTPError, ValueError, KeyError, TypeError, RuntimeError):
-                self.status.append({"provider": "gdelt", "topic": topic, "code": "discovery_unavailable"})
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+                self.status.append({"provider": "gdelt", "topic": topic, "code": "discovery_unavailable", **source_error(exc)})
         return articles
 
     async def aclose(self):
@@ -116,10 +149,13 @@ class FREDClient:
         now = utc(now or datetime.now(timezone.utc))
         values = []
         for series in self.SERIES:
-            response = await get_readonly(self.client, "https://api.stlouisfed.org/fred/series/observations",
-                limiter=self.limiter, params={"api_key": self.api_key, "series_id": series, "file_type": "json",
-                                             "sort_order": "desc", "limit": 10,
-                                             "realtime_start": now.date().isoformat(), "realtime_end": now.date().isoformat()})
+            try:
+                response = await get_readonly(self.client, "https://api.stlouisfed.org/fred/series/observations",
+                    limiter=self.limiter, params={"api_key": self.api_key, "series_id": series, "file_type": "json",
+                                                 "sort_order": "desc", "limit": 10,
+                                                 "realtime_start": now.date().isoformat(), "realtime_end": now.date().isoformat()})
+            except httpx.HTTPStatusError as exc:
+                raise FREDRequestError(exc.response) from None
             for item in response.json().get("observations", []):
                 if item.get("value") == "." or item.get("date", "9999") > now.date().isoformat():
                     continue

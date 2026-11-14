@@ -331,7 +331,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     with operations:
         st.subheader("주문·체결과 당일 청산")
         session = view["session"] if isinstance(view["session"], dict) else {}
-        session = session.get("schedule", session)
+        schedule = session.get("schedule", session)
+        session = schedule if isinstance(schedule, dict) else {}
         st.caption(f"청산 시작: {timestamp(session.get('exit_start', session.get('liquidation_start')))} · 미청산 경고: {timestamp(session.get('alert_at', session.get('emergency_at')))}")
         st.caption("주문 전송과 체결 완료를 구분합니다. 부분 체결·잔량·시세 지연·미청산 사유는 아래 기록으로 확인하세요.")
         _table([{"주문 ID": row.get("client_id", row.get("id", "")), "종목": row.get("symbol", ""), "방향": row.get("side", ""),

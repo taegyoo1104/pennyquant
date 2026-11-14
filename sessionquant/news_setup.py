@@ -4,8 +4,14 @@ from urllib.parse import quote
 import httpx
 from .models import symbol_valid
 from .macro.models import LLMSettings
-from .macro.sources import OFFICIAL_FEEDS,FREDClient,GDELTClient,OfficialNewsClient,TreasuryClient
+from .macro.sources import OFFICIAL_FEEDS,FREDClient,FREDRequestError,GDELTClient,OfficialNewsClient,TreasuryClient
 from .session_config import load_session_config
+
+
+def aggregate_status(rows):
+    """검사를 수행했다는 사실과 실제 수집 성공 여부를 구분한다."""
+    good = sum(row.get('code') == 'ok' for row in rows)
+    return 'ok' if rows and good == len(rows) else 'partial' if good else 'unavailable'
 
 
 async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
@@ -67,15 +73,18 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
                 result={'status':'checked' if feeds else 'not_configured','feeds':feeds}
             elif name=='official':
                 client=OfficialNewsClient(); clients.append(client)
-                rows=await client.fetch(); result={'status':'checked','events':len(rows),'feeds':client.status}
+                rows=await client.fetch(); result={'status':aggregate_status(client.status),'events':len(rows),'feeds':client.status}
             elif name=='treasury':
                 client=TreasuryClient(); clients.append(client)
                 rows=await client.fetch(); result={'status':'checked','events':len(rows),'publication_time':'unknown'}
             elif name=='gdelt':
                 client=GDELTClient(topics=('us_monetary_policy',)); clients.append(client)
-                rows=await client.fetch(); result={'status':'checked','events':len(rows),'topics':client.status,'fact_verification':False}
+                rows=await client.fetch(); result={'status':aggregate_status(client.status),'events':len(rows),'topics':client.status,'fact_verification':False}
             else: raise ValueError('unknown_provider')
             report['connections'][name]=result
+        except FREDRequestError as exc:
+            report['connections'][name]={'status':'error','http_status':exc.http_status,
+                'error_code':exc.code,'message':str(exc)}
         except httpx.HTTPStatusError as exc:
             # FRED URL에는 키가 있으므로 요청 URL·예외 원문을 출력하지 않는다.
             report['connections'][name]={'status':'error','http_status':exc.response.status_code}

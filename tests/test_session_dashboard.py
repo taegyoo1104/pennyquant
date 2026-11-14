@@ -136,3 +136,22 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     assert repo.get_control('llm_provider_health')['code'] == 'NO_CREDIT'
     assert repo.all('orders') == []
     repo.close()
+
+
+def test_main_screen_with_closed_market_null_schedule(tmp_path, monkeypatch):
+    """휴장일의 실제 청산 관리자 응답을 읽어도 메인 화면 전체가 중단되지 않는다."""
+    from sessionquant.database.repository import Repository
+    from sessionquant.portfolio.session import SessionExitManager
+    from sessionquant.portfolio.broker import PaperBroker
+    # 토요일에는 schedule 키가 존재하되 값이 None이다.
+    status = SessionExitManager(PaperBroker()).tick(datetime(2026, 11, 14, 14, 32, tzinfo=timezone.utc), {})
+    assert status['schedule'] is None
+    path = tmp_path/'closed-market.db'
+    repo = Repository(path, backend='sqlite')
+    repo.record('session_state', {'id': 'closed-market', **status})
+    repo.close()
+    monkeypatch.setenv('SQ_DB_BACKEND', 'sqlite')
+    monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception
+    assert any('청산 시작: — · 미청산 경고: —' in row.value for row in app.caption)

@@ -62,6 +62,8 @@ def parse_feed(xml: bytes, *, source: str, received_at: datetime,
         raise DataQualityError("RSS/Atom XML 형식을 해석할 수 없습니다") from None
     atom = "{http://www.w3.org/2005/Atom}"
     content = "{http://purl.org/rss/1.0/modules/content/}encoded"
+    if root.tag not in {"rss", atom + "feed"}:
+        raise DataQualityError("RSS 또는 Atom 피드가 아닌 응답입니다")
     entries = root.findall("./channel/item") + root.findall(atom + "entry")
     result, seen = [], set()
     for entry in entries:
@@ -111,7 +113,7 @@ class RSSCollector:
             raise ValueError("인증정보 없는 HTTPS 피드 URL이 필요합니다")
         limiter = self._host_limiters.setdefault(parsed.hostname, RateLimiter(1))
         response = await get_readonly(self.client, url, limiter=limiter,
-                                      headers={"Accept": "application/rss+xml, application/atom+xml, application/xml"})
+                                      headers={"Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.1"})
         return parse_feed(response.content, source=source, received_at=now_utc(),
                           symbols=symbols, verified=verified)
 

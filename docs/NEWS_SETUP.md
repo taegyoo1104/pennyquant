@@ -146,3 +146,29 @@ OpenAI의 `accessible: true`는 모델 메타데이터 접근 성공이며 실�
 ```
 
 이 명령은 생성 비용 없이 모델 접근과 뉴스 소스 연결을 검사하고 토스 시세·계좌와 DB를 추가 확인한다. `llm_credit_balance_verified: false`는 공식 잔액을 조회하지 않았다는 뜻이다. 표준 API 키만으로 잔액을 확정하거나 키 연결 성공을 충전 성공으로 취급하지 않는다.
+
+## 연결 결과가 일부 실패하는 경우
+
+`configured: true`는 값이 있다는 뜻이며 인증 성공을 보장하지 않는다. OpenAI 모델 메타데이터 접근 성공도 충전 잔액·실제 생성·주문 권한 검사와 별개다. `llm_credit_balance_verified: false`, `structured_generation_verified: false`, `order_permissions_verified: false`는 이 읽기 전용 점검에서 해당 작업을 하지 않았다는 뜻이다.
+
+FRED는 키 오류에도 HTTP 400을 반환할 수 있다. [공식 오류 설명](https://fred.stlouisfed.org/docs/api/fred/errors.html)에 따라 서버 메시지를 고정된 코드로 변환하며, 키가 포함될 수 있는 원문과 URL은 출력하지 않는다.
+
+| `error_code` | 확인할 항목 |
+|---|---|
+| `invalid_api_key_format` | FRED API Keys에서 발급한 키 전체를 입력했는지, 공백·따옴표 포함 여부 |
+| `api_key_rejected` | 등록된 FRED 키인지 확인하고 `.env`의 `FRED_API_KEY` 수정 |
+| `invalid_realtime_window` | PC 날짜·시간 및 기준일 요청 확인 |
+| `invalid_series_id` | 요청 시리즈의 제공 여부 |
+| `request_rejected` | HTTP 상태와 요청·서버 상태 추가 확인 |
+
+[FRED API Keys](https://fredaccount.stlouisfed.org/apikeys)에서 확인한다. 키 값은 공유하지 않는다. 기존 셸에 직접 지정한 환경변수가 있으면 `.env`보다 우선하므로 수정 후 새 터미널의 설정도 확인한다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant check-news --connect --provider fred
+.\venv\Scripts\python.exe -m sessionquant check-news --connect --provider official
+.\venv\Scripts\python.exe -m sessionquant check-news --connect --provider gdelt
+```
+
+RSS는 `text/xml` 응답도 수신하도록 요청한다. 공식 피드·GDELT의 결과는 `ok`·`partial`·`unavailable`로 구분하고 실패 항목에 `http_status` 또는 `error_type`을 표시한다. HTML 오류 페이지를 유효한 빈 RSS로 처리하지 않는다. 공급자가 403·503을 반환하거나 연결이 지연될 수 있으므로 수정 후에도 사용자 PC에서 재검사한다. GDELT의 `unavailable`과 성공한 검색의 0건은 다르다.
+
+`company_rss_count: 0`과 `rss: not_configured`는 위의 기업별 `companies`에 피드를 등록하지 않았다는 뜻이다. Fed 등 공식 기관 RSS와 별도로 관리하며 자동으로 임의의 기업 피드를 추가하지 않는다. Alpaca의 일부 지원하지 않는 태그 생략 메시지는 다른 유효한 티커와 기사 수집이 성공했다면 수집 중단 오류가 아니다.
