@@ -24,6 +24,7 @@ TABLES = (
 )
 REGIMES = {"BULLISH": "상승", "NEUTRAL": "중립", "BEARISH": "하락", "UNKNOWN": "확인 필요"}
 STATUS_NAMES = {
+    'submitted':'제출', 'accepted':'모의 접수', 'cancel_pending':'취소 확인 대기',
     "pending": "접수 대기", "open": "미체결", "partial": "부분 체결", "filled": "체결 완료",
     "cancelled": "취소", "rejected": "거절", "unknown": "확인 필요",
 }
@@ -352,9 +353,19 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                  "상태": STATUS_NAMES.get(str(row.get("status", "")).lower(), row.get("status", "")), "금액": usd(row.get("amount")),
                  "수량": str(row.get("qty", "")), "체결 수량": str(row.get("filled_qty", "")), "사유": row.get("reason", ""),
                  "생성 시각": timestamp(row.get("created_at"))} for row in data.tables["orders"]])
+        if view['environment'] == 'PAPER_LOCAL':
+            st.caption('모의 체결 모델: '+str(data.context.get('paper_fill_model','기존 기록·미확인'))+' · 접수·지연·유동성은 가정이며 실제 증권사 체결을 보장하지 않습니다.')
+            with st.expander('모의 체결 가정·미체결 근거'):
+                _table([{'주문 ID':row.get('client_id'), '체결 모델':row.get('fill_model_version','UNKNOWN'),
+                    '예상 가격':usd(row.get('expected_price')),'누적 모의 체결가':usd(row.get('simulated_fill_price')),
+                    '가정 지연(초)':row.get('assumed_latency'),'가격 차이(bps)':row.get('slippage_bps'),
+                    '수수료 항목':row.get('fee_breakdown'),'미체결 사유':row.get('unfilled_reason'),
+                    '접수 시각':timestamp(row.get('accepted_at'))} for row in data.tables['orders']])
         with st.expander("체결 기록"):
             _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
+                     '체결 모델':row.get('fill_model_version','실제 브로커' if row.get('execution_mode')=='live' else 'UNKNOWN'),
+                     '예상 가격':usd(row.get('expected_price')),'가격 차이(bps)':row.get('slippage_bps'),
                      "체결 ID": row.get("id", "")} for row in data.tables["executions"]])
         st.markdown("**운영 경고**")
         _table([{"시각": timestamp(row.get("timestamp", row.get("created_at"))), "수준": row.get("level", row.get("severity", "")),

@@ -69,6 +69,10 @@ class PortfolioSettings:
     max_quote_age_seconds: int = 10
     order_ttl_seconds: int = 60
     min_entry_to_exit_minutes: int = 30
+    paper_fill_model: str = 'market_v2'
+    paper_latency_seconds: Decimal = Decimal('1')
+    paper_cancel_latency_seconds: Decimal = ZERO
+    paper_depth_participation: Decimal = Decimal('0.10')
 
     def __post_init__(self):
         for item in fields(self):
@@ -76,6 +80,12 @@ class PortfolioSettings:
                 object.__setattr__(self, item.name, decimal(getattr(self, item.name), item.name, nonnegative=True))
         if self.initial_cash <= 0 or self.minimum_order <= 0:
             raise ValueError('초기 자본과 최소 모의 주문 금액은 양수여야 합니다.')
+        if self.paper_fill_model not in {'market_v2','legacy_limit_v1'}:
+            raise ValueError('모의 체결 모델은 market_v2 또는 legacy_limit_v1이어야 합니다.')
+        if not ZERO < self.paper_depth_participation <= 1 or max(self.paper_latency_seconds,self.paper_cancel_latency_seconds) > 3600:
+            raise ValueError('호가 참여율은 0 초과 1 이하, 가정 지연은 최대 3600초여야 합니다.')
+        if any(value != value.quantize(Decimal('0.000001')) for value in (self.paper_latency_seconds,self.paper_cancel_latency_seconds)):
+            raise ValueError('모의 시계의 지연은 마이크로초 단위까지만 지원합니다.')
         for name in ('initial_weight', 'add_weight', 'max_symbol_weight', 'max_gross_weight', 'risk_per_symbol',
                      'daily_loss_limit', 'target_return'):
             if not ZERO < getattr(self, name) < 1:
@@ -98,14 +108,18 @@ class PortfolioSettings:
 
     def fees(self, side: str, notional: Decimal) -> Decimal:
         """실제 체결 수수료와 다를 수 있는 보수적인 모의 비용을 계산한다."""
+        return self.fee_breakdown(side,notional)['total']
+
+    def fee_breakdown(self, side: str, notional: Decimal) -> dict:
+        """기존 모의 요율의 주문 누적 비용을 항목별로 분리한다. 실제 청구액이 아니다."""
         amount = decimal(notional, 'notional', nonnegative=True)
         if side not in ('buy', 'sell'):
             raise ValueError('주문 방향은 buy 또는 sell이어야 합니다.')
         if amount == 0:
-            return ZERO
+            return {'commission':ZERO,'regulatory':ZERO,'total':ZERO}
         commission = ZERO if amount <= self.commission_free_notional else (amount * self.commission_rate).quantize(CENT, rounding=ROUND_CEILING)
         regulatory = max(amount * self.sell_regulatory_rate, self.sell_regulatory_min).quantize(CENT, rounding=ROUND_CEILING) if side == 'sell' else ZERO
-        return commission + regulatory
+        return {'commission':commission,'regulatory':regulatory,'total':commission+regulatory}
 
 
 @dataclass(frozen=True)
@@ -121,6 +135,7 @@ class OrderIntent:
     strategy: str = ''
     reason: str = ''
     is_add: bool = False
+    expected_price: Decimal | None = None
 
     def __post_init__(self):
         from ..models import symbol_valid
@@ -131,7 +146,7 @@ class OrderIntent:
             raise ValueError('주문 방향 또는 추가매수 표시가 올바르지 않습니다.')
         object.__setattr__(self, 'created_at', aware(self.created_at))
         object.__setattr__(self, 'limit_price', decimal(self.limit_price, 'limit_price', positive=True))
-        for name in ('amount', 'qty', 'stop_price'):
+        for name in ('amount', 'qty', 'stop_price', 'expected_price'):
             if getattr(self, name) is not None:
                 object.__setattr__(self, name, decimal(getattr(self, name), name, positive=True))
         if self.side == 'buy' and (self.amount is None or self.qty is not None or self.stop_price is None):
@@ -150,6 +165,19 @@ class FractionalOrder:
     filled_notional: Decimal = ZERO
     fee: Decimal = ZERO
     rejection_reason: str = ''
+    fill_model_version: str = 'legacy_limit_v1'
+    submitted_at: datetime | None = None
+    accepted_at: datetime | None = None
+    cancel_requested_at: datetime | None = None
+    cancel_effective_at: datetime | None = None
+    expected_price: Decimal | None = None
+    expected_price_source: str = 'UNKNOWN'
+    simulated_fill_price: Decimal | None = None
+    assumed_latency: Decimal | None = None
+    slippage_bps: Decimal | None = None
+    fee_breakdown: dict = field(default_factory=dict)
+    unfilled_reason: str = ''
+    lifecycle: list[dict] = field(default_factory=list)
 
     @property
     def client_id(self):
@@ -194,6 +222,16 @@ class FractionalFill:
     fee: Decimal
     timestamp: datetime
     realized_pnl: Decimal = ZERO
+    fill_model_version: str = 'legacy_limit_v1'
+    expected_price: Decimal | None = None
+    simulated_fill_price: Decimal | None = None
+    assumed_latency: Decimal | None = None
+    slippage_bps: Decimal | None = None
+    fee_breakdown: dict = field(default_factory=dict)
+    quote_timestamp: datetime | None = None
+    quote_received_at: datetime | None = None
+    observed_latency: Decimal | None = None
+    execution_mode: str = 'paper'
 
 
 @dataclass(frozen=True)

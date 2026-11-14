@@ -1,0 +1,27 @@
+# 중지한 기존 PAPER 장부를 보존하고 시장가 근사를 별도 실행 공간에서 검증한다.
+# 같은 .env의 로컬 MySQL·토스 설정을 읽는다. 실제 주문은 실행하지 않는다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-paper-market-v2.db
+universe_path: ../data/sp500-universe.json
+source: toss
+strategy: pullback
+watchlist_enabled: true
+watchlist_size: 100
+focus_size: 20
+market_cap_input: ../data/market-cap-input.json
+symbols_per_cycle: 2
+max_api_calls_per_cycle: 24
+max_cycle_seconds: 15
+history_pages_per_cycle: 1
+news_enabled: true
+portfolio:
+  initial_cash: '100'
+  paper_fill_model: market_v2
+  # 실제 브로커 실측값이 아닌 명시적 모의 가정이다.
+  paper_latency_seconds: '1'
+  paper_cancel_latency_seconds: '0'
+  paper_depth_participation: '0.10'
+  slippage_rate: '0.001'
+  minimum_order: '1'
+  min_entry_to_exit_minutes: 30

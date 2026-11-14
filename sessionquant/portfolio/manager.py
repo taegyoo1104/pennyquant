@@ -95,7 +95,7 @@ class PortfolioManager:
         seed = f'{symbol}|{signal_id}|{aware(now).isoformat()}|{add}'
         client_id = 'sq-buy-' + sha256(seed.encode()).hexdigest()[:32]
         intent = OrderIntent(client_id, symbol, 'buy', now, price, amount=amount, stop_price=stop,
-                             strategy=strategy, reason='추세 재확인 추가매수' if add else '기술적 추세와 시장 강세 확인', is_add=add)
+                             strategy=strategy, reason='추세 재확인 추가매수' if add else '기술적 추세와 시장 강세 확인', is_add=add,expected_price=ask)
         return AllocationDecision(True, 'approved', intent)
 
     def _queue_exit(self, symbol: str, quote, now: datetime, reason: str):
@@ -109,7 +109,7 @@ class PortfolioManager:
             raise ValueError('청산 의도와 현재 보유 포지션의 생성 시각이 다릅니다.')
         for order in self.broker.get_open_orders(symbol):
             if order.intent.side == 'buy':
-                self.broker.cancel_order(order.client_id)
+                self.broker.cancel_order(order.client_id,now)
         self.broker.expire_orders(now)
         if any(o.intent.side == 'sell' for o in self.broker.get_open_orders(symbol)):
             return None
@@ -120,7 +120,7 @@ class PortfolioManager:
         client_id = 'sq-exit-' + sha256(seed.encode()).hexdigest()[:32]
         limit = decimal(quote.bid) * (1 - self.settings.slippage_rate)
         intent = OrderIntent(client_id, symbol, 'sell', now, limit, qty=position.qty,
-                             strategy=position.strategy, reason=latch['reason'])
+                             strategy=position.strategy, reason=latch['reason'],expected_price=decimal(quote.bid))
         return self.broker.submit_order(intent)
 
     def check_exits(self, quote, now: datetime, *, bearish_signal: bool = False,

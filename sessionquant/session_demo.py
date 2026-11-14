@@ -43,7 +43,7 @@ def synthetic_tape() -> tuple[list[dict], datetime]:
     return records, opened
 
 
-def write_session_demo(out: Path, *, strategy="pullback", backend="sqlite"):
+def write_session_demo(out: Path, *, strategy="pullback", backend="sqlite", fill_model="market_v2"):
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise ValueError("출력 폴더에 기존 자료가 있습니다. 새로운 --out 경로를 지정하세요.")
@@ -57,10 +57,12 @@ def write_session_demo(out: Path, *, strategy="pullback", backend="sqlite"):
     tape.with_suffix(".meta.json").write_text(json.dumps({"synthetic": True, "source_label": "SYNTHETIC_FIXTURE"}), encoding="utf-8")
     # MySQL 이름은 폴더별로 달라져 다른 합성 실행 공간을 덮어쓰지 않는다.
     db = out/("sessionquant-demo-"+out.name+".db")
-    result = replay_session(tape, db, universe_path, strategy=strategy, synthetic=True, backend=backend)
+    from .portfolio.models import PortfolioSettings
+    settings = PortfolioSettings(paper_fill_model=fill_model)
+    result = replay_session(tape, db, universe_path, strategy=strategy, synthetic=True, backend=backend,settings=settings)
     from .session_backtest import compare_session
     report = out/"report.json"
-    compare_session(tape, universe_path, report, synthetic=True)
+    compare_session(tape, universe_path, report, synthetic=True,settings=settings)
     return {"database": str(db), "backend": backend, "input": str(tape), "universe": str(universe_path),
-            "report": str(report), "strategy": strategy, "fills": len(result["fills"]),
+            "report": str(report), "strategy": strategy,"fill_model_version":fill_model, "fills": len(result["fills"]),
             "open_positions": len(result["state"]["positions"]), "synthetic": True, "live_orders_enabled": False}

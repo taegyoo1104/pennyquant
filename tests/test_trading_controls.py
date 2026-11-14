@@ -46,6 +46,8 @@ def test_startup_waits_for_button_and_risk_exits_work_while_stopped(tmp_path):
             enqueue(repo,'sell_symbol',run_id=state['run_id'],symbol='AAPL',now=entry+timedelta(seconds=3),command_id=cid)
         engine.apply_batch(quotes(events,entry+timedelta(seconds=3)),entry+timedelta(seconds=3))
         assert sum(o.intent.side=='sell' for o in engine.broker.orders.values())==1
+        assert engine.broker.positions
+        engine.apply_batch(quotes(events,entry+timedelta(seconds=4)),entry+timedelta(seconds=4))
         assert not engine.broker.positions
     finally: repo.close()
 

@@ -167,6 +167,7 @@ class SessionEngine:
         for order in self.broker.orders.values():
             row = serialize(order)
             row.update(serialize(order.intent))
+            row['expected_price'] = serialize(order.expected_price)
             self._record_changed("orders", order.client_id, row)
         for fill in self.broker.fills:
             self._record_changed("executions", fill.id, serialize(fill))
@@ -186,13 +187,14 @@ class SessionEngine:
                    "synthetic": self.synthetic, "strategy": self.strategy, "updated_at": now.isoformat(),
                    "market_regime": regime, "session": serialize(session_status), "account": account,
                    "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else "ENABLED",
+                   "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         self.repo.set_control("sessionquant_context", context)
         if self.market.strict_data:
             from .market.reporting import persist_quality
             persist_quality(self,now)
         self.repo.set_control("runtime_kind", "sessionquant")
-        self._last_summary = broker_state
+        self._last_summary = {k:v for k,v in broker_state.items() if k != 'last_event_at'}
         self._last_persist_at = now
 
     def apply_batch(self, events: list[dict], now: datetime, *, cursor: int | None = None, controls: dict | None = None):
@@ -242,7 +244,7 @@ class SessionEngine:
                 if manual_halt:
                     for order in self.broker.get_open_orders():
                         if order.intent.side == "buy":
-                            self.broker.cancel_order(order.client_id)
+                            self.broker.cancel_order(order.client_id,now)
                 session_status = self.exit_manager.tick(now, self.market.quotes)
                 quotes = [parse_event(raw).data for raw in events if raw["kind"] == "quote"]
                 for quote in quotes:
@@ -289,7 +291,7 @@ class SessionEngine:
                 if self.control_state is not None:
                     from .trading_controls import heartbeat
                     heartbeat(self.repo,self.control_state,now=now,flat=not self.broker.positions and not self.broker.get_open_orders())
-                changed = self._last_summary != self.broker.to_state()
+                changed = self._last_summary != {k:v for k,v in self.broker.to_state().items() if k != 'last_event_at'}
                 heartbeat_due = self._last_persist_at is None or (now - self._last_persist_at).total_seconds() >= 30
                 if events or changed or heartbeat_due or controls:
                     self._persist(now, session_status)

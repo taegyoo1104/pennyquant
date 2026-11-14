@@ -3,21 +3,21 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import fields
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_DOWN
 from zoneinfo import ZoneInfo
 
 from .models import (ZERO, QUANTITY_STEP, AccountView, FractionalFill, FractionalOrder,
                      FractionalPosition, OrderIntent, PortfolioSettings, aware, decimal, serialize)
 
-OPEN_STATUSES = {'open', 'partial', 'unknown'}
+OPEN_STATUSES = {'submitted', 'accepted', 'open', 'partial', 'cancel_pending', 'unknown'}
 
 
 class PaperBroker:
     """금액 매수와 수량 매도를 동일한 체결 장부로 처리한다.
 
-    제출은 체결이 아니다. 제출 이후 수신한 유효한 호가가 제한 가격과
-    유동성을 충족할 때만 체결하며, 슬리피지와 주문 전체 수수료를 적용한다.
+    기본 시장가 근사는 접수 지연 후 관측된 호가로 체결한다. 기존 가격제한
+    방식은 명시적 실험 모드로 보존한다. 실제 증권사 매칭을 재현하지 않는다.
     """
     mode = 'paper'
 
@@ -34,6 +34,8 @@ class PaperBroker:
         self.exit_intents: dict[str, dict] = {}
         self.alerts: list[dict] = []
         self.quote_watermarks: dict[str, str] = {}
+        self.quote_sequences: dict[str, str] = {}
+        self.last_event_at: datetime | None = None
 
     @property
     def equity(self) -> Decimal:
@@ -78,7 +80,7 @@ class PaperBroker:
             self.halted = False
             for order in self.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.cancel_order(order.client_id)
+                    self.cancel_order(order.client_id, now)
 
     def check_daily_loss(self, now: datetime) -> bool:
         self.roll_session(now)
@@ -86,11 +88,11 @@ class PaperBroker:
             self.halted = True
             for order in self.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.cancel_order(order.client_id)
+                    self.cancel_order(order.client_id, now)
             self._alert('daily_loss_limit', now, '일일 손실 한도에 도달하여 당일 신규 매수를 중단했습니다.')
         return self.halted
 
-    def submit_order(self, intent: OrderIntent) -> FractionalOrder:
+    def submit_order(self, intent: OrderIntent, now: datetime | None = None) -> FractionalOrder:
         if not isinstance(intent, OrderIntent):
             raise ValueError('검증된 OrderIntent가 필요합니다.')
         previous = self.orders.get(intent.client_id)
@@ -98,11 +100,35 @@ class PaperBroker:
             if serialize(previous.intent) != serialize(intent):
                 raise ValueError('같은 주문 ID를 다른 주문 내용으로 재사용할 수 없습니다.')
             return previous
-        self.roll_session(intent.created_at)
-        order = FractionalOrder(intent)
+        submitted = aware(now or intent.created_at)
+        if now is not None and (submitted < intent.created_at or (self.last_event_at and submitted < self.last_event_at)):
+            raise ValueError('제출 시각은 의도 생성·장부 확인 시각보다 과거일 수 없습니다.')
+        submitted = max(submitted,self.last_event_at or submitted)
+        self.roll_session(submitted)
+        legacy = self.settings.paper_fill_model == 'legacy_limit_v1'
+        order = FractionalOrder(intent,status='open' if legacy else 'submitted',
+            fill_model_version=self.settings.paper_fill_model,submitted_at=submitted,
+            accepted_at=submitted if legacy else None,expected_price=intent.expected_price or intent.limit_price,
+            expected_price_source='decision_quote' if intent.expected_price is not None else 'intent_reference',
+            assumed_latency=ZERO if legacy else self.settings.paper_latency_seconds,
+            fee_breakdown=self.settings.fee_breakdown(intent.side,ZERO),unfilled_reason='awaiting_quote' if legacy else 'awaiting_acceptance')
+        self._transition(order,order.status,submitted,force=True)
         reason = ''
-        if intent.side == 'buy':
-            if self.check_daily_loss(intent.created_at):
+        if not legacy:
+            from .session import SessionExitManager
+            schedule = SessionExitManager(self).schedule(submitted)
+            if not schedule or not schedule.opens_at <= submitted < schedule.fractional_deadline:
+                reason = 'outside_fractional_order_window'
+            elif intent.side == 'buy' and intent.amount != intent.amount.quantize(Decimal('0.01')):
+                reason = 'amount_step_unsupported'
+            elif intent.side == 'sell' and intent.qty != intent.qty.quantize(QUANTITY_STEP):
+                reason = 'quantity_step_unsupported'
+        if reason:
+            pass
+        elif intent.side == 'buy':
+            if any(o.status == 'unknown' for o in self.get_open_orders()):
+                reason = 'account_order_state_unknown'
+            elif self.check_daily_loss(submitted):
                 reason = 'daily_loss_limit'
             elif intent.amount < self.settings.minimum_order:
                 reason = 'below_minimum_order'
@@ -127,21 +153,90 @@ class PaperBroker:
             if position is None or intent.qty > position.qty - reserved:
                 reason = 'insufficient_sellable_quantity'
         if reason:
-            order.status, order.rejection_reason = 'rejected', reason
+            order.rejection_reason = reason
+            order.unfilled_reason = reason
+            self._transition(order,'rejected',submitted)
         self.orders[intent.client_id] = order
         return order
 
-    def cancel_order(self, client_id: str) -> FractionalOrder | None:
+    def _transition(self, order, status, now, *, force=False, event=None):
+        """모의 상태 전이를 기록한다. 접수·취소 확인은 실제 브로커 응답이 아니다."""
+        changed = order.status != status
+        order.status = status
+        if changed or force:
+            order.lifecycle.append({'status':status,'event':event or status,'observed_at':aware(now).isoformat(),
+                'source':'paper_assumption','fill_model_version':order.fill_model_version})
+
+    def cancel_order(self, client_id: str, now: datetime | None = None) -> FractionalOrder | None:
         order = self.orders.get(client_id)
-        if order is not None and order.status in OPEN_STATUSES:
-            order.status = 'cancelled'
+        if order is None or order.status not in OPEN_STATUSES:
+            return order
+        stamp = aware(now or self.last_event_at or order.submitted_at or order.intent.created_at)
+        if order.status == 'unknown':
+            if order.cancel_requested_at is None:
+                order.cancel_requested_at = stamp
+                self._transition(order,'unknown',stamp,force=True,event='cancel_requested_unconfirmed')
+            order.unfilled_reason = 'cancel_result_unknown'
+            return order
+        if order.cancel_effective_at is not None:
+            return order
+        order.cancel_requested_at = stamp
+        delay = ZERO if self.settings.paper_fill_model == 'legacy_limit_v1' else self.settings.paper_cancel_latency_seconds
+        order.cancel_effective_at = stamp+timedelta(microseconds=int(delay*1_000_000))
+        self._transition(order,'cancel_pending',stamp)
+        order.unfilled_reason = 'cancel_pending'
+        if delay == 0:
+            self._transition(order,'cancelled',stamp)
+            order.unfilled_reason = 'cancelled'
+        return order
+
+    def mark_unknown(self, client_id: str, now: datetime, reason='simulated_result_unknown'):
+        """장애 시나리오용 미확인 상태. 시세로 접수·체결을 추측해 복구하지 않는다."""
+        order = self.orders[client_id]
+        if order.status not in OPEN_STATUSES:
+            raise ValueError('종료 주문을 미확인 진행 주문으로 되돌릴 수 없습니다.')
+        order.unfilled_reason = reason
+        self._transition(order,'unknown',now)
+        self._alert('paper_order_unknown',now,'모의 주문 결과가 미확인입니다. 예약을 유지하고 자동 체결·재전송하지 않습니다.',order.intent.symbol)
         return order
 
     def expire_orders(self, now: datetime):
         now = aware(now)
-        for order in self.get_open_orders():
-            if (now - order.intent.created_at).total_seconds() >= self.settings.order_ttl_seconds:
-                self.cancel_order(order.client_id)
+        market = self.settings.paper_fill_model == 'market_v2'
+        if market:
+            if self.last_event_at and now < self.last_event_at:
+                return
+            self.last_event_at = now
+        active = list(self.get_open_orders())
+        schedule = None
+        if market and active:
+            from .session import SessionExitManager
+            schedule = SessionExitManager(self).schedule(now)
+        for order in active:
+            if order.status == 'unknown':
+                continue
+            submitted = order.submitted_at or order.intent.created_at
+            if market:
+                ny = ZoneInfo('America/New_York')
+                if (now.astimezone(ny).date() > submitted.astimezone(ny).date()
+                        or (schedule and now >= schedule.closes_at)):
+                    self._transition(order,'cancelled',now,event='day_expired')
+                    order.unfilled_reason = 'day_expired'
+                    continue
+                due = submitted+timedelta(microseconds=int((order.assumed_latency or ZERO)*1_000_000))
+                if order.accepted_at is None and now >= due:
+                    order.accepted_at = due
+                    if order.status == 'submitted':
+                        self._transition(order,'accepted',now)
+                        order.unfilled_reason = 'awaiting_post_acceptance_quote'
+                if order.cancel_effective_at is not None and order.cancel_effective_at <= now:
+                    self._transition(order,'cancelled',now)
+                    order.unfilled_reason = 'cancelled'
+                    continue
+            if (now-submitted).total_seconds() >= self.settings.order_ttl_seconds:
+                self.cancel_order(order.client_id,now)
+                if order.status == 'cancelled':
+                    order.unfilled_reason = 'assumed_order_timeout'
 
     def quote_is_fresh(self, quote, now: datetime) -> bool:
         try:
@@ -154,97 +249,29 @@ class PaperBroker:
             return False
 
     def process_quote(self, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None) -> list[FractionalFill]:
-        now = aware(now or quote.received_at)
-        self.roll_session(now)
-        self.expire_orders(now)
-        if not self.quote_is_fresh(quote, now):
-            return []
-        from .session import SessionExitManager
-        schedule = SessionExitManager(self).schedule(now)
-        if schedule is None or not schedule.opens_at <= now < schedule.fractional_deadline:
-            return []
-        bid, ask = decimal(quote.bid), decimal(quote.ask)
-        if quote.symbol in self.positions:
-            self.positions[quote.symbol].mark_price = bid
-        self.check_daily_loss(now)
-        fills = []
-        fingerprint = '|'.join(str(v) for v in (aware(quote.timestamp).isoformat(), quote.bid, quote.ask, quote.bid_size, quote.ask_size))
-        if self.quote_watermarks.get(quote.symbol) == fingerprint:
-            return fills
-        self.quote_watermarks[quote.symbol] = fingerprint
-        liquidity = decimal(max_fill_qty, 'max_fill_qty', nonnegative=True) if max_fill_qty is not None else None
-        for order in list(self.get_open_orders(quote.symbol)):
-            intent = order.intent
-            if intent.created_at > aware(quote.timestamp) or intent.created_at > now:
-                continue
-            side = intent.side
-            if side == 'buy':
-                from ..session_window import permits_new_entry
-                if not permits_new_entry(now,min_entry_to_exit_minutes=self.settings.min_entry_to_exit_minutes):
-                    self.cancel_order(order.client_id)
-                    continue
-            price = ask * (1 + self.settings.slippage_rate) if side == 'buy' else bid * (1 - self.settings.slippage_rate)
-            if (side == 'buy' and price > intent.limit_price) or (side == 'sell' and price < intent.limit_price):
-                continue
-            if side == 'buy' and (self.halted or not quote.tradable):
-                continue
-            remaining = order.remaining_amount / price if side == 'buy' else order.remaining_qty
-            available = decimal(quote.ask_size if side == 'buy' else quote.bid_size)
-            if liquidity is not None:
-                available = min(available, liquidity)
-            qty = min(remaining, available).quantize(QUANTITY_STEP, rounding=ROUND_DOWN)
-            if qty <= 0:
-                continue
-            notional = qty * price
-            fee = self.settings.fees(side, order.filled_notional + notional) - order.fee
-            if side == 'buy' and notional + fee > self.cash:
-                continue
-            pnl = ZERO
-            if side == 'buy':
-                position = self.positions.get(intent.symbol)
-                if position is None:
-                    position = FractionalPosition(intent.symbol, ZERO, price, ZERO, intent.stop_price, now, intent.strategy)
-                    self.positions[intent.symbol] = position
-                if intent.is_add and order.filled_qty == 0:
-                    position.adds += 1
-                position.avg_price = (position.qty * position.avg_price + notional) / (position.qty + qty)
-                position.qty += qty
-                position.entry_fee += fee
-                # 추가매수는 이전 손절선을 내릴 수 없다.
-                position.stop_price = max(position.stop_price, intent.stop_price)
-                position.mark_price = bid
-                if intent.is_add:
-                    position.add_amount += notional
-                else:
-                    position.initial_amount += notional
-                self.cash -= notional + fee
-            else:
-                position = self.positions.get(intent.symbol)
-                if position is None or qty > position.qty:
-                    self.cancel_order(order.client_id)
-                    continue
-                entry_fee = position.entry_fee * qty / position.qty
-                pnl = notional - fee - position.avg_price * qty - entry_fee
-                self.cash += notional - fee
-                self.realized_pnl += pnl
-                position.qty -= qty
-                position.entry_fee -= entry_fee
-                if position.qty == 0:
-                    del self.positions[intent.symbol]
-                    self.exit_intents.pop(intent.symbol, None)
-            order.filled_qty += qty
-            order.filled_notional += notional
-            order.fee += fee
-            complete = order.remaining_amount < price * QUANTITY_STEP if side == 'buy' else order.remaining_qty == 0
-            order.status = 'filled' if complete else 'partial'
-            fill = FractionalFill(f'{order.client_id}:{len(self.fills)+1}', order.client_id, intent.symbol, side,
-                                  qty, price, fee, now, pnl)
-            self.fills.append(fill)
-            fills.append(fill)
-            if liquidity is not None:
-                liquidity -= qty
-            self.check_daily_loss(now)
-        return fills
+        if self.settings.paper_fill_model == 'legacy_limit_v1':
+            from .legacy_fills import process_legacy_quote
+            return process_legacy_quote(self,quote,now,max_fill_qty=max_fill_qty)
+        from .market_fills import process_market_quote
+        return process_market_quote(self,quote,now,max_fill_qty=max_fill_qty)
+
+    def _fill_record(self, order, qty, price, fee, now, pnl, quote):
+        """주문 누적값과 체결별 비교 근거를 동일한 형식으로 기록한다."""
+        expected = order.expected_price
+        sign = Decimal(1) if order.intent.side == 'buy' else Decimal(-1)
+        bps = (price/expected-1)*10000*sign if expected else None
+        order.simulated_fill_price = order.filled_notional/order.filled_qty
+        order.slippage_bps = (order.simulated_fill_price/expected-1)*10000*sign if expected else None
+        current = self.settings.fee_breakdown(order.intent.side,order.filled_notional)
+        prior = self.settings.fee_breakdown(order.intent.side,order.filled_notional-qty*price)
+        breakdown = {k:current[k]-prior[k] for k in current}
+        order.fee_breakdown = current
+        order.unfilled_reason = '' if order.status == 'filled' else 'liquidity_partial'
+        self._transition(order,order.status,now,force=True,event='fill')
+        delay = Decimal(str((aware(now)-(order.submitted_at or order.intent.created_at)).total_seconds()))
+        return FractionalFill(f'{order.client_id}:{len(self.fills)+1}',order.client_id,order.intent.symbol,
+            order.intent.side,qty,price,fee,now,pnl,order.fill_model_version,expected,price,
+            order.assumed_latency,bps,breakdown,aware(quote.timestamp),aware(quote.received_at),delay)
 
     def reconcile(self) -> dict:
         issues = []
@@ -254,6 +281,19 @@ class PaperBroker:
             issues.append('invalid_position')
         if len({f.id for f in self.fills}) != len(self.fills):
             issues.append('duplicate_fill_id')
+        for order in self.orders.values():
+            if (order.status not in OPEN_STATUSES|{'filled','cancelled','rejected'}
+                    or min(order.filled_qty,order.filled_notional,order.fee) < 0
+                    or (order.intent.amount is not None and order.filled_notional > order.intent.amount)
+                    or (order.intent.qty is not None and order.filled_qty > order.intent.qty)):
+                issues.append('invalid_order_totals_or_state')
+            if self.settings.paper_fill_model == 'market_v2':
+                if (order.fill_model_version != 'market_v2' or order.submitted_at is None
+                        or order.submitted_at < order.intent.created_at or order.assumed_latency is None
+                        or order.assumed_latency < 0 or (order.accepted_at is not None and order.accepted_at < order.submitted_at)):
+                    issues.append('invalid_execution_model_metadata')
+        if self.settings.paper_fill_model == 'market_v2' and any(fill.fill_model_version != 'market_v2' for fill in self.fills):
+            issues.append('mixed_fill_model_versions')
         for symbol, position in self.positions.items():
             reserved = sum((o.remaining_qty for o in self.get_open_orders(symbol) if o.intent.side == 'sell'), ZERO)
             if reserved > position.qty:
@@ -261,18 +301,23 @@ class PaperBroker:
         return {'ok': not issues, 'mode': 'paper', 'issues': issues, 'account': serialize(self.get_account())}
 
     def to_state(self) -> dict:
-        return serialize({'version': 1, 'mode': 'paper', 'settings': self.settings, 'cash': self.cash,
+        return serialize({'version': 2, 'mode': 'paper', 'settings': self.settings, 'cash': self.cash,
                           'equity': self.equity, 'day_start_equity': self.day_start_equity,
                           'reserved_cash': self.reserved_cash, 'realized_pnl': self.realized_pnl,
                           'session_date': self.session_date, 'halted': self.halted,
                           'orders': self.orders, 'positions': self.positions, 'fills': self.fills,
-                          'exit_intents': self.exit_intents, 'alerts': self.alerts, 'quote_watermarks': self.quote_watermarks})
+                          'exit_intents': self.exit_intents, 'alerts': self.alerts, 'quote_watermarks': self.quote_watermarks, 'quote_sequences':self.quote_sequences, 'last_event_at':self.last_event_at})
 
     @classmethod
     def from_state(cls, state: dict, settings: PortfolioSettings | None = None) -> 'PaperBroker':
-        if state.get('mode') != 'paper' or state.get('version') != 1:
+        if state.get('mode') != 'paper' or state.get('version') not in {1,2}:
             raise ValueError('지원하지 않는 모의 장부 형식입니다.')
-        stored_settings = PortfolioSettings(**state['settings'])
+        stored_values = dict(state['settings'])
+        if state['version'] == 1:
+            stored_values['paper_fill_model'] = 'legacy_limit_v1'
+        stored_settings = PortfolioSettings(**stored_values)
+        if state['version'] == 1 and settings is not None and settings.paper_fill_model != 'legacy_limit_v1':
+            raise ValueError('이전 가격제한 장부입니다. portfolio.paper_fill_model: legacy_limit_v1로 복구하거나 새 db_path에서 market_v2를 시작하세요.')
         if settings is not None and serialize(settings) != serialize(stored_settings):
             raise ValueError('재시작 설정이 저장된 위험·비용 설정과 다릅니다. 별도 모의 실행 공간을 사용하세요.')
         result = cls(stored_settings)
@@ -286,8 +331,15 @@ class PaperBroker:
             intent = OrderIntent(**data['intent'])
             if key != intent.client_id:
                 raise ValueError('저장된 주문 ID가 일치하지 않습니다.')
-            result.orders[key] = FractionalOrder(intent, data['status'], decimal(data['filled_qty'], nonnegative=True),
-                decimal(data['filled_notional'], nonnegative=True), decimal(data['fee'], nonnegative=True), data.get('rejection_reason', ''))
+            values = {k:v for k,v in data.items() if k != 'intent'}
+            for name in ('filled_qty','filled_notional','fee','expected_price','simulated_fill_price','assumed_latency','slippage_bps'):
+                if values.get(name) is not None:
+                    values[name] = decimal(values[name],name,nonnegative=name != 'slippage_bps')
+            for name in ('submitted_at','accepted_at','cancel_requested_at','cancel_effective_at'):
+                if values.get(name) is not None:
+                    values[name] = aware(values[name])
+            values['fee_breakdown'] = {k:decimal(v,nonnegative=True) if v is not None else None for k,v in values.get('fee_breakdown',{}).items()}
+            result.orders[key] = FractionalOrder(intent,**values)
         for symbol, data in state.get('positions', {}).items():
             value = dict(data)
             for name in ('qty', 'avg_price', 'entry_fee', 'stop_price', 'initial_amount', 'add_amount', 'mark_price'):
@@ -298,13 +350,20 @@ class PaperBroker:
             result.positions[symbol] = FractionalPosition(**value)
         for data in state.get('fills', []):
             value = dict(data)
-            for name in ('qty', 'price', 'fee', 'realized_pnl'):
-                value[name] = decimal(value[name], name)
+            for name in ('qty','price','fee','realized_pnl','expected_price','simulated_fill_price','assumed_latency','slippage_bps','observed_latency'):
+                if value.get(name) is not None:
+                    value[name] = decimal(value[name],name)
+            for name in ('quote_timestamp','quote_received_at'):
+                if value.get(name) is not None:
+                    value[name] = aware(value[name])
+            value['fee_breakdown'] = {k:decimal(v) if v is not None else None for k,v in value.get('fee_breakdown',{}).items()}
             value['timestamp'] = aware(value['timestamp'])
             result.fills.append(FractionalFill(**value))
         result.exit_intents = deepcopy(state.get('exit_intents', {}))
         result.alerts = deepcopy(state.get('alerts', []))
         result.quote_watermarks = deepcopy(state.get('quote_watermarks', {}))
+        result.quote_sequences = deepcopy(state.get('quote_sequences',{}))
+        result.last_event_at = aware(state['last_event_at']) if state.get('last_event_at') else None
         if not result.reconcile()['ok']:
             raise ValueError('모의 장부 대사에 실패하여 복구를 중단했습니다.')
         return result

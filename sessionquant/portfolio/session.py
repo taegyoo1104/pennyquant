@@ -79,7 +79,7 @@ class SessionExitManager:
         if not can_enter:
             for order in self.broker.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.broker.cancel_order(order.client_id)
+                    self.broker.cancel_order(order.client_id,now)
         today = now.astimezone(ZoneInfo('America/New_York')).date()
         for symbol, position in list(self.broker.positions.items()):
             overnight = position.opened_at.astimezone(ZoneInfo('America/New_York')).date() < today

@@ -171,6 +171,8 @@ def test_early_profit_exit_is_latched_and_retries_after_price_drop():
     assert result and result[0].intent.reason=='profit_protection'
     assert restored.get_order(exits[0].client_id).status=='cancelled'
     restored.process_quote(q2,later)
+    assert restored.positions  # 시장가도 제출 때 관측한 동일 호가로 체결하지 않는다.
+    restored.process_quote(quote(later+timedelta(seconds=1),'97','97.1'))
     assert not restored.positions
 
 
@@ -215,6 +217,9 @@ def test_session_exit_submission_is_not_completion_and_residual_warns():
     assert not result['liquidation_complete']
     q=quote(now)
     e.tick(now,{'AAPL':q})
+    b.process_quote(q,now)
+    assert not e.tick(now,{'AAPL':q})['liquidation_complete']
+    now+=timedelta(seconds=1);q=quote(now)
     b.process_quote(q,now)
     assert e.tick(now,{'AAPL':q})['liquidation_complete']
 

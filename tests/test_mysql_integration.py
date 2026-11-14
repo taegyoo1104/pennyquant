@@ -244,3 +244,31 @@ def test_real_mysql_market_quality_metadata_and_strict_recovery(mysql_repositori
     assert reader.get_control(QUALITY_KEY) == report and reader.all('orders') == []
     with pytest.raises(ValueError):
         SessionEngine(reader,universe,synthetic=True,strict_market_data=False,restore=True)
+
+
+def test_real_mysql_paper_market_partial_cancel_race_preserves_audit_and_money(mysql_repositories):
+    """합성 체결의 미확정 취소·금액·비교 근거를 격리 MySQL에서 복구한다."""
+    from decimal import Decimal
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.portfolio import PortfolioSettings
+    from sessionquant.session_engine import SessionEngine
+    from test_paper_market_fills import NOW, intent, quote
+    settings = PortfolioSettings(paper_cancel_latency_seconds=Decimal('2'))
+    repo = mysql_repositories()
+    universe = UniverseStore()
+    engine = SessionEngine(repo,universe,settings=settings,synthetic=True)
+    engine.broker.submit_order(intent())
+    engine.broker.process_quote(quote(1),max_fill_qty=Decimal('.05'))
+    engine.broker.cancel_order('buy',NOW+timedelta(seconds=2))
+    engine.tick(NOW+timedelta(seconds=2))
+    reader = mysql_repositories(repo.namespace)
+    restored = SessionEngine(reader,universe,settings=settings,restore=True,synthetic=True)
+    assert restored.broker.orders['buy'].status=='cancel_pending'
+    restored.broker.process_quote(quote(3),max_fill_qty=Decimal('.05'))
+    restored.tick(NOW+timedelta(seconds=4))
+    assert restored.broker.positions['AAPL'].qty==Decimal('.1')
+    order = reader.all('orders')[0]
+    assert order['status']=='cancelled' and order['fill_model_version']=='market_v2'
+    assert Decimal(order['simulated_fill_price'])==Decimal('100.1')
+    assert len(reader.all('executions'))==2 and restored.broker.reserved_cash==0
+    assert restored.broker.reconcile()['ok']

@@ -68,6 +68,8 @@ def parser():
         cmd.add_argument("--input", required=True, type=Path, help="정규화된 JSONL 자료")
         cmd.add_argument("--universe", required=True, type=Path, help="시점별 S&P 500 구성 이력")
         cmd.add_argument("--config", type=Path, help="위험·수수료 설정 YAML")
+    for cmd in (demo,replay,backtest):
+        cmd.add_argument('--fill-model',choices=('market_v2','legacy_limit_v1'),default=None,help='새 모의 체결은 market_v2 기본. 기존 가격제한 장부는 legacy_limit_v1')
     replay.add_argument("--db", type=Path, default=Path("data/sessionquant-replay.db"))
     replay.add_argument("--backend", choices=("sqlite", "mysql"), default="sqlite")
     replay.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
@@ -200,7 +202,7 @@ def main(argv=None):
             print(f"현재 목록을 저장했습니다: {args.output}. 과거 백테스트의 구성 이력으로 소급하지 않습니다.")
         elif args.command == "demo":
             from .session_demo import write_session_demo
-            result = write_session_demo(args.out, strategy=args.strategy, backend=args.backend)
+            result = write_session_demo(args.out, strategy=args.strategy, backend=args.backend,fill_model=args.fill_model or "market_v2")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             print("합성 검증을 완료했습니다. 실제 시세·투자 성과·실제 주문이 아닙니다.")
         elif args.command in {"replay", "backtest"}:
@@ -208,6 +210,9 @@ def main(argv=None):
             from .session_config import load_session_config
             from .session_runtime import replay_session
             settings = PortfolioSettings(**load_session_config(args.config).portfolio) if args.config else PortfolioSettings()
+            if args.fill_model:
+                from dataclasses import replace
+                settings = replace(settings,paper_fill_model=args.fill_model)
             synthetic = metadata(args.input).get("synthetic", False) is True
             if args.command == "replay":
                 result = replay_session(args.input, args.db, args.universe, strategy=args.strategy, resume=args.resume,
