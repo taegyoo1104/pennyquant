@@ -1,6 +1,6 @@
-# SessionQuant 2.0
+# SessionQuant 2.1
 
-S&P 500 구성 종목의 장중 추세와 SPY·QQQ 시장 방향, 기업·경제 뉴스를 함께 확인하는 Python 3.12 이상 모의매매 시스템입니다. **현재 구현 범위는 기획서의 Phase 0~4이며, 새 실행 경로는 Paper Trading 전용입니다.** 실제 주문과 GCP 배포는 Phase 5~6의 별도 검증 대상입니다.
+S&P 500 구성 종목의 장중 추세와 SPY·QQQ 시장 방향, 기업·경제 뉴스를 함께 확인하는 Python 3.12 이상 모의매매 시스템입니다. 일반 `run`은 Paper Trading 전용입니다. Phase 5의 첫 1종목 소액 실주문 검증 경로 `live-local`이 추가됐으며 기본은 주문 없는 계좌 검사입니다. 실제 계좌 검증과 완전 자동 실거래 연결은 별도 단계이고 GCP 배포는 Phase 6 범위입니다.
 
 GitHub 저장소 주소는 [`taegyoo1104/pennyquant`](https://github.com/taegyoo1104/pennyquant)를 그대로 사용합니다. 프로젝트·패키지·실행 명령은 `SessionQuant` / `sessionquant`로 바뀌었습니다. 과거 주문 ID와 SQLite 기록은 자동 변경하지 않습니다.
 
@@ -110,3 +110,13 @@ python -m sessionquant legacy --help
 - [기존 버전 안내 보관본](docs/LEGACY_README.md)
 
 실계좌 소수점 주문, 소액 실거래 검증, GCP 배포·원격 운영은 이번 범위에 포함하지 않습니다. 로컬 MySQL 접속과 본인 API 권한은 사용자 PC에서 마지막 연결 검사를 진행해야 합니다.
+
+## Phase 5 첫 실거래 검증
+
+[소수점 실주문 검증 매뉴얼](docs/PHASE5_LOCAL.md)을 먼저 읽으세요. 기본 명령은 실제 주문을 보내지 않습니다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant live-local --config config/live.local.yaml
+```
+
+사용자 계좌의 최소 금액·소수점 지원·현재 거래 제한은 이 개발 환경에서 검증하지 못했습니다. 실제 주문은 매 실행마다 명시적 활성화와 계좌 확인이 필요합니다. 일반 `run`을 실제 주문으로 바꾸거나 기존 정수 지정가 실거래 어댑터를 소수점 주문에 재사용하지 않습니다.

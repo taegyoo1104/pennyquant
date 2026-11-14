@@ -87,3 +87,7 @@ FRED의 [실시간 기간](https://fred.stlouisfed.org/docs/api/fred/realtime_pe
 - 해당 계정의 OpenAI 모델 접근과 구조화된 출력 연결 확인.
 
 Phase 0~4는 Paper 개발·검증 범위다. 위 확인 없이 실제 주문을 활성화하지 않는다.
+
+## Phase 5 구현 시 재확인
+
+공식 OpenAPI 원문을 다시 내려받아 버전 `1.2.28`, 금액 매수·소수점 수량 매도·주문 상세의 `orderAmount`와 `OrderExecution` 누적 체결·수수료·세금·실제 체결 시각 필드를 재확인했다. 주문 API 권한은 계좌 읽기 성공만으로 검증됐다고 기록하지 않는다. 개발 서버에서는 공식 명세 GET과 모의 HTTP만 사용하며 실제 계좌 주문은 호출하지 않았다.

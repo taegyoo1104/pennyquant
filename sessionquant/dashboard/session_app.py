@@ -95,6 +95,10 @@ def load_database(path: str | Path) -> DashboardData:
         repository = Repository(path)
         result.state = repository.load_state() or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
+        broker_status = (repository.get_control("broker_state", {}) or {}) if not result.context else {}
+        if broker_status.get("mode") == "live" and not result.context:
+            result.context={"environment":"LIVE_LOCAL","mode":"live","synthetic":False,
+                "updated_at":broker_status.get("observed_at"),"source_label":"실계좌 주문·체결 기록"}
         for name in TABLES:
             if name in KINDS:
                 result.tables[name] = repository.recent(name, limit=2000)
@@ -222,7 +226,7 @@ def render_dashboard(path: str | Path) -> None:
         st.info("저장된 실행 기록이 없습니다. 먼저 합성 데모 또는 모의매매 엔진을 실행하세요.")
     if view["synthetic"]:
         st.warning("합성 데이터 데모입니다. 실제 시장 수익이나 실제 체결을 나타내지 않습니다.")
-    st.caption(f"환경: {view['environment']} · 저장소: {data.backend.upper()} · 실제 주문 비활성 · 마지막 수신: {view['last_event']}")
+    st.caption(f"환경: {view['environment']} · 저장소: {data.backend.upper()} · 화면은 읽기 전용 · 마지막 수신: {view['last_event']}")
     metrics = st.columns(5)
     account = view["account"]
     metrics[0].metric("계좌 평가금액", usd(account.get("equity")))
@@ -296,7 +300,7 @@ def render_dashboard(path: str | Path) -> None:
                  "상태": STATUS_NAMES.get(str(row.get("status", "")).lower(), row.get("status", "")), "금액": usd(row.get("amount")),
                  "수량": str(row.get("qty", "")), "체결 수량": str(row.get("filled_qty", "")), "사유": row.get("reason", ""),
                  "생성 시각": timestamp(row.get("created_at"))} for row in data.tables["orders"]])
-        with st.expander("모의 체결 기록"):
+        with st.expander("체결 기록"):
             _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
                      "체결 ID": row.get("id", "")} for row in data.tables["executions"]])
@@ -317,8 +321,8 @@ def main() -> None:
     st.title("SessionQuant")
     st.caption("S&P 500 · 시장 흐름, 검증된 뉴스와 위험 예산으로 운영하는 장중 모의매매")
     with st.sidebar:
-        st.subheader("로컬 Paper Trading")
-        st.info("실제 주문 비활성")
+        st.subheader("로컬 거래 기록 조회")
+        st.info("조회 전용 · 주문 버튼 없음")
         refresh = st.toggle("자동 갱신 · 5초", value=True)
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
