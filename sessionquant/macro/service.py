@@ -111,7 +111,9 @@ class NewsPipeline:
         if self._last_fred_day != now.date().isoformat():
             self._last_fred_day = now.date().isoformat()
             try:
-                for row in await self.fred.fetch(now=now):
+                # 이 파이프라인은 운영 수집 전용이다. 기준일은 FRED의 오늘을 사용한다.
+                # 과거 기준일 조회는 FREDClient.fetch(now=...)로 별도로 요청한다.
+                for row in await self.fred.fetch():
                     self.repo.record("macro_indicators", row)
             except (ValueError, RuntimeError, TypeError, OSError, httpx.HTTPError):
                 issues.append({"provider": "fred", "code": "daily_context_unavailable"})

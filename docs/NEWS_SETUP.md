@@ -157,7 +157,7 @@ FRED는 키 오류에도 HTTP 400을 반환할 수 있다. [공식 오류 설명
 |---|---|
 | `invalid_api_key_format` | FRED API Keys에서 발급한 키 전체를 입력했는지, 공백·따옴표 포함 여부 |
 | `api_key_rejected` | 등록된 FRED 키인지 확인하고 `.env`의 `FRED_API_KEY` 수정 |
-| `invalid_realtime_window` | PC 날짜·시간 및 기준일 요청 확인 |
+| `invalid_realtime_window` | 프로젝트 업데이트 후 재검사. 과거 조회라면 지정 기준일과 PC 날짜·시간 확인 |
 | `invalid_series_id` | 요청 시리즈의 제공 여부 |
 | `request_rejected` | HTTP 상태와 요청·서버 상태 추가 확인 |
 
@@ -172,3 +172,18 @@ FRED는 키 오류에도 HTTP 400을 반환할 수 있다. [공식 오류 설명
 RSS는 `text/xml` 응답도 수신하도록 요청한다. 공식 피드·GDELT의 결과는 `ok`·`partial`·`unavailable`로 구분하고 실패 항목에 `http_status` 또는 `error_type`을 표시한다. HTML 오류 페이지를 유효한 빈 RSS로 처리하지 않는다. 공급자가 403·503을 반환하거나 연결이 지연될 수 있으므로 수정 후에도 사용자 PC에서 재검사한다. GDELT의 `unavailable`과 성공한 검색의 0건은 다르다.
 
 `company_rss_count: 0`과 `rss: not_configured`는 위의 기업별 `companies`에 피드를 등록하지 않았다는 뜻이다. Fed 등 공식 기관 RSS와 별도로 관리하며 자동으로 임의의 기업 피드를 추가하지 않는다. Alpaca의 일부 지원하지 않는 태그 생략 메시지는 다른 유효한 티커와 기사 수집이 성공했다면 수집 중단 오류가 아니다.
+
+
+### FRED 운영 조회 기준일
+
+운영 수집과 연결 검사는 `realtime_start`·`realtime_end`를 생략하여 FRED 서버의 기본 오늘을 사용한다. 한국·UTC 날짜를 강제로 보내 FRED 쪽에서 미래 기준일로 거부하는 문제를 피한다. [공식 기준일 설명](https://fred.stlouisfed.org/docs/api/fred/realtime_period.html)을 따른다.
+
+DB에는 UTC `received_at`, 응답의 `realtime_start`·`realtime_end`, `query_mode: provider_today`를 구분해 저장한다. 자료는 여전히 일별 보조 지표다. 운영 모드 변경으로 과거 날짜 조회를 최신 수정치로 대체하지 않는다. `FREDClient.fetch(now=지정시각)`은 기존의 지정 날짜를 요청하며 `query_mode: explicit_asof`, `requested_asof`를 기록하고, 해당 요청이 거부되면 최신 자료로 재시도하지 않는다.
+
+업데이트 후 다음 명령으로 재검사한다. 기존 키는 유지한다.
+
+```powershell
+.\venv\Scripts\python.exe -m sessionquant check-news --connect --provider fred
+```
+
+성공하면 `status: ok`, `query_mode: provider_today`, 시리즈 목록과 FRED가 반환한 `realtime_dates`가 표시된다. 사용자 PC의 실제 키로 이 결과를 확인해야 연결 성공이 확정된다.

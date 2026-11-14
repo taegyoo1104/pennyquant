@@ -43,7 +43,8 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
                 if not os.getenv('FRED_API_KEY'): raise ValueError('missing_key')
                 client=FREDClient(); clients.append(client)
                 rows=await client.fetch()
-                result={'status':'ok','series':[r['series'] for r in rows],'auxiliary_only':True}
+                result={'status':'ok','series':[r['series'] for r in rows],'auxiliary_only':True,
+                    'query_mode':'provider_today','realtime_dates':sorted({r['realtime_start'] for r in rows if r.get('realtime_start')})}
             elif name=='alpaca':
                 if not os.getenv('APCA_API_KEY_ID') or not os.getenv('APCA_API_SECRET_KEY'): raise ValueError('missing_key')
                 from .collectors.alpaca_news import AlpacaNewsClient

@@ -50,7 +50,7 @@ class FREDRequestError(RuntimeError):
             hint = "FRED My Account의 API Keys에서 발급한 키를 확인하고 .env의 FRED_API_KEY를 수정하세요."
         elif "realtime_start" in message or "realtime_end" in message:
             self.code = "invalid_realtime_window"
-            hint = "PC 날짜·시간과 FRED 기준일 요청을 확인하세요. 임의로 최신 데이터로 대체하지 않습니다."
+            hint = "PC 날짜·시간과 FRED 기준일 요청을 확인하세요. 과거 조회는 지정일을 유지하며 최신 데이터로 재시도하지 않습니다."
         elif "series_id" in message:
             self.code = "invalid_series_id"
             hint = "FRED 시리즈 식별자와 제공 여부를 확인하세요."
@@ -146,17 +146,24 @@ class FREDClient:
     async def fetch(self, *, now: datetime | None = None) -> list[dict]:
         if not self.api_key:
             raise CapabilityUnavailable("FRED_API_KEY 설정이 필요합니다. FRED 자료는 일별 참고 데이터입니다")
+        # 운영 조회는 공급자의 기본 '오늘'을 사용한다. UTC 날짜를 강제하면
+        # 공급자에게 아직 오지 않은 날짜가 되어 400 오류가 발생할 수 있다.
+        # now를 명시한 과거 조회에는 지정 기준일을 유지하며 최신 값으로 재시도하지 않는다.
+        explicit_asof = now is not None
         now = utc(now or datetime.now(timezone.utc))
         values = []
         for series in self.SERIES:
+            params = {"api_key": self.api_key, "series_id": series, "file_type": "json",
+                      "sort_order": "desc", "limit": 10}
+            if explicit_asof:
+                params.update(realtime_start=now.date().isoformat(), realtime_end=now.date().isoformat())
             try:
                 response = await get_readonly(self.client, "https://api.stlouisfed.org/fred/series/observations",
-                    limiter=self.limiter, params={"api_key": self.api_key, "series_id": series, "file_type": "json",
-                                                 "sort_order": "desc", "limit": 10,
-                                                 "realtime_start": now.date().isoformat(), "realtime_end": now.date().isoformat()})
+                    limiter=self.limiter, params=params)
             except httpx.HTTPStatusError as exc:
                 raise FREDRequestError(exc.response) from None
-            for item in response.json().get("observations", []):
+            body = response.json()
+            for item in body.get("observations", []):
                 if item.get("value") == "." or item.get("date", "9999") > now.date().isoformat():
                     continue
                 from decimal import Decimal, InvalidOperation
@@ -170,7 +177,10 @@ class FREDClient:
                     "observation_date": item["date"], "received_at": now.isoformat(), "value": str(value),
                     "units": "percent" if series in {"DGS2", "DGS10"} else "usd_per_barrel",
                     "frequency": "daily", "real_time": False, "auxiliary_only": True,
-                    "realtime_start": item.get("realtime_start"), "realtime_end": item.get("realtime_end")})
+                    "realtime_start": item.get("realtime_start", body.get("realtime_start")),
+                    "realtime_end": item.get("realtime_end", body.get("realtime_end")),
+                    "query_mode": "explicit_asof" if explicit_asof else "provider_today",
+                    "requested_asof": now.date().isoformat() if explicit_asof else None})
                 break
         return values
 
