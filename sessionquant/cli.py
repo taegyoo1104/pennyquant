@@ -29,6 +29,13 @@ def parser():
     account.add_argument("--port",type=int,default=8502)
     account.add_argument("--no-dashboard",action="store_true")
     account.add_argument("--max-polls",type=int)
+    news_setup=sub.add_parser("setup-news",help="OpenAI·FRED·Alpaca·SEC 접속 설정을 한 번 저장")
+    news_setup.add_argument("--from-current",action="store_true")
+    news_check=sub.add_parser("check-news",help="뉴스 키·소스·모델 설정 점검; 기본은 연결하지 않음")
+    news_check.add_argument("--config",type=Path,default=Path("config/sessionquant.yaml"))
+    news_check.add_argument("--connect",action="store_true",help="주문·LLM 생성 없이 API 읽기 연결 검사")
+    news_check.add_argument("--provider",choices=("all","openai","fred","alpaca","sec","rss","official","treasury","gdelt"),default="all")
+    news_check.add_argument("--symbol",default="AAPL")
     setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
     setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
@@ -103,7 +110,13 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == "run-account":
+        if args.command == "setup-news":
+            from .local_env import setup_local_env
+            setup_local_env(from_current=args.from_current,news_only=True)
+        elif args.command == "check-news":
+            from .news_setup import check_news
+            print(json.dumps(asyncio.run(check_news(args.config,connect=args.connect,provider=args.provider,symbol=args.symbol)),ensure_ascii=False,indent=2))
+        elif args.command == "run-account":
             from .account_monitor import run_account_monitor
             return asyncio.run(run_account_monitor(db_path=args.db,interval=args.interval,port=args.port,
                 no_dashboard=args.no_dashboard,max_polls=args.max_polls))

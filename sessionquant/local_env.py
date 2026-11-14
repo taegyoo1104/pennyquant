@@ -55,7 +55,7 @@ def save_local_env(values: dict[str,str],*,path: Path | None = None) -> Path:
     return target
 
 
-def setup_local_env(*,from_current=False,path: Path | None = None,input_fn=None,secret_fn=None) -> Path:
+def setup_local_env(*,from_current=False,path: Path | None = None,input_fn=None,secret_fn=None,news_only=False) -> Path:
     """현재 연결값을 저장하거나 로컬 터미널에서 한 번 입력받는다."""
     input_fn=input_fn or input
     secret_fn=secret_fn or getpass.getpass
@@ -67,14 +67,20 @@ def setup_local_env(*,from_current=False,path: Path | None = None,input_fn=None,
     for key in DEFAULTS:
         if key.startswith('SQ_') and key not in os.environ and 'PQ_'+key[3:] in values:
             values[key]=values['PQ_'+key[3:]]
+    prompts=(
+        ('OPENAI_API_KEY','OpenAI API 키(LLM 분석)',True),
+        ('FRED_API_KEY','FRED API 키(일별 거시 참고자료, 선택)',True),
+        ('APCA_API_KEY_ID','Alpaca API Key ID(선택)',True),
+        ('APCA_API_SECRET_KEY','Alpaca API Secret Key(선택)',True),
+        ('SEC_USER_AGENT','SEC 식별자: ASCII 프로젝트명과 실제 연락 이메일',False)) if news_only else (
+        ('TOSS_CLIENT_ID','토스 클라이언트 ID',True),
+        ('TOSS_CLIENT_SECRET','토스 클라이언트 시크릿',True),
+        ('TOSS_ACCOUNT_SEQ','토스 계좌 순번(선택)',False),
+        ('SQ_MYSQL_HOST','MySQL 호스트',False),('SQ_MYSQL_PORT','MySQL 포트',False),
+        ('SQ_MYSQL_DATABASE','MySQL DB 이름',False),('SQ_MYSQL_USER','MySQL 사용자',False),
+        ('SQ_MYSQL_PASSWORD','MySQL 전용 계정 비밀번호',True))
     if not from_current:
-        for key,label,secret in (
-            ('TOSS_CLIENT_ID','토스 클라이언트 ID',True),
-            ('TOSS_CLIENT_SECRET','토스 클라이언트 시크릿',True),
-            ('TOSS_ACCOUNT_SEQ','토스 계좌 순번(선택)',False),
-            ('SQ_MYSQL_HOST','MySQL 호스트',False),('SQ_MYSQL_PORT','MySQL 포트',False),
-            ('SQ_MYSQL_DATABASE','MySQL DB 이름',False),('SQ_MYSQL_USER','MySQL 사용자',False),
-            ('SQ_MYSQL_PASSWORD','MySQL 전용 계정 비밀번호',True)):
+        for key,label,secret in prompts:
             existing=values.get(key)
             suffix=' (기존 값 유지: Enter)' if existing and secret else f' [{existing}]' if existing else ' (미설정, 선택 항목은 Enter)'
             value=(secret_fn if secret else input_fn)(label+suffix+': ')
@@ -82,9 +88,10 @@ def setup_local_env(*,from_current=False,path: Path | None = None,input_fn=None,
     # 최근 실거래 화면을 열었다는 이유로 다음 기본 DB 조회 환경을 실거래로 저장하지 않는다.
     values['SQ_ENVIRONMENT']='PAPER_LOCAL'
     target=save_local_env(values,path=path)
-    configured=[key for key in ('TOSS_CLIENT_ID','TOSS_CLIENT_SECRET','SQ_MYSQL_PASSWORD') if values.get(key)]
+    required=('OPENAI_API_KEY','SEC_USER_AGENT') if news_only else ('TOSS_CLIENT_ID','TOSS_CLIENT_SECRET','SQ_MYSQL_PASSWORD')
+    configured=[key for key in required if values.get(key)]
     print(f'로컬 접속 설정을 저장했습니다: {target}')
-    print(f'필수 비밀정보 저장: {len(configured)}/3개. 실제 값은 출력하지 않습니다.')
-    if len(configured)<3: print('누락된 값은 setup-env를 실행해 한 번 입력하세요.')
+    print(f'필수 설정 저장: {len(configured)}/{len(required)}개. 실제 값은 출력하지 않습니다.')
+    if len(configured)<len(required): print('누락된 값은 setup-news 또는 setup-env를 실행해 한 번 입력하세요.')
     print('다음 실행부터 자동으로 읽습니다. 실주문 활성화는 저장하지 않습니다.')
     return target
