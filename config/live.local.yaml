@@ -1,0 +1,19 @@
+# Phase 5의 첫 소액 주문 검증. 일반 전략 자동 실거래 전용 설정이 아니다.
+# 실행만으로 실제 주문하지 않는다. --execute와 계좌 확인이 매번 필요하다.
+environment: LIVE_LOCAL
+db_path: ../data/sessionquant-live-local.db
+universe_path: ../data/sp500-universe.json
+symbol: AAPL
+buy_amount: '1.00'
+max_buy_amount: '5.00'
+strategy_cash: '100.00'
+stop_pct: '0.03'
+target_pct: '0.10'
+daily_loss_pct: '0.02'
+risk_per_symbol: '0.0075'
+max_hold_seconds: 600
+poll_seconds: 5
+# 아래 항목은 본인 계좌에서 확인한 뒤 채운다. null을 임의의 값으로 바꾸지 않는다.
+minimum_amount: null
+eligibility_checked_at: null
+eligibility_evidence: ''

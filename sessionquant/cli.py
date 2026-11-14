@@ -1,4 +1,4 @@
-"""SessionQuant의 한국어 명령행. Phase 0~4에서는 실제 주문을 허용하지 않는다."""
+"""한국어 명령행. 소수점 실주문 검증은 별도 live-local에서 명시적으로 활성화한다."""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +7,7 @@ from importlib.metadata import version
 import json
 from pathlib import Path
 import sys
+import httpx
 
 from .legacy_cli import metadata
 
@@ -14,6 +15,12 @@ from .legacy_cli import metadata
 def parser():
     root = argparse.ArgumentParser(prog="sessionquant", description="S&P 500 장중 전략·소수점 모의매매·MySQL·뉴스 위험 분석")
     sub = root.add_subparsers(dest="command", required=True)
+    live=sub.add_parser("live-local", help="Phase 5 소액 검증; 기본은 주문 없는 계좌 검사")
+    live.add_argument("--config",type=Path,default=Path("config/live.local.yaml"))
+    live.add_argument("--execute",action="store_true",help="실제 시장가 매수·매도 검증 활성화")
+    live.add_argument("--confirm-account-seq",type=int)
+    live.add_argument("--acknowledge-live-orders",action="store_true")
+    live.add_argument("--max-polls",type=int)
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
     run = sub.add_parser("run", help="로컬 MySQL과 토스 읽기 전용 시세로 모의 운영")
     run.add_argument("--config", type=Path, default=Path("config/sessionquant.yaml"), help="운영 설정 YAML")
@@ -69,7 +76,7 @@ def parser():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if any(x in {"--live", "--acknowledge-live-orders"} for x in argv):
+    if (not argv or argv[0]!="live-local") and any(x in {"--live", "--acknowledge-live-orders"} for x in argv):
         print("SessionQuant Phase 0~4에서는 실제 주문을 실행할 수 없습니다.", file=sys.stderr)
         return 2
     # 기존 자료 재생과 수집 명령은 식별자·장부 형식을 바꾸지 않고 유지한다.
@@ -80,8 +87,13 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == "doctor":
-            print(json.dumps({"project": "SessionQuant", "version": "2.0.0", "python": sys.version.split()[0],
+        if args.command == "live-local":
+            from .live.runtime import live_local
+            result=asyncio.run(live_local(args.config,execute=args.execute,confirm_account_seq=args.confirm_account_seq,
+                acknowledge=args.acknowledge_live_orders,max_polls=args.max_polls))
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+        elif args.command == "doctor":
+            print(json.dumps({"project": "SessionQuant", "version": "2.1.0", "python": sys.version.split()[0],
                 "environment": "PAPER_LOCAL", "live_orders_enabled": False,
                 "packages": {p: version(p) for p in ("httpx", "streamlit", "exchange-calendars", "PyMySQL")}},
                 ensure_ascii=False, indent=2))
@@ -161,11 +173,16 @@ def main(argv=None):
                 "--server.address", "127.0.0.1", "--server.port", str(args.port), "--", "--db", str(args.db)],
                 env=dashboard_environment(database=True))
         return 0
+    except httpx.HTTPError as exc:
+        status=getattr(getattr(exc,"response",None),"status_code",None)
+        print(f"SessionQuant: 토스/API 연결 또는 응답 실패 (HTTP {status or '미확인'}). 실제 주문·잔량은 앱에서 확인하세요.",file=sys.stderr)
+        return 2
     except (ValueError, RuntimeError, OSError, ImportError, KeyError, TypeError) as exc:
         print(f"SessionQuant: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print("운영을 중지했습니다. 저장된 주문·포지션 상태는 다음 실행에서 복구됩니다.", file=sys.stderr)
+        message="실거래 검증 중지: 주문 취소·청산 완료를 의미하지 않습니다. 토스 앱에서 미체결·잔량을 확인하세요." if args.command=="live-local" else "운영을 중지했습니다. 저장된 주문·포지션 상태는 다음 실행에서 복구됩니다."
+        print(message, file=sys.stderr)
         return 130
 
 

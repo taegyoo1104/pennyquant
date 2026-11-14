@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sessionquant"
-version = "2.0.0"
+version = "2.1.0"
 description = "S&P 500 장중 매매 연구·모의투자·위험 관리 시스템"
 requires-python = ">=3.12"
 dependencies = [
