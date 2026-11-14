@@ -178,6 +178,11 @@ class PaperBroker:
             if intent.created_at > aware(quote.timestamp) or intent.created_at > now:
                 continue
             side = intent.side
+            if side == 'buy':
+                from ..session_window import permits_new_entry
+                if not permits_new_entry(now,min_entry_to_exit_minutes=self.settings.min_entry_to_exit_minutes):
+                    self.cancel_order(order.client_id)
+                    continue
             price = ask * (1 + self.settings.slippage_rate) if side == 'buy' else bid * (1 - self.settings.slippage_rate)
             if (side == 'buy' and price > intent.limit_price) or (side == 'sell' and price < intent.limit_price):
                 continue

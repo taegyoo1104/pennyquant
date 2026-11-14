@@ -17,3 +17,6 @@ poll_seconds: 5
 minimum_amount: null
 eligibility_checked_at: null
 eligibility_evidence: ''
+
+# 청산 시작까지 최소 30분 이상 남아야 신규 진입한다. 기존 13:30 마감과 더 이른 값을 적용한다.
+min_entry_to_exit_minutes: 30

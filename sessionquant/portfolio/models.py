@@ -68,6 +68,7 @@ class PortfolioSettings:
     allow_adds: bool = True
     max_quote_age_seconds: int = 10
     order_ttl_seconds: int = 60
+    min_entry_to_exit_minutes: int = 30
 
     def __post_init__(self):
         for item in fields(self):
@@ -90,6 +91,8 @@ class PortfolioSettings:
             raise ValueError('최대 보유 종목은 5개, 권장 보유 수는 최대 보유 수 이하여야 합니다.')
         if not 0 <= self.max_adds <= 1 or type(self.allow_adds) is not bool:
             raise ValueError('추가매수는 최대 1회만 설정할 수 있습니다.')
+        if type(self.min_entry_to_exit_minutes) is not int or self.min_entry_to_exit_minutes<30:
+            raise ValueError('청산 전 진입 여유는 최소 30분이어야 합니다.')
         if min(self.max_quote_age_seconds, self.order_ttl_seconds) <= 0:
             raise ValueError('유효 기간은 양수여야 합니다.')
 

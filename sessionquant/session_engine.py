@@ -32,7 +32,8 @@ def event_time(raw: dict) -> datetime:
 class SessionEngine:
     def __init__(self, repository: Repository, universe: UniverseStore, *, strategy: str = "pullback",
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
-                 synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True):
+                 synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None):
+        self.control_state=control_state
         self.repo, self.universe = repository, universe
         self.strategy, self.synthetic, self.use_news = strategy, synthetic, use_news
         self.use_market_filter = use_market_filter
@@ -205,7 +206,31 @@ class SessionEngine:
                     self.cursor = cursor
                 self.broker.roll_session(now)
                 self.broker.expire_orders(now)
-                manual_halt = self.repo.get_control("manual_halt", False) is True
+                if self.control_state is not None:
+                    from .trading_controls import pending,acknowledge
+                    stopped_this_cycle=False
+                    for request in pending(self.repo,self.control_state,now):
+                        action=request['action']
+                        if action=='stop_all':
+                            self.control_state.update(running=False,draining=True)
+                            stopped_this_cycle=True
+                        elif action=='start':
+                            if stopped_this_cycle or (self.control_state['draining'] and (self.broker.positions or self.broker.get_open_orders())):
+                                acknowledge(self.repo,request,ok=False,message='종료·청산 중에는 시작할 수 없습니다.'); continue
+                            self.control_state.update(running=True,draining=False)
+                        elif action=='sell_symbol':
+                            symbol=request['symbol']; position=self.broker.positions.get(symbol)
+                            if not position:
+                                acknowledge(self.repo,request,ok=False,message='현재 관리하는 보유 종목이 아닙니다.'); continue
+                            self.broker.exit_intents.setdefault(symbol,{'reason':'manual_market_sell',
+                                'opened_at':position.opened_at.isoformat(),'requested_at':now.isoformat(),'attempt':0})
+                        acknowledge(self.repo,request)
+                    if self.control_state['draining']:
+                        for symbol,position in self.broker.positions.items():
+                            self.broker.exit_intents.setdefault(symbol,{'reason':'operator_stop_all',
+                                'opened_at':position.opened_at.isoformat(),'requested_at':now.isoformat(),'attempt':0})
+                manual_halt = (self.repo.get_control("manual_halt", False) is True or
+                    (self.control_state is not None and not self.control_state['running']))
                 if manual_halt:
                     for order in self.broker.get_open_orders():
                         if order.intent.side == "buy":
@@ -246,6 +271,9 @@ class SessionEngine:
                         self.repo.record("order_intents", serialize(allocation.intent))
                         self.broker.submit_order(allocation.intent)
                         self.consumed_signals.add(signal.id)
+                if self.control_state is not None:
+                    from .trading_controls import heartbeat
+                    heartbeat(self.repo,self.control_state,now=now,flat=not self.broker.positions and not self.broker.get_open_orders())
                 changed = self._last_summary != self.broker.to_state()
                 heartbeat_due = self._last_persist_at is None or (now - self._last_persist_at).total_seconds() >= 30
                 if events or changed or heartbeat_due or controls:

@@ -229,3 +229,12 @@ def test_cutoff_prevents_pending_buy_fill_and_overnight_alert_survives_restart()
     next_day=datetime(2026,11,16,15,0,tzinfo=timezone.utc)
     result=SessionExitManager(restored).tick(next_day,{'AAPL':quote(next_day)})
     assert result['orders'] and any(a['code']=='overnight_position' for a in result['alerts'])
+
+@pytest.mark.parametrize('hour,minute,buffer',[(18,30,30),(17,40,120)])
+def test_buy_pending_across_entry_cutoff_is_cancelled_instead_of_filled(hour,minute,buffer):
+    broker=PaperBroker(PortfolioSettings(min_entry_to_exit_minutes=buffer))
+    cutoff=NOW.replace(hour=hour,minute=minute)
+    order=buy(broker,now=cutoff-timedelta(seconds=1))
+    assert broker.process_quote(quote(cutoff))==[]
+    assert order.status=='cancelled' and not broker.positions
+    assert broker.cash==D('100') and broker.reserved_cash==0

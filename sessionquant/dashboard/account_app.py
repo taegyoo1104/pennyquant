@@ -57,6 +57,16 @@ def render(path):
         (columns[3],'원화 매수 가능 금액',cash.get('KRW'),'KRW')]:
         col.metric(label,money(value,currency))
     st.caption('매수 가능 금액은 예수금·총자산과 다를 수 있습니다. 원화와 달러를 합산하거나 미제공 값을 0으로 만들지 않습니다.')
+    control_repo=None
+    try:
+        from sessionquant.database.repository import Repository
+        from sessionquant.trading_controls import render_controls
+        control_repo=Repository(path)
+        render_controls(control_repo,positions=snapshot['items'])
+    except Exception:
+        st.caption('거래 제어 상태를 확인할 수 없습니다.')
+    finally:
+        if control_repo: control_repo.close()
     st.subheader('실제 보유 종목')
     rows=[]
     for row in snapshot['items']:
@@ -82,7 +92,7 @@ def main():
     args,_=parser.parse_known_args()
     st.set_page_config(page_title='SessionQuant 실제 계좌',layout='wide')
     st.title('내 실제 토스증권 계좌')
-    st.info('조회 전용입니다. 이 실행 경로에는 매수·매도·취소 기능이 없습니다.')
+    st.info('실제 계좌 조회 화면입니다. 활성화된 거래 엔진이 연결되면 매매 제어 요청 버튼을 표시합니다.')
     @st.fragment(run_every='5s')
     def monitor(): render(Path(args.db))
     monitor()

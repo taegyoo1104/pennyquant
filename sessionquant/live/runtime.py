@@ -8,6 +8,8 @@ import asyncio
 import os
 from uuid import uuid4
 import yaml
+import subprocess
+import sys
 
 from ..collectors.common import CapabilityUnavailable
 from ..collectors.toss_market import TossMarketClient
@@ -21,13 +23,16 @@ from .broker import FractionalLiveBroker,FractionalRequest,TERMINAL
 
 FIELDS={'environment','db_path','universe_path','symbol','buy_amount','max_buy_amount','strategy_cash',
         'stop_pct','target_pct','daily_loss_pct','risk_per_symbol','max_hold_seconds','poll_seconds',
-        'minimum_amount','eligibility_checked_at','eligibility_evidence'}
+        'minimum_amount','eligibility_checked_at','eligibility_evidence','min_entry_to_exit_minutes'}
 
 def load_live_config(path):
     path=Path(path).resolve(); data=yaml.safe_load(path.read_text(encoding='utf-8'))
+    if isinstance(data,dict): data.setdefault("min_entry_to_exit_minutes",30)
     if not isinstance(data,dict) or set(data)!=FIELDS or data['environment']!='LIVE_LOCAL':
         raise ValueError('config/live.local.yaml의 LIVE_LOCAL 설정 항목을 확인하세요.')
     symbol_valid(data['symbol'])
+    if type(data['min_entry_to_exit_minutes']) is not int or data['min_entry_to_exit_minutes']<30:
+        raise ValueError('청산 전 진입 여유는 최소 30분입니다.')
     for name in ('buy_amount','max_buy_amount','strategy_cash','stop_pct','target_pct','daily_loss_pct','risk_per_symbol'):
         data[name]=decimal(data[name],name,positive=True)
     if not data['buy_amount']<=data['max_buy_amount']<=Decimal('25'):
@@ -53,7 +58,8 @@ def entry_blockers(config,now):
     if not isinstance(config['eligibility_evidence'],str) or len(config['eligibility_evidence'].strip())<10:
         issues.append('계좌 자격 확인 근거 필요')
     bounds=session_bounds(now)
-    if not bounds or not bounds[0]+timedelta(minutes=75)<=now<bounds[1]-timedelta(hours=2,minutes=30):
+    from ..session_window import permits_new_entry
+    if not permits_new_entry(now,min_entry_to_exit_minutes=config.get('min_entry_to_exit_minutes',30)):
         issues.append('신규 진입 시간(정규장 10:45~13:30)이 아님')
     if not UniverseStore(config['universe_path']).contains(config['symbol'],now): issues.append('최신 S&P 500 편입 미확인')
     # 최소 수수료·가격 급변 여유를 포함한 첫 실험의 보수적 예상 손실 한도.
@@ -64,6 +70,7 @@ def entry_blockers(config,now):
 def net_state(broker,bid=None):
     invested=proceeds=fees=Decimal(0); missing=False
     for row in broker.orders.values():
+        if row.get('ownership')=='external': continue
         amount=decimal(row.get('filled_amount','0'))
         if row['request']['side']=='BUY': invested+=amount
         else: proceeds+=amount
@@ -73,15 +80,22 @@ def net_state(broker,bid=None):
     net=proceeds-invested-fees+(qty*bid if bid is not None else Decimal(0))
     return {'invested':invested,'proceeds':proceeds,'fees':fees,'qty':qty,'net_pnl':net,'fees_pending':missing}
 
-async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknowledge=False,max_polls=None):
+async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknowledge=False,max_polls=None,dashboard=False,port=8502):
     config=load_live_config(config_path)
+    dashboard=bool(dashboard or execute)
+    if dashboard:
+        import socket
+        if type(port) is not int or not 1024<=port<=65535: raise ValueError("대시보드 포트 범위 오류")
+        try:
+            with socket.socket() as probe: probe.bind(("127.0.0.1",port))
+        except OSError: raise ValueError("대시보드 포트가 사용 중입니다. 기존 화면을 종료하거나 다른 포트를 지정하세요.") from None
     if max_polls is not None and (type(max_polls) is not int or max_polls<1): raise ValueError("max_polls는 1 이상이어야 합니다.")
     if execute and (acknowledge is not True or confirm_account_seq is None):
         raise ValueError('실주문은 --execute --acknowledge-live-orders --confirm-account-seq 값이 필요합니다.')
     os.environ['SQ_DB_BACKEND']='mysql'; os.environ['SQ_ENVIRONMENT']='LIVE_LOCAL'
     if 'paper' in config['db_path'].stem.lower() or os.getenv('SQ_DB_NAMESPACE') or os.getenv('PQ_DB_NAMESPACE'):
         raise ValueError('실거래 전용 DB 경로를 사용하고 SQ_DB_NAMESPACE 수동 덮어쓰기를 해제하세요.')
-    market=TossMarketClient(); broker=None
+    market=TossMarketClient(); broker=None; display=None
     try:
         accounts=await market.accounts()
         selectable=[a for a in accounts if a.get('accountType')=='BROKERAGE']
@@ -102,6 +116,7 @@ async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknow
                 raise ValueError('모의/기존 전략 DB를 소수점 실거래 테스트에 재사용할 수 없습니다.')
             repo.set_control('runtime_kind','fractional_live_test')
             broker=FractionalLiveBroker(market,repo,armed=execute and acknowledge)
+            broker.min_entry_to_exit_minutes=config['min_entry_to_exit_minutes']
             def persist_residual():
                 if broker.failed: return
                 try:
@@ -126,34 +141,116 @@ async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknow
                 'commission_records':[{k:v for k,v in x.items() if k in {'marketCountry','commissionRate','startDate','endDate'}}
                     for x in commissions if x.get('marketCountry')=='US'],'actual_order_permissions_verified':False}
             repo.set_control('live_preflight',report)
-            if not execute: return report
+            if not execute and not dashboard: return report
             # 복구 중 매도에는 신규 매수의 자격 만료를 적용하지 않는다.
-            if not broker.orders and blockers: raise CapabilityUnavailable(' / '.join(blockers))
+            if not dashboard and not broker.orders and blockers: raise CapabilityUnavailable(' / '.join(blockers))
             fingerprint={k:str(config[k]) for k in ('symbol','buy_amount','max_buy_amount','strategy_cash','stop_pct','target_pct','daily_loss_pct')}
             previous=repo.get_control('live_test_settings')
             if previous is not None and previous!=fingerprint: raise ValueError('저장된 실거래 위험 설정과 현재 설정이 다릅니다.')
             repo.set_control('live_test_settings',fingerprint)
+            from ..trading_controls import begin_session,pending,acknowledge as ack,heartbeat
+            control=begin_session(repo,mode='live',account_seq=market.account_seq,now=datetime.now(timezone.utc),armed=execute and acknowledge)
+            from ..trading_controls import finish_session
+            stack.callback(finish_session,repo,control)
+            manual_exits=set(broker.state.get('manual_exit_symbols',[]))
+            if dashboard:
+                from ..notifications import dashboard_environment
+                app=Path(__file__).resolve().parents[1]/'dashboard'/'account_app.py'
+                display=subprocess.Popen([sys.executable,'-m','streamlit','run',str(app),'--server.address','127.0.0.1',
+                    '--server.port',str(port),'--server.headless','true','--','--db',str(config['db_path'])],env=dashboard_environment(database=True))
+                print(f'매매 제어 화면: http://127.0.0.1:{port} · 시작 대기',flush=True)
             notifier=DesktopNotifier()
-            polls=0; need_exit=bool(broker.owned_quantities())
+            polls=0; need_exit=broker.state.get('system_exit_requested',False)
             while max_polls is None or polls<max_polls:
                 polls+=1; now=datetime.now(timezone.utc)
                 if not await broker.reconcile(): raise CapabilityUnavailable('실거래 대사 불일치. 자동 주문 중단.')
+                from ..account_monitor import fetch_account_snapshot
+                snapshot=await fetch_account_snapshot(market)
+                repo.set_control('actual_account_snapshot',snapshot)
+                repo.set_control('account_monitor_status',{'status':'ok','updated_at':snapshot['received_at']})
+                stopped=False
+                for request in pending(repo,control,now):
+                    action=request['action']
+                    if not execute:
+                        ack(repo,request,ok=False,message='이번 실행은 실거래 권한이 없습니다.'); continue
+                    if action=='stop_all':
+                        control.update(running=False,draining=True); stopped=True; need_exit=True
+                        broker.state['system_exit_requested']=True; broker._save()
+                    elif action=='start':
+                        current_blockers=entry_blockers(config,now)
+                        if config['symbol'] in broker.positions or len(broker.positions)>=5: current_blockers.append('보유·노출 제한')
+                        if config['buy_amount']+Decimal('.10')>broker.cash: current_blockers.append('현금 부족')
+                        if stopped or control.get('completed') or current_blockers or (control['draining'] and (broker.owned_quantities() or any(i['status'] not in TERMINAL for i in broker.orders.values()))):
+                            ack(repo,request,ok=False,message=' / '.join(current_blockers) or '종료·청산 중이거나 첫 소액 검증이 완료됐습니다.'); continue
+                        control.update(running=True,draining=False)
+                        need_exit=False
+                        broker.state['system_exit_requested']=False; broker._save()
+                    elif action=='sell_symbol':
+                        bounds=session_bounds(now)
+                        if not bounds or not bounds[0]<=now<bounds[1]-timedelta(hours=1):
+                            ack(repo,request,ok=False,message='소수점 주문 접수 시간이 아닙니다.'); continue
+                        symbol=request['symbol']
+                        if symbol not in broker.positions:
+                            ack(repo,request,ok=False,message='현재 보유 수량이 없습니다.'); continue
+                        manual_exits.add(symbol)
+                        broker.state['manual_exit_symbols']=sorted(manual_exits); broker._save()
+                    ack(repo,request)
+                if not control['running'] or control['draining']:
+                    for cid,item in list(broker.orders.items()):
+                        if item['request']['side']=='BUY' and item['status'] not in TERMINAL and execute:
+                            await broker.cancel_order(cid)
+                control['pending_manual_sells']=sorted(manual_exits)
+                heartbeat(repo,control,now=datetime.now(timezone.utc),flat=not manual_exits and not broker.owned_quantities() and all(i['status'] in TERMINAL for i in broker.orders.values()))
+                for cid,item in list(broker.orders.items()):
+                    if item['request']['side']=='BUY' and item['request']['symbol'] in manual_exits and item['status'] not in TERMINAL and execute:
+                        await broker.cancel_order(cid)
+                control['pending_manual_sells']=sorted(manual_exits)
+                if not execute:
+                    await asyncio.sleep(config['poll_seconds']); continue
+                for symbol in list(manual_exits):
+                    owned=broker.owned_quantities().get(symbol,Decimal(0)); external=not bool(owned)
+                    quantity=owned or broker.positions.get(symbol,Decimal(0))
+                    active=any(i['request']['symbol']==symbol and i['status'] not in TERMINAL for i in broker.orders.values())
+                    if not quantity and not active:
+                        manual_exits.discard(symbol)
+                        broker.state['manual_exit_symbols']=sorted(manual_exits); broker._save()
+                    if quantity and not active and execute:
+                        try:
+                            await broker.submit_order(FractionalRequest('sqf_'+uuid4().hex,symbol,'SELL',quantity=quantity),
+                                buy_cap=config['max_buy_amount'],external_position=external)
+                        except (ValueError,CapabilityUnavailable):
+                            repo.record('alerts',{'id':'manual-sell-'+symbol,'timestamp':now,'severity':'critical',
+                                'message':symbol+' 매도 요청을 처리하지 못했습니다. 잔량·세션·미체결을 확인하세요.'})
+                if not control['running'] and not broker.owned_quantities():
+                    await asyncio.sleep(config['poll_seconds']); continue
                 quote=await market.quote(config['symbol'],exchange=stock.get('market','UNKNOWN'),tradable=True)
                 bid=decimal(quote.bid); ask=decimal(quote.ask)
                 now=datetime.now(timezone.utc)
                 if not quote.timestamp<=quote.received_at<=now: raise ValueError('호가 시각 오류')
                 if any((now-t).total_seconds()>10 for t in (quote.timestamp,quote.received_at)) or quote.halted or quote.spread_pct>.003:
-                    raise CapabilityUnavailable('최신 양방향 호가·스프레드 확인 실패. 실제 주문 중단.')
+                    control['running']=False
+                    repo.record('alerts',{'id':'stale-trading-quote','timestamp':now,'severity':'critical',
+                        'message':'최신 호가를 확인하지 못해 신규 매수를 중단했습니다. 기존 잔량은 확인을 계속합니다.'})
+                    heartbeat(repo,control,now=now)
+                    await asyncio.sleep(config['poll_seconds']); continue
                 if broker.failed: raise RuntimeError('DB 장애: 실제 주문 중단')
                 state=net_state(broker,bid)
                 repo.record('daily_performance',{'id':now.date().isoformat(),'timestamp':now,'execution_mode':'live',
                     'strategy_allocated_cash':str(config['strategy_cash']),'estimated_net_pnl':str(state['net_pnl']),
                     'fees_pending':state['fees_pending']})
-                if not broker.orders:
+                managed_buys=[i for i in broker.orders.values() if i['request']['side']=='BUY']
+                if not managed_buys:
+                    if not control['running'] or control['draining']:
+                        await asyncio.sleep(config['poll_seconds']); continue
                     if entry_blockers(config,now): raise CapabilityUnavailable('매수 직전 자격 또는 세션 확인 실패')
                     if config['buy_amount']+Decimal('.10')>await broker.get_available_cash(): raise CapabilityUnavailable('현금 부족')
-                    await broker.submit_order(FractionalRequest('sqf_'+uuid4().hex,config['symbol'],'BUY',amount=config['buy_amount']),
-                        buy_cap=config['max_buy_amount'],eligibility_verified=True)
+                    try:
+                        await broker.submit_order(FractionalRequest('sqf_'+uuid4().hex,config['symbol'],'BUY',amount=config['buy_amount']),
+                            buy_cap=config['max_buy_amount'],eligibility_verified=True)
+                    except CapabilityUnavailable as exc:
+                        control['running']=False
+                        repo.record('alerts',{'id':'entry-blocked','timestamp':now,'severity':'warning','message':str(exc)})
+                        heartbeat(repo,control,now=datetime.now(timezone.utc))
                 else:
                     buys=[i for i in broker.orders.values() if i['request']['side']=='BUY']
                     first=utc(buys[0]['created_at']); bounds=session_bounds(now)
@@ -161,13 +258,15 @@ async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknow
                         or state['net_pnl']<=-config['strategy_cash']*config['daily_loss_pct']))
                     profit=state['net_pnl']>=state['invested']*config['target_pct'] and state['invested']>0
                     due=not bounds or now>=bounds[1]-timedelta(hours=1,minutes=20)
-                    need_exit=need_exit or stop or profit or due or (now-first).total_seconds()>=config['max_hold_seconds']
+                    need_exit=need_exit or control['draining'] or stop or profit or due or (now-first).total_seconds()>=config['max_hold_seconds']
+                    if need_exit and not broker.state.get('system_exit_requested'):
+                        broker.state['system_exit_requested']=True; broker._save()
                     if bounds and now>=bounds[1]-timedelta(hours=1,minutes=10) and (state['qty'] or any(i['status'] not in TERMINAL for i in broker.orders.values())):
                         alert={'id':'live-exit-overdue:'+now.date().isoformat(),'timestamp':now,'severity':'critical',
                             'code':'live_exit_incomplete','message':'실거래 당일 청산이 완료되지 않았습니다. 토스 앱의 미체결·잔량을 확인하세요.'}
                         repo.record('alerts',alert); notifier(alert)
                     for cid,item in list(broker.orders.items()):
-                        if item['request']['side']=='BUY' and item['status'] not in TERMINAL and (need_exit or (now-first).total_seconds()>30):
+                        if item['request']['side']=='BUY' and item['status'] not in TERMINAL and (need_exit or entry_blockers(config,now) or (now-first).total_seconds()>30):
                             await broker.cancel_order(cid)
                     # 매수 체결이 불명확한 동안 추가 매도를 제출하지 않는다.
                     buy_pending=any(i['request']['side']=='BUY' and i['status'] not in TERMINAL for i in broker.orders.values())
@@ -178,13 +277,21 @@ async def live_local(config_path,*,execute=False,confirm_account_seq=None,acknow
                         await broker.submit_order(FractionalRequest('sqf_'+uuid4().hex,config['symbol'],'SELL',quantity=state['qty']),
                             buy_cap=config['max_buy_amount'])
                     if not state['qty'] and all(i['status'] in TERMINAL for i in broker.orders.values()):
+                        control.update(running=False,completed=True)
+                        heartbeat(repo,control,now=datetime.now(timezone.utc),flat=True)
+                        if dashboard:
+                            await asyncio.sleep(config['poll_seconds']); continue
                         return {**report,'mode':'live_test_finished','estimated_net_pnl':str(state['net_pnl']),
                             'order_statuses':{cid:i['status'] for cid,i in broker.orders.items()},
                             'actual_order_permissions_verified':any(decimal(i.get('filled_quantity','0'))>0 for i in broker.orders.values()),
                             'fees_pending':state['fees_pending'],'closed':True,'orders':len(broker.orders)}
                 await asyncio.sleep(config['poll_seconds'])
-            return {**report,'mode':'live_test_paused','closed':not bool(broker.owned_quantities()) and all(i['status'] in TERMINAL for i in broker.orders.values()),
+            return {**report,'mode':'live_test_paused','actual_order_permissions_verified':any(decimal(i.get('filled_quantity','0'))>0 for i in broker.orders.values()),'closed':not bool(broker.owned_quantities()) and all(i['status'] in TERMINAL for i in broker.orders.values()),
                 'message':'제한 횟수 종료. 실제 주문·잔량은 계좌와 원장에서 확인하세요.'}
     finally:
+        if display:
+            display.terminate()
+            try: display.wait(timeout=5)
+            except subprocess.TimeoutExpired: display.kill(); display.wait(timeout=5)
         if broker: broker.armed=False
         await market.aclose()

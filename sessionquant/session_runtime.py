@@ -121,8 +121,12 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                 from .macro.service import NewsPipeline
                 news = NewsPipeline(repo, companies=config.companies, settings=LLMSettings.from_dict(config.llm),
                                     include_alpaca=config.include_alpaca)
+            from .trading_controls import begin_session
+            control_state=begin_session(repo,mode="paper")
+            from .trading_controls import finish_session
+            stack.callback(finish_session,repo,control_state)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
-                                   restore=bool(repo.load_state()), risk_provider=news)
+                                   restore=bool(repo.load_state()), risk_provider=news,control_state=control_state)
             for snapshot in universe.snapshots:
                 repo.record("universe_history", snapshot)
             if config.source == "toss":

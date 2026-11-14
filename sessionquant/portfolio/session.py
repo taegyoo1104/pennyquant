@@ -57,10 +57,10 @@ class SessionExitManager:
             closing = aware(cal.session_close(session).to_pydatetime())
         except (ValueError, KeyError, IndexError, RuntimeError, ImportError, TypeError):
             return None
-        deadline = closing - timedelta(hours=1)
-        return SessionSchedule(day.isoformat(), opening, closing, opening + timedelta(minutes=75),
-                               deadline - timedelta(minutes=90), deadline - timedelta(minutes=20),
-                               deadline - timedelta(minutes=15), deadline - timedelta(minutes=10), deadline)
+        from ..session_window import schedule_times
+        times=schedule_times(now,min_entry_to_exit_minutes=self.broker.settings.min_entry_to_exit_minutes)
+        if not times: return None
+        return SessionSchedule(day.isoformat(),**times)
 
     def permits_entry(self, now: datetime) -> bool:
         now = aware(now)

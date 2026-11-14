@@ -187,7 +187,8 @@ async def test_missing_fees_remain_pending_not_final_profit(setup):
     assert net_state(b,Decimal('100'))['fees_pending'] is True
     assert repo.all('executions')[0]['fees_final'] is False
 
-async def test_live_runtime_roundtrip_and_flags_with_mock_account(tmp_path,monkeypatch):
+@pytest.mark.parametrize("execute",[False,True])
+async def test_live_runtime_roundtrip_and_flags_with_mock_account(tmp_path,monkeypatch,execute):
     """실계좌 없이 실제 런타임의 활성화·매수·시간 청산·대사 경로를 연결한다."""
     import yaml
     import sessionquant.live.runtime as runtime
@@ -235,8 +236,21 @@ async def test_live_runtime_roundtrip_and_flags_with_mock_account(tmp_path,monke
     from sessionquant.database.repository import Repository as RealRepository
     def repository(path,backend=None):
         r=RealRepository(path,backend='sqlite'); r._execute=lambda *args,**kwargs:(1,)
+        original_set=r.set_control
+        ticks={'count':0,'queued':False}
+        def set_control(name,value):
+            original_set(name,value)
+            if name=='trade_control_state':
+                ticks['count']+=1
+                if ticks['count']==2 and not ticks['queued'] and value.get('armed'):
+                    assert not m.posts, '시작 버튼 전에는 실제 주문을 보내지 않는다'
+                    ticks['queued']=True
+                    from sessionquant.trading_controls import enqueue
+                    enqueue(r,'start',run_id=value['run_id'],account_seq=7,now=Clock.now())
+        r.set_control=set_control
         return r
     monkeypatch.setattr(runtime,'Repository',repository)
+    monkeypatch.setattr(runtime.subprocess,'Popen',lambda *a,**kw:SimpleNamespace(terminate=lambda:None,wait=lambda **kw:0,kill=lambda:None))
     async def no_wait(*args): pass
     monkeypatch.setattr(runtime.asyncio,'sleep',no_wait)
     universe=tmp_path/'universe.json'
@@ -248,10 +262,51 @@ async def test_live_runtime_roundtrip_and_flags_with_mock_account(tmp_path,monke
     # 런타임과 브로커는 동일한 실제 벽시계를 사용한다. 검증에서는 같은 고정 시계를 주입한다.
     original_broker=runtime.FractionalLiveBroker
     monkeypatch.setattr(runtime,'FractionalLiveBroker',lambda market,repo,armed=False:original_broker(market,repo,armed=armed,clock=lambda:Clock.now()))
-    result=await runtime.live_local(config,execute=True,confirm_account_seq=7,acknowledge=True,max_polls=20)
-    assert result['closed'] is True and result['mode']=='live_test_finished'
-    assert [p[1]['side'] for p in m.posts]==['BUY','SELL']
-    assert result['actual_order_permissions_verified'] is True
+    result=await runtime.live_local(config,execute=execute,confirm_account_seq=7,acknowledge=execute,max_polls=20,dashboard=True)
+    assert result['closed'] is True and result['mode']=='live_test_paused'
+    assert [p[1]['side'] for p in m.posts]==(['BUY','SELL'] if execute else [])
+    assert result['actual_order_permissions_verified'] is execute
     r=RealRepository(tmp_path/'live-test.db',backend='sqlite')
-    assert len(r.all('executions'))==2 and not r.all('positions')
+    assert len(r.all('executions'))==(2 if execute else 0) and not r.all('positions')
     r.close()
+
+async def test_explicit_external_position_sale_preserves_managed_quantities(setup):
+    repo,m,b=setup; m.positions={'MSFT':'0.01'}
+    assert await b.reconcile()
+    with pytest.raises(CapabilityUnavailable):
+        await b.submit_order(FractionalRequest('unauthorized','MSFT','SELL',quantity='.01'),buy_cap='5')
+    await b.submit_order(FractionalRequest('manual-external','MSFT','SELL',quantity='.01'),buy_cap='5',external_position=True)
+    m.details['broker-1']={**detail(),'symbol':'MSFT','side':'SELL','orderAmount':None,'quantity':'.01'}
+    m.positions={}
+    assert await b.reconcile()
+    assert b.owned_quantities()=={}
+    assert net_state(b,Decimal('100'))['net_pnl']==0
+    restored=FractionalLiveBroker(m,repo,armed=True,clock=lambda:NOW)
+    assert await restored.reconcile()
+    assert restored.state['baseline']=={'MSFT':'0.01'}
+
+async def test_late_buy_is_blocked_at_actual_post_boundary(setup):
+    repo,m,b=setup; await b.reconcile()
+    b.clock=lambda:NOW.replace(hour=18,minute=29,second=59)
+    b.observed_at=b.clock().isoformat()
+    async def cross_cutoff(): b.clock=lambda:NOW.replace(hour=18,minute=30)
+    m.limiter=SimpleNamespace(wait=cross_cutoff)
+    with pytest.raises(CapabilityUnavailable,match='마감'):
+        await b.submit_order(buy(),buy_cap='5',eligibility_verified=True)
+    assert not m.posts
+
+async def test_stop_queued_after_durable_intent_prevents_create_post(setup,monkeypatch):
+    from sessionquant.trading_controls import begin_session,enqueue,heartbeat
+    repo,m,b=setup; await b.reconcile()
+    state=begin_session(repo,mode='live',account_seq=7,now=NOW)
+    state['running']=True; heartbeat(repo,state,now=NOW)
+    original=repo.set_control; queued={'value':False}
+    def set_control(name,value):
+        original(name,value)
+        if name=='fractional_live_v1' and not queued['value'] and any(i['status']=='SUBMITTING' for i in value['orders'].values()):
+            queued['value']=True
+            enqueue(repo,'stop_all',run_id=state['run_id'],account_seq=7,now=NOW)
+    monkeypatch.setattr(repo,'set_control',set_control)
+    order=await b.submit_order(buy(),buy_cap='5',eligibility_verified=True)
+    assert order['status']=='CANCELED' and order['local_cancel_before_submit'] is True
+    assert not m.posts

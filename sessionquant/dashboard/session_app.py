@@ -229,6 +229,17 @@ def render_dashboard(path: str | Path) -> None:
     if view["synthetic"]:
         st.warning("합성 데이터 데모입니다. 실제 시장 수익이나 실제 체결을 나타내지 않습니다.")
     st.caption(f"환경: {view['environment']} · 저장소: {data.backend.upper()} · 화면은 읽기 전용 · 마지막 수신: {view['last_event']}")
+    if data.connected:
+        control_repo=None
+        try:
+            from sessionquant.database.repository import Repository
+            from sessionquant.trading_controls import render_controls
+            control_repo=Repository(path)
+            render_controls(control_repo,positions=view['positions'])
+        except Exception:
+            st.caption('거래 제어 연결을 확인할 수 없습니다.')
+        finally:
+            if control_repo: control_repo.close()
     metrics = st.columns(5)
     account = view["account"]
     metrics[0].metric("계좌 평가금액", usd(account.get("equity")))
@@ -309,7 +320,7 @@ def render_dashboard(path: str | Path) -> None:
         st.markdown("**운영 경고**")
         _table([{"시각": timestamp(row.get("timestamp", row.get("created_at"))), "수준": row.get("level", row.get("severity", "")),
                  "코드": row.get("code", row.get("type", "")), "설명": row.get("message", row.get("reason", ""))} for row in data.tables["alerts"]])
-        st.caption("이 화면은 읽기 전용입니다. 실거래 활성화·실주문 전송 기능이 없습니다. 중지와 재시작은 엔진을 실행한 터미널에서 관리하세요.")
+        st.caption("화면은 엔진에 제어 요청을 전달합니다. 실제 주문·취소·체결 확인은 실행 중인 엔진에서 처리합니다.")
 
 
 def main() -> None:

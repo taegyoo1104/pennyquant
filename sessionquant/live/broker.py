@@ -55,6 +55,7 @@ class FractionalLiveBroker:
         if type(armed) is not bool: raise ValueError("실주문 활성화 값은 불리언이어야 합니다.")
         self.market,self.repo,self.armed=market,repository,armed
         self.clock=clock or (lambda:datetime.now(timezone.utc))
+        self.min_entry_to_exit_minutes=30
         self.failed=False
         self.lock=asyncio.Lock()
         self.state=self.repo.get_control('fractional_live_v1') or {
@@ -66,6 +67,7 @@ class FractionalLiveBroker:
         self.reconciled=False
         self.observed_at=None
         self.positions={}
+        self.position_currencies={}
         self.cash=Decimal(0)
 
     @property
@@ -115,6 +117,7 @@ class FractionalLiveBroker:
     def owned_quantities(self):
         result={}
         for item in self.orders.values():
+            if item.get('ownership')=='external': continue
             req=item['request']; sign=1 if req['side']=='BUY' else -1
             result[req['symbol']]=result.get(req['symbol'],Decimal(0))+sign*decimal(item.get('filled_quantity','0'),nonnegative=True)
         if any(v<0 for v in result.values()): raise DataQualityError('실거래 원장의 보유 수량이 음수입니다.')
@@ -186,8 +189,9 @@ class FractionalLiveBroker:
         positions={}
         for row in raw['items']:
             symbol=row['symbol']; symbol_valid(symbol)
-            if row.get('marketCountry')!='US' or row.get('currency')!='USD':
-                raise CapabilityUnavailable('초기 소액 검증은 미국 주식 전용 계좌 장부를 요구합니다.')
+            if (row.get('marketCountry'),row.get('currency')) not in {('US','USD'),('KR','KRW')}:
+                raise CapabilityUnavailable('보유 종목의 시장·통화를 확인하지 못했습니다.')
+            self.position_currencies[symbol]=row['currency']
             if symbol in positions: raise DataQualityError('중복 보유 종목')
             positions[symbol]=decimal(row['quantity'],nonnegative=True)
         self.positions={s:q for s,q in positions.items() if q}
@@ -222,6 +226,10 @@ class FractionalLiveBroker:
             if self.orders: raise DataQualityError('기준 잔고 없는 주문 이력')
             self.state['baseline']={s:str(q) for s,q in positions.items()}
         expected={s:decimal(q) for s,q in self.state['baseline'].items()}
+        for item in self.orders.values():
+            if item.get('ownership')=='external':
+                symbol=item['request']['symbol']
+                expected[symbol]=expected.get(symbol,Decimal(0))-decimal(item.get('filled_quantity','0'))
         for s,q in self.owned_quantities().items(): expected[s]=expected.get(s,Decimal(0))+q
         if {s:q for s,q in expected.items() if q}!=positions: self._block('holdings_mismatch')
         await self.get_available_cash()
@@ -244,7 +252,20 @@ class FractionalLiveBroker:
         if not for_exit and self.repo.get_control('manual_halt',False) is True:
             raise CapabilityUnavailable('사용자 거래 중단 상태입니다.')
 
-    async def submit_order(self,request,*,buy_cap,eligibility_verified=False):
+    def _check_dashboard_buy_gate(self,symbol):
+        gate=self.repo.get_control('trade_control_state')
+        if not gate: return
+        if not gate.get('running') or gate.get('draining'):
+            raise CapabilityUnavailable('대시보드에서 신규 매수가 중단되어 있습니다.')
+        for row in self.repo.recent('order_intents',10000):
+            if (row.get('kind')=='dashboard_command' and row.get('status')=='pending'
+                    and row.get('run_id')==gate['run_id'] and row.get('account_seq')==gate.get('account_seq')
+                    and (row.get('action')=='stop_all' or (row.get('action')=='sell_symbol' and row.get('symbol')==symbol))):
+                try: valid=0<=(self.clock()-utc(row['requested_at'])).total_seconds()<=60
+                except (ValueError,KeyError,TypeError): valid=False
+                if valid: raise CapabilityUnavailable('종료·매도 요청이 먼저 도착하여 신규 매수를 차단했습니다.')
+
+    async def submit_order(self,request,*,buy_cap,eligibility_verified=False,external_position=False):
         async with self.lock:
             previous=self.orders.get(request.client_order_id)
             if previous:
@@ -253,27 +274,48 @@ class FractionalLiveBroker:
             self._require_write(for_exit=request.side=='SELL')
             if request.side=='BUY':
                 if eligibility_verified is not True: raise CapabilityUnavailable('계좌별 소수점 거래 자격 확인이 필요합니다.')
-                if self.orders: raise CapabilityUnavailable('초기 검증의 추가 매수는 금지됩니다. 새 ID로 재시도하지 마세요.')
+                from ..session_window import permits_new_entry
+                if not permits_new_entry(self.clock(),min_entry_to_exit_minutes=self.min_entry_to_exit_minutes): raise CapabilityUnavailable('청산 전 신규 매수 금지 구간입니다.')
+                self._check_dashboard_buy_gate(request.symbol)
+                if any(i['request']['side']=='BUY' for i in self.orders.values()): raise CapabilityUnavailable('초기 검증의 추가 매수는 금지됩니다. 새 ID로 재시도하지 마세요.')
                 if request.symbol in self.positions or len(self.positions)>=5:
                     raise CapabilityUnavailable('기존 보유 종목 또는 노출 한도')
                 if request.amount>decimal(buy_cap,positive=True) or request.amount>self.cash:
                     raise CapabilityUnavailable('소액 검증 한도 또는 달러 현금 부족')
             else:
-                if sum(i['request']['side']=='SELL' for i in self.orders.values())>=3:
+                if sum(i['request']['side']=='SELL' and i['request']['symbol']==request.symbol for i in self.orders.values())>=3:
                     raise CapabilityUnavailable('매도 시도 3회 한도: 토스 앱에서 잔량을 확인하세요.')
+                if self.position_currencies.get(request.symbol)!='USD':
+                    raise CapabilityUnavailable('현재 수동 시장가 매도는 미국 주식만 지원합니다.')
                 owned=self.owned_quantities().get(request.symbol,Decimal(0))
+                if external_position:
+                    if owned: raise CapabilityUnavailable('전략 보유와 외부 보유를 혼합 매도할 수 없습니다.')
+                    disposed=sum((decimal(i.get('filled_quantity','0')) for i in self.orders.values() if i.get('ownership')=='external' and i['request']['symbol']==request.symbol),Decimal(0))
+                    owned=decimal((self.state['baseline'] or {}).get(request.symbol,'0'))-disposed
                 reserved=sum((decimal(i['request']['quantity'])-decimal(i.get('filled_quantity','0'))
-                    for i in self.orders.values() if i['request']['side']=='SELL' and i['status'] not in TERMINAL),Decimal(0))
+                    for i in self.orders.values() if i['request']['side']=='SELL' and i['request']['symbol']==request.symbol and i['status'] not in TERMINAL),Decimal(0))
                 available=await self.market._get('/api/v1/sellable-quantity',params={'symbol':request.symbol},account=True)
                 if request.quantity>min(owned-reserved,decimal(available['sellableQuantity'],nonnegative=True)):
                     raise CapabilityUnavailable('전략 보유 또는 실제 매도 가능 수량 초과')
             token=await self.market.access_token(); await self.market.limiter.wait()
             self._require_write(for_exit=request.side=='SELL')
+            if request.side=='BUY':
+                if not permits_new_entry(self.clock(),min_entry_to_exit_minutes=self.min_entry_to_exit_minutes): raise CapabilityUnavailable('신규 매수 마감 시각을 지났습니다.')
+                self._check_dashboard_buy_gate(request.symbol)
             item={'request':request.payload(),'status':'SUBMITTING','order_id':None,
+                'ownership':'external' if external_position else 'managed',
                 'created_at':self.clock().isoformat(),'filled_quantity':'0','filled_amount':'0','commission':None,'tax':None}
             self.orders[request.client_order_id]=item
             self._save()
             self.reconciled=False
+            if request.side=='BUY':
+                try:
+                    if not permits_new_entry(self.clock(),min_entry_to_exit_minutes=self.min_entry_to_exit_minutes):
+                        raise CapabilityUnavailable('마감 시각 경과')
+                    self._check_dashboard_buy_gate(request.symbol)
+                except CapabilityUnavailable:
+                    item.update(status='CANCELED',local_cancel_before_submit=True)
+                    self._save(); return dict(item)
             try:
                 response=await self.market.client.post(BASE_URL+'/api/v1/orders',json=request.payload(),
                     headers={'Authorization':'Bearer '+token,'X-Tossinvest-Account':str(self.market.account_seq)})

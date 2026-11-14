@@ -21,6 +21,8 @@ def parser():
     live.add_argument("--confirm-account-seq",type=int)
     live.add_argument("--acknowledge-live-orders",action="store_true")
     live.add_argument("--max-polls",type=int)
+    live.add_argument("--dashboard",action="store_true",help="대시보드를 열고 매매 시작 버튼 대기")
+    live.add_argument("--port",type=int,default=8502)
     account=sub.add_parser("run-account",help="내 실제 계좌 보유·매수 가능 금액·미체결 조회; 주문 없음")
     account.add_argument("--db",type=Path,default=Path("data/sessionquant-account.db"))
     account.add_argument("--interval",type=int,default=10)
@@ -111,7 +113,7 @@ def main(argv=None):
         elif args.command == "live-local":
             from .live.runtime import live_local
             result=asyncio.run(live_local(args.config,execute=args.execute,confirm_account_seq=args.confirm_account_seq,
-                acknowledge=args.acknowledge_live_orders,max_polls=args.max_polls))
+                acknowledge=args.acknowledge_live_orders,max_polls=args.max_polls,dashboard=args.dashboard,port=args.port))
             print(json.dumps(result,ensure_ascii=False,indent=2))
         elif args.command == "doctor":
             print(json.dumps({"project": "SessionQuant", "version": "2.1.0", "python": sys.version.split()[0],
