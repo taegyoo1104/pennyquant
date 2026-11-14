@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
+from decimal import Decimal
 from typing import Any
 import math
 import re
@@ -212,6 +213,10 @@ class RiskDecision:
 def jsonable(value: Any) -> Any:
     if hasattr(value, "__dataclass_fields__"):
         return jsonable(asdict(value))
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("금액과 수량은 유한한 Decimal이어야 합니다")
+        return str(value)
     if isinstance(value, datetime):
         return utc(value).isoformat()
     if isinstance(value, dict):
