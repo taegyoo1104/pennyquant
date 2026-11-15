@@ -94,7 +94,7 @@ def render_news_diagnostics(data):
                 ('news_receipts','llm_request_attempts','validated_responses','failed_or_rejected'),
                 ('기사 수신','LLM 요청 시도','응답 검증 통과','요청 실패·검증 거부')):
             column.metric(label,str(counts[key]))
-        st.caption('최근 24시간 · 수신 최대 2,000건/감사 최대 500건 내 집계. 중복 수신과 생성 요청은 서로 다른 수치입니다.')
+        st.caption('최근 24시간 · 수신 최대 2,000건, 실제 AI 요청과 분석 처리 기록 각각 최대 500건. 중복 수신과 생성 요청은 다른 수치입니다.')
         st.caption('최근 기사 수신 '+timestamp(report['last_news_received_at'])+' · 최근 LLM 요청 '+timestamp(report['last_llm_request_at'])+
             f" · 캐시 재사용 {counts['cache_hits']}건 · 처리 중/결과 미확인 {counts['pending_or_unconfirmed']}건")
         if report['scope']['may_be_truncated']:st.caption('조회 상한에 도달했습니다. 위 수치는 전체 누계가 아닙니다.')
@@ -107,7 +107,7 @@ def render_news_diagnostics(data):
                 _table([{'종목·주제':r['ticker_or_topic'],'회사 영향':r['company_impacts'],
                     '주주 영향':r['shareholder_impacts'],'내용 확인':r['event_statuses'],
                     '분류 이유':r['reason'],'원문 근거':' / '.join(str(x) for x in r['evidence']),
-                    '오류':r['error']} for r in report['latest_calls']])
+                    '오류':r['error'],'검사 실패 항목':r.get('failed_field') or '—'} for r in report['latest_calls']])
     with st.expander('뉴스 공급자·신선도·원문 검증 상세'):
         st.caption('저장된 최근 최대 2,000건 기준입니다. 수집·분석·새 기사가 없음·장애를 구분합니다.')
         st.caption('마지막 뉴스 작업: '+timestamp(data.news_status.get('updated_at')))

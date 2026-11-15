@@ -729,3 +729,24 @@ async def test_missing_cap_subset_metadata_and_policy_survive_mysql_restart(mysq
     strict=WatchlistManager(reopened,universe,replace(config,watchlist_missing_cap_policy='block'),
                             provider=provider,allow_synthetic=True)
     assert strict.entry_blockers('T007',NOW)==['watchlist_partial']
+
+
+def test_mysql_actual_llm_requests_are_not_hidden_by_prechecks(mysql_repositories):
+    from test_news_visibility import call,NOW
+    from sessionquant.news.diagnostics import read_news_status
+    repo,other=mysql_repositories(),mysql_repositories()
+    repo.record('llm_calls',call('success'))
+    repo.record('llm_calls',call('failure','EVIDENCE_MISMATCH'))
+    with repo.transaction():
+        for i in range(510):
+            repo.record('llm_calls',call(f'skip-{i}','SKIPPED_PRECHECK',network_attempted=False,
+                                        llm_call_id=None,recorded_at=NOW.isoformat()))
+    # A string containing "true" is not the verified boolean flag.
+    repo.record('llm_calls',call('string-flag',network_attempted='true'))
+    other.record('llm_calls',call('other-account'))
+    report=read_news_status(repo,NOW)
+    assert report['counts']['llm_request_attempts']==2
+    assert report['counts']['validated_responses']==report['counts']['failed_or_rejected']==1
+    assert [r['id'] for r in repo.recent_llm_attempts(limit=1)]==['failure']
+    assert [r['id'] for r in other.recent_llm_attempts()]==['other-account']
+    assert not repo.all('orders')

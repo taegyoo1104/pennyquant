@@ -140,6 +140,7 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
                 from sessionquant.news.diagnostics import summarize_news
                 limit=300 if page=='대시보드' else 500
                 result.news_flow=summarize_news(result.tables['news_ingestions'],repository.recent('llm_calls',limit=limit),
+                    network_calls=repository.recent_llm_attempts(limit=limit),
                     schedule=result.news_status.get('schedule',{}),health=repository.get_control('llm_provider_health',{}),
                     engine=repository.get_control('trade_control_state',{}),
                     ingestion_limit=300 if page=='대시보드' else 2000,audit_limit=limit)

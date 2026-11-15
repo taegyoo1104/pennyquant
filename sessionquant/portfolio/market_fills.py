@@ -22,8 +22,6 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         return unfilled('quote_invalid_stale_halted_or_missing_depth')
     from .session import SessionExitManager
     schedule = SessionExitManager(broker).schedule(now)
-    if schedule is None or not schedule.opens_at <= now < schedule.fractional_deadline:
-        return unfilled('outside_fractional_execution_window')
     stamp = aware(quote.timestamp)
     previous = broker.quote_sequences.get(quote.symbol)
     if previous and stamp <= aware(previous):
@@ -33,6 +31,9 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
     if quote.symbol in broker.positions:
         broker.positions[quote.symbol].mark_price = bid
     broker.check_daily_loss(now)
+    # A closed order window prevents execution, not valuation of residual shares.
+    if schedule is None or not schedule.opens_at <= now < schedule.fractional_deadline:
+        return unfilled('outside_fractional_execution_window')
     participation = broker.settings.paper_depth_participation
     depths = {'buy':decimal(quote.ask_size)*participation,'sell':decimal(quote.bid_size)*participation}
     liquidity = decimal(max_fill_qty,'max_fill_qty',nonnegative=True) if max_fill_qty is not None else None

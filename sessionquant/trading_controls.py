@@ -88,6 +88,8 @@ def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
             position=(ledger.get('broker',{}).get('positions') or {}).get(symbol,{})
             if mode!='paper' or decimal(position.get('qty','0'))<=0:
                 raise ValueError('전략 관리 수량을 검증할 수 없습니다.')
+            if symbol in (ledger.get('broker',{}).get('exit_intents') or {}):
+                raise ValueError('이미 매도 처리 중입니다. 남은 수량을 확인하세요.')
             orders=repo.recent('orders',10000)
             if any(r.get('symbol')==symbol and str(r.get('side')).lower()=='sell' and str(r.get('status')).lower() not in {'filled','cancelled','rejected'} for r in orders):
                 raise ValueError('매도 주문이 진행 중입니다.')
@@ -118,6 +120,7 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     st.write('**실행 상태 · '+(label(state.get('status','UNKNOWN')) if active else '연결 확인 필요 · 조회만 가능')+'**')
     run=state['run_id']
     requests=[r for r in repo.recent('order_intents',200) if r.get('kind')=='dashboard_command' and r.get('run_id')==run]
+    selling=set(((repo.load_state() or {}).get('broker') or {}).get('exit_intents') or {})
     unresolved=[r for r in requests if r.get('status')=='pending']
     def submit(action,symbol=None):
         try:
@@ -142,7 +145,7 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
         with st.expander(f'{symbol} 전량 매도 · 전략 관리 {qty}'):
             st.caption(label(environment)+' · 시장가 위험/미체결 수량은 엔진에서 다시 확인합니다.')
             confirm=st.checkbox(f'{symbol} 전략 관리 수량 전량 시장가 매도를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
-            if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or any(r.get('symbol')==symbol and r.get('status') in {'pending','accepted'} for r in requests)):
+            if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or symbol in selling or any(r.get('symbol')==symbol and r.get('status')=='pending' for r in requests)):
                 submit('sell_symbol',symbol)
     st.caption('주문 처리와 남은 수량은 매매 내역에서 확인하세요.')
     if not compact:

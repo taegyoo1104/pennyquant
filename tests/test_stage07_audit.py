@@ -68,6 +68,8 @@ async def test_company_call_usage_result_cache_restart_and_exact_payload_are_lin
         assert usage['cost_status']=='TOKEN_BASED_ESTIMATE' and usage['provider_billed_cost_usd'] is None
         assert Decimal(usage['cost_usd'])==Decimal('0.000060')
         assert row['input_hash'] and row['prompt_hash'] and row['response_hash']
+        from sessionquant.news.analysis import PROMPT_VERSION
+        assert row['prompt_version']==row['normalized_result']['prompt_version']==first.prompt_version==PROMPT_VERSION
         assert row['normalized_result']['evidence_source_spans'][0]['paragraph_id']=='p0001'
         assert 'Authorization' not in json.dumps(row) and BODY not in json.dumps(row)
         sent=json.loads(calls[0].content)
@@ -78,6 +80,7 @@ async def test_company_call_usage_result_cache_restart_and_exact_payload_are_lin
         restarted=BudgetedAnalyzer(repo,api_key='fixture-key',client=http,clock=lambda:clock[0])
         cached=await restarted.analyze(company(),'TEST',source_kind='rss',primary_verified=True)
         assert cached.cached and cached.llm_call_ids==first.llm_call_ids and len(calls)==1
+        assert cached.prompt_version==first.prompt_version
         assert len(repo.all('llm_usage'))==1
         assert repo.all('llm_calls')[-1]['status']=='CACHE_HIT' and not repo.all('llm_calls')[-1]['network_attempted']
         assert cached.to_dict()['analysis_id']==first.to_dict()['analysis_id']
@@ -294,3 +297,22 @@ async def test_future_completion_is_not_exposed_or_paid_for_again_at_past_time(r
         again=await analyzer.analyze_macro(macro())
     assert first['status']=='CONFIRMED' and again['error']=='llm_result_not_yet_available'
     assert len(calls)==1 and len(repo.all('llm_usage'))==1
+
+
+async def test_company_prompt_change_invalidates_cache_and_keeps_old_audit(repo,monkeypatch):
+    import sessionquant.macro.analysis as module
+    calls=[]
+    def handle(request):
+        calls.append(request)
+        return httpx.Response(200,json=response())
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        with monkeypatch.context() as patch:
+            patch.setattr(module,'COMPANY_PROMPT_VERSION','older-test-prompt')
+            old=BudgetedAnalyzer(repo,api_key='fixture',client=http,clock=lambda:NOW)
+            await old.analyze(company(),'TEST',source_kind='rss',primary_verified=True)
+        current=BudgetedAnalyzer(repo,api_key='fixture',client=http,clock=lambda:NOW+timedelta(seconds=5))
+        result=await current.analyze(company(),'TEST',source_kind='rss',primary_verified=True)
+        assert not result.cached and len(calls)==2
+        rows=repo.recent_llm_attempts()
+        assert len(rows)==2 and rows[0]['prompt_version']=='older-test-prompt'
+        assert rows[1]['prompt_version']==module.COMPANY_PROMPT_VERSION

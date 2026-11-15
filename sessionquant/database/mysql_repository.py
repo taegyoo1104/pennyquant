@@ -350,6 +350,15 @@ class MySQLRepository:
             for value in positions.values():
                 self.record("positions", value)
 
+    def recent_llm_attempts(self, limit=500):
+        """Keep namespace isolation and filter prechecks before the display limit."""
+        if type(limit) is not int or not 1 <= limit <= 10000:
+            raise ValueError('요청 조회 개수는 1~10000 정수여야 합니다.')
+        rows = self._execute("SELECT payload FROM pq_llm_calls WHERE namespace=%s "
+            "AND JSON_EXTRACT(payload,'$.network_attempted')=CAST('true' AS JSON) "
+            "ORDER BY seq DESC LIMIT %s",(self.namespace,limit),fetch='all')
+        return [self._decode(row[0]) for row in reversed(rows)]
+
     def save_state(self, state: dict) -> None:
         payload = self._json(state)
         account = state.get("account", state.get("broker", state))

@@ -68,6 +68,28 @@ def test_repeated_news_status_preserves_records_and_reports_cached_requests_hone
     finally:repo.close()
 
 
+def test_skipped_articles_do_not_push_real_llm_requests_out_of_report(tmp_path):
+    repo=Repository(tmp_path/'requests.db',backend='sqlite')
+    try:
+        repo.record('llm_calls',call('success'))
+        repo.record('llm_calls',call('failure','EVIDENCE_MISMATCH',validation_error_code='EVIDENCE_QUOTE_MISMATCH',
+                                     failed_field='events.evidence'))
+        for i in range(510):
+            repo.record('llm_calls',call(f'skip-{i}','SKIPPED_PRECHECK',network_attempted=False,
+                                        llm_call_id=None,recorded_at=NOW.isoformat()))
+        report=read_news_status(repo,NOW)
+        assert report['counts']['llm_request_attempts']==2
+        assert report['counts']['validated_responses']==report['counts']['failed_or_rejected']==1
+        assert report['audit_status_counts']=={'SKIPPED_PRECHECK':500,'SUCCEEDED':1,'EVIDENCE_MISMATCH':1}
+        assert report['scope']['may_be_truncated'] and not report['scope']['requests_may_be_truncated']
+        assert next(r for r in report['latest_calls'] if r['status']=='EVIDENCE_MISMATCH')['failed_field']=='events.evidence'
+        assert not repo.all('orders')
+        assert [row['id'] for row in repo.recent_llm_attempts(1)]==['failure']
+        for bad in (0,True,10001):
+            with pytest.raises(ValueError):repo.recent_llm_attempts(bad)
+    finally:repo.close()
+
+
 def test_human_labels_preserve_numbers_originals_tickers_and_evidence():
     original=[{'symbol':'AAPL','status':'SUCCEEDED','code':'stale_article','count':3,
         '원문 근거':'The report states UNKNOWN_FIELD exactly.',

@@ -75,6 +75,8 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
         def recent(self, name, limit):
             calls.append((name, limit))
             return []
+        def recent_llm_attempts(self, limit):
+            return []
         def close(self):
             calls.append("closed")
 
