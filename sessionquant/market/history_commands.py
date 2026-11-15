@@ -12,7 +12,8 @@ from .history import HistoryStore, history_plan, VIEW
 PROGRESS = 'watchlist_history_backfill_v1'
 
 
-async def backfill(repo, symbols, client, *, now=None, max_requests=5000, refresh=False, progress_fn=None):
+async def backfill(repo, symbols, client, *, now=None, max_requests=5000, refresh=False, progress_fn=None,
+                   selection_context=None):
     now = utc(now or datetime.now(timezone.utc))
     if not symbols or len(symbols) > 100 or len(set(symbols)) != len(symbols):
         raise ValueError('검증된 감시 종목 1~100개가 필요합니다.')
@@ -28,7 +29,8 @@ async def backfill(repo, symbols, client, *, now=None, max_requests=5000, refres
     report = {'started_at':now.isoformat(),'symbols':symbols,'required_full_sessions':20,
               'session_dates':[r[0] for r in plan], 'complete_symbol_days':0, 'skipped_symbol_days':0,
               'required_symbol_days':len(plan)*len(symbols), 'read_requests':0,
-              'status':'RUNNING','error':None,'retry_after':None}
+              'status':'RUNNING','error':None,'retry_after':None,
+              'selection':selection_context or {'status':'UNSPECIFIED','ranking_verified':False}}
     try:
         for index,symbol in enumerate(symbols,1):
             for day,opened,closed in plan:
@@ -87,7 +89,37 @@ async def backfill(repo, symbols, client, *, now=None, max_requests=5000, refres
     return report
 
 
-async def command(config, action, *, max_requests=5000, refresh=False):
+def collection_selection(manager, now, *, allow_partial=False):
+    """Incomplete ranking may prepare bars explicitly; it never creates a trading watchlist."""
+    from ..market_reference.contracts import REFERENCE_SYMBOLS
+    from ..models import symbol_valid
+    from ..watchlist.toss_capitalization import CONTRACT
+    status = manager.store.status(now)
+    snapshot = status.get('snapshot') or {}
+    issues = snapshot.get('issues',[])
+    partial = (allow_partial and status['status']=='PARTIAL' and snapshot.get('contract')==CONTRACT
+               and snapshot.get('synthetic') is False and issues
+               and all(row.get('code')=='market_cap_missing' for row in issues))
+    if status['status']=='VALID':
+        symbols=manager.light_symbols(now)
+    elif partial:
+        members=manager.universe.members(now)
+        symbols=[row['ticker'] for row in status['items'][:manager.config.watchlist_size]
+                 if row['ticker'] in members and row['ticker'] not in REFERENCE_SYMBOLS]
+        missing={row.get('ticker') for row in issues}
+        if set(symbols)&missing:
+            raise ValueError('시총 미확인 종목이 사전 수집 후보에 포함되어 있습니다.')
+    else:
+        raise ValueError('유효한 감시목록이 없습니다. watchlist-diagnose로 확인하세요. 시총 누락만 있는 PARTIAL은 --allow-partial-watchlist로 분봉 사전 수집만 허용할 수 있습니다.')
+    if len(symbols)!=manager.config.watchlist_size or len(set(symbols))!=len(symbols):
+        raise ValueError('설정한 수만큼의 서로 다른 수집 후보를 확보하지 못했습니다.')
+    for symbol in symbols:symbol_valid(symbol)
+    return symbols,{'status':status['status'],'ranking_verified':status['status']=='VALID',
+        'snapshot_id':snapshot.get('id'),'collection_only':bool(partial),
+        'missing_market_cap_symbols':sorted({row['ticker'] for row in issues if row.get('code')=='market_cap_missing'})}
+
+
+async def command(config, action, *, max_requests=5000, refresh=False, allow_partial=False):
     from ..session_runtime import _open, bind_runtime
     from ..database.repository import Repository
     from ..watchlist.selection import WatchlistManager
@@ -112,15 +144,15 @@ async def command(config, action, *, max_requests=5000, refresh=False):
         if active_collector(repo):
             raise ValueError('토스 수집기·계좌 조회기를 종료한 뒤 실행하세요.')
         manager = WatchlistManager(repo,UniverseStore(config.universe_path),config)
-        status = manager.store.status(datetime.now(timezone.utc))
-        symbols = manager.light_symbols(datetime.now(timezone.utc))
-        if status['status'] != 'VALID' or len(symbols) != config.watchlist_size:
-            raise ValueError('유효한 감시목록이 없습니다. 같은 --config로 universe-refresh 및 watchlist-refresh를 먼저 실행하세요.')
+        symbols,selection = collection_selection(manager,datetime.now(timezone.utc),allow_partial=allow_partial)
         bind_runtime(repo,source='toss',identity='toss-readonly')
         client = TossMarketClient(account_seq=0)
         print('같은 클라이언트의 토스 수집기를 종료한 상태에서 실행하세요. 인증 외에는 분봉 GET만 사용합니다.',flush=True)
+        if selection['collection_only']:
+            print('PARTIAL 후보의 분봉 사전 수집입니다. 상위 순위 확정·감시목록 활성화·매수 허용은 하지 않습니다.',flush=True)
         try:
             result = await backfill(repo,symbols,client,max_requests=max_requests,refresh=refresh,
+                                    selection_context=selection,
                                     progress_fn=lambda text:print(text,flush=True))
         finally:
             await client.aclose()
