@@ -26,7 +26,8 @@ def render_quality(state):
             '누락 분':bars.get('missing_minutes'),'누락률':bars.get('missing_rate'),
             '정정 충돌 분':bars.get('conflicting_minutes'),'명시적 거래량 0분':bars.get('explicit_zero_volume_minutes'),
             '분봉 지연(초)':bars.get('age_seconds'),'수신 지연(초)':bars.get('latest_receipt_lag_seconds'),
-            'RVOL':volume.get('value'),'완전한 과거 거래일':volume.get('complete_sessions'),
+            'RVOL(검증됨)':volume.get('value'),'RVOL(계산값·비교 근거 미확인 가능)':volume.get('calculated_value'),
+            '완전한 과거 거래일':volume.get('complete_sessions'),
             '필요 거래일':volume.get('required_sessions',20),'RVOL 부족 입력':', '.join(volume.get('reasons',[])),
             '계좌 검증 범위':(item.get('eligibility') or {}).get('account_scope','UNKNOWN'),
             '제한 사유':', '.join(item.get('blockers',[]))})
@@ -38,3 +39,21 @@ def render_quality(state):
         _table([{'종목':s,**row} for s,row in source.get('history_progress',{}).items()],'과거 봉 보충 이력이 없습니다.')
         _table([{'종목':s,**row} for s,row in report.get('market_reference_quality',{}).items()])
     st.caption('토스 ACTIVE·보유·매수 가능 현금·빈 유의사항은 소수점 주문 자격의 증거가 아닙니다. 누락 봉은 보간하지 않으며 분할 전후 거래량 비교가 미확인이면 RVOL은 UNKNOWN입니다.')
+
+
+def render_watchlist_rvol(view, backfill):
+    import streamlit as st
+    from .session_app import _table, timestamp
+    from ..market.history import current_view
+    st.subheader('감시목록 과거 분봉·RVOL')
+    st.caption(f"장전 수집: {backfill.get('status','미실행')} · 완료 종목×거래일 "
+               f"{backfill.get('complete_symbol_days',0)} / {backfill.get('required_symbol_days',0)}")
+    st.caption('감시 종목은 호출 예산 안에서 순환합니다. 계산값은 비교 근거 검증과 별개이며, 오래된 값은 숨깁니다.')
+    rows = current_view(view).get('items',[])
+    _table([{'종목':r['symbol'],'RVOL 계산값':r.get('calculated_value'),'매매용 검증값':r.get('value'),
+             '현재성':'최신' if r.get('fresh') else '지연·미확인',
+             '계산 기준 시각':timestamp(r.get('cutoff_at')),'수신·평가 시각':timestamp(r.get('observed_at')),
+             '과거 확보 거래일':r.get('complete_sessions'),'현재 누적 거래량':r.get('current_cumulative_volume'),
+             '과거 동시간 평균':r.get('historical_mean_cumulative_volume'),
+             '확인 필요':', '.join(r.get('reasons',[]))} for r in rows],
+           '장전 history-backfill 후 run으로 당일 분봉을 수집하세요.')

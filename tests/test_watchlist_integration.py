@@ -57,7 +57,7 @@ def test_old_config_remains_loadable_with_safe_new_defaults(tmp_path):
     path=tmp_path/'old.yaml'
     path.write_text('symbols_per_cycle: 2\ncompanies: {}\n',encoding='utf-8')
     config=load_session_config(path)
-    assert config.watchlist_size==100 and config.focus_size==20 and config.watchlist_enabled
+    assert config.watchlist_size==50 and config.focus_size==20 and config.watchlist_enabled
     assert config.symbols_per_cycle==2
     assert config.market_cap_input==(tmp_path/'../data/market-cap-input.json').resolve()
     assert path.read_text()=='symbols_per_cycle: 2\ncompanies: {}\n'

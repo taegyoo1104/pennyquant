@@ -34,7 +34,7 @@ def render_references(view, risk=None, fred=None):
     st.subheader('시장 참고 ETF · 거래 후보 제외')
     st.caption('ETF 가격 변화입니다. 금리 bp 또는 WTI 현물 등락률로 환산하지 않습니다. 조회 성공과 실시간 권한은 별도로 검증합니다.')
     st.dataframe(reference_rows(view), use_container_width=True, hide_index=True)
-    st.caption('SHY·IEF·TLT·USO·SPY·QQQ는 감시 100·집중 20 정원에서 제외됩니다. 권한·가격 비교 가능성이 미확인되면 UNKNOWN으로 표시합니다.')
+    st.caption('SHY·IEF·TLT·USO·SPY·QQQ는 감시·집중 종목 정원에서 제외됩니다. 권한·가격 비교 가능성이 미확인되면 UNKNOWN으로 표시합니다.')
     if risk:
         from .session_app import timestamp
         st.caption(f"참고 위험 관찰: {risk.get('status','UNKNOWN')} · 평가 시각: {timestamp(risk.get('observed_at'))} · 가설: {risk.get('threshold_version','UNKNOWN')}")

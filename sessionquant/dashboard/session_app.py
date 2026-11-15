@@ -45,6 +45,8 @@ class DashboardData:
     account_status: dict = field(default_factory=dict)
     watchlist_state: dict = field(default_factory=dict)
     market_quality: dict = field(default_factory=dict)
+    watchlist_rvol: dict = field(default_factory=dict)
+    history_backfill: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
     fred_references: list = field(default_factory=list)
     news_status: dict = field(default_factory=dict)
@@ -110,6 +112,8 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
             result.state = repository.load_state() or {}
             result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
             result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
+            result.watchlist_rvol=repository.get_control('watchlist_rvol_v1',{}) or {}
+            result.history_backfill=repository.get_control('watchlist_history_backfill_v1',{}) or {}
             result.portfolio_selection=repository.get_control('portfolio_selection_v1',{}) or {}
             result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
             result.fred_references=repository.recent('fred_reference_observations',limit=30)
@@ -289,13 +293,15 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
             render_quality(data.market_quality)
+            from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
+            render_watchlist_rvol(data.watchlist_rvol,data.history_backfill)
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
             render_watchlist(data.watchlist_state, data.tables['candidates'])
             from sessionquant.dashboard.selection_panel import render_selection
             render_selection(data.portfolio_selection)
         else:
-            st.caption('시총 감시 100·집중 20 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
+            st.caption('시총 감시·집중 분석 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
         st.subheader("기술 분석 이력과 진입 근거")
         st.caption('아래 표는 과거 분석 기록을 포함합니다. 현재 감시·집중 여부는 위 목록에서 확인하세요.')
         rows = []

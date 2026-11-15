@@ -60,6 +60,7 @@ class MarketEngine:
         self.eligibility: dict[str, InstrumentEligibility] = {}
         self.rvol: dict[str, dict] = {}
         self.sector_strength: dict[str, tuple[float, datetime]] = {}
+        self.history_provider = None
 
     def on_bar(self, bar: Bar) -> None:
         if bar.received_at < bar.timestamp:
@@ -128,6 +129,8 @@ class MarketEngine:
             from .quality import bar_quality, rvol_report
             from .eligibility import field_verified
             bars = self.bars.get(symbol, [])
+            if self.history_provider is not None:
+                bars = [*self.history_provider(symbol,now),*bars]
             volume = rvol_report(bars,symbol,data.five[-1].timestamp if data.five else None,now,
                                  evidence=eligibility.volume_evidence if eligibility else None)
             rvol = volume['value']

@@ -166,6 +166,10 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             for snapshot in universe.snapshots:
                 repo.record("universe_history", snapshot)
             if config.source == "toss":
+                from .market.history import HistoryStore
+                history_store = HistoryStore(repo) if watchlist is not None else None
+                if history_store is not None:
+                    engine.market.history_provider = lambda symbol,stamp: history_store.load(symbol,stamp,record=config.recording_enabled)
                 def receive_priority(batch):
                     # 위험 자료는 후보 탐색 완료를 기다리지 않고 단일 작성자 엔진에 전달한다.
                     raw = batch_events(batch)
@@ -180,7 +184,8 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                 market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
-                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference)
+                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference,
+                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle)
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:

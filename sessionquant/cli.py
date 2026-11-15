@@ -53,6 +53,12 @@ def parser():
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
     quality = sub.add_parser('market-data-status',help='저장된 시세·적격성·RVOL 확보율 조회; 외부 호출 없음')
     quality.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'),help='PAPER_LOCAL 설정 파일')
+    for name in ('history-backfill','history-status'):
+        history = sub.add_parser(name,help='감시목록 과거 분봉 DB 수집' if name=='history-backfill' else '과거 분봉 수집·RVOL 상태 조회')
+        history.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
+        if name == 'history-backfill':
+            history.add_argument('--max-requests',type=int,default=5000)
+            history.add_argument('--refresh-complete',action='store_true',help='완료 거래일도 다시 조회해 정정 충돌 확인')
     export = sub.add_parser('record-export',help='중지한 PAPER 원장에서 시점 보존 연구 묶음 내보내기')
     export.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
     export.add_argument('--out',type=Path,required=True,help='새 출력 폴더')
@@ -194,6 +200,13 @@ def main(argv=None):
                 api_cost_usd=args.api_cost_usd,infrastructure_cost_usd=args.infrastructure_cost_usd)
             print(json.dumps({'report':str(args.report),'split_status':result['split_plan']['status'],
                 'actual_out_of_sample_validated':False,'live_order_writes':0,'llm_generation_calls':0},ensure_ascii=False,indent=2))
+        elif args.command in {'history-backfill','history-status'}:
+            from .session_config import load_session_config
+            from .market.history_commands import command
+            report = asyncio.run(command(load_session_config(args.config),args.command,
+                max_requests=getattr(args,'max_requests',5000),refresh=getattr(args,'refresh_complete',False)))
+            print(json.dumps(report,ensure_ascii=False,indent=2))
+            if args.command == 'history-backfill' and report['status'] != 'COMPLETE':return 1
         elif args.command == 'market-data-status':
             from .session_config import load_session_config
             from .database.repository import Repository

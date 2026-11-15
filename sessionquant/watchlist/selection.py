@@ -83,7 +83,9 @@ class WatchlistManager:
     async def refresh(self, now=None, *, force=False):
         now = utc(now or self.clock())
         attempt = self.repo.get_control(ATTEMPT, {})
-        if not force and attempt.get('next_attempt_at') and now < utc(attempt['next_attempt_at']):
+        snapshot = self.store.at(now)
+        size_changed = bool(snapshot and len(snapshot.get('items',[])) != self.config.watchlist_size)
+        if not force and not size_changed and attempt.get('next_attempt_at') and now < utc(attempt['next_attempt_at']):
             return self.store.status(now, allow_synthetic=self.allow_synthetic)
         try:
             batch = await asyncio.wait_for(self.provider.fetch(), timeout=5)
@@ -214,7 +216,7 @@ class WatchlistManager:
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         if status['status'] != 'VALID':
             return ['watchlist_'+status['status'].lower()]
-        if symbol not in {row['ticker'] for row in status['items']}:
+        if symbol not in set(self.light_symbols(now)):
             return ['outside_market_cap_watchlist']
         row = next((r for r in self.state['focus'] if r['ticker'] == symbol), None)
         if not row or self._metric(symbol, now)['data_status'] != 'VERIFIED':
@@ -253,7 +255,7 @@ class WatchlistManager:
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         focused = {row['ticker']: row for row in self.state['focus']}
         rows = []
-        for row in status['items']:
+        for row in status['items'][:self.config.watchlist_size]:
             symbol = row['ticker']
             metric = self._metric(symbol, now)
             rows.append({**row, 'focused': symbol in focused, 'focus_reason': focused.get(symbol, {}).get('selection_reason', metric['reason']),

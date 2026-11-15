@@ -1,9 +1,10 @@
 """보간하지 않은 봉의 실제 확보율과 동일 경과 분 RVOL 부족 입력을 보고한다."""
 from collections import Counter, defaultdict
 from datetime import timedelta
+import math
 
 from ..models import utc
-from ..scanners.relative_volume import NEW_YORK, _calendar, relative_volume
+from ..scanners.relative_volume import NEW_YORK, _calendar
 from .bars import aggregate_bars, available_minutes, calendar, session_bounds
 
 QUALITY_KEY = 'market_data_quality_v1'
@@ -78,11 +79,14 @@ def volume_evidence_valid(evidence, bars, start, through, now):
 
 def rvol_report(bars, symbol, through, now, *, evidence=None, legacy_comparable=False, min_sessions=20):
     """최신 20개 비교 가능 거래일의 정확한 동일 경과 분을 검사한다. 더 오래된 날로 채우지 않는다."""
+    if type(min_sessions) is not int or min_sessions < 1:
+        raise ValueError('비교 거래일 수는 양의 정수여야 합니다.')
     now = utc(now)
-    result = {'value':None, 'status':'UNKNOWN', 'required_sessions':min_sessions, 'complete_sessions':0,
+    result = {'value':None, 'calculated_value':None, 'calculation_status':'UNKNOWN',
+        'status':'UNKNOWN', 'required_sessions':min_sessions, 'complete_sessions':0,
         'cutoff_at':through.isoformat() if through else None, 'observed_at':now.isoformat(), 'reasons':[], 'sessions':[]}
     bounds = session_bounds(through) if through else None
-    if not bounds or through > now or not bounds[0] < through <= bounds[1]:
+    if not bounds or through > now or through.second or through.microsecond or not bounds[0] < through <= bounds[1]:
         result['reasons'] = ['current_closed_interval_missing']
         return result
     elapsed = int((through-bounds[0]).total_seconds()//60)
@@ -101,9 +105,14 @@ def rvol_report(bars, symbol, through, now, *, evidence=None, legacy_comparable=
         result['reasons'] = ['rvol_calendar_unknown']
         return result
     all_relevant = []
+    by_timestamp = defaultdict(list)
+    for bar in bars:
+        if bar.symbol == symbol and bar.timestamp <= bar.received_at <= now:
+            by_timestamp[bar.timestamp].append(bar)
+    totals = []
     for session, opened in selected:
         required = {opened+timedelta(minutes=i) for i in range(1,elapsed+1)}
-        values = [b for b in bars if b.symbol == symbol and b.timestamp in required and b.received_at <= now]
+        values = [b for stamp in required for b in by_timestamp.get(stamp,[])]
         all_relevant.extend(values)
         versions = defaultdict(set)
         for b in values:
@@ -111,6 +120,8 @@ def rvol_report(bars, symbol, through, now, *, evidence=None, legacy_comparable=
         missing = len(required-set(versions))
         conflicting = sum(len(v)>1 for v in versions.values())
         complete = not missing and not conflicting
+        if complete:
+            totals.append(sum(next(iter(versions[stamp]))[-1] for stamp in required))
         result['complete_sessions'] += int(complete)
         result['sessions'].append({'date':str(session.date()),'expected_minutes':elapsed,
                                   'missing_minutes':missing,'conflicting_minutes':conflicting})
@@ -120,13 +131,26 @@ def rvol_report(bars, symbol, through, now, *, evidence=None, legacy_comparable=
     all_relevant.extend(current)
     if len(current) != elapsed:
         result['reasons'].append('current_session_coverage_incomplete')
+    provenance = {(b.source,b.price_adjustment) for b in all_relevant}
+    if len(provenance) != 1 or any(source in {'','UNKNOWN'} or adjustment not in {'raw','adjusted'}
+                                   for source,adjustment in provenance):
+        result['reasons'].append('volume_source_or_adjustment_mismatch')
+    if not result['reasons']:
+        average = sum(totals)/min_sessions
+        cumulative = sum(b.volume for b in current)
+        value = cumulative/average if average > 0 else None
+        if value is None or not math.isfinite(value):
+            result['reasons'].append('invalid_or_zero_history_volume')
+        else:
+            result.update(calculated_value=value,calculation_status='CALCULATED',
+                current_cumulative_volume=cumulative,historical_mean_cumulative_volume=average,
+                elapsed_minutes=elapsed,calculated_valid_until=(now+timedelta(seconds=30)).isoformat())
     comparable = legacy_comparable or (bool(selected) and volume_evidence_valid(
         evidence or {}, all_relevant, selected[-1][1], through, now))
     if not comparable:
         result['reasons'].append('split_volume_comparability_unknown')
     if not result['reasons']:
-        value = relative_volume(sum(b.volume for b in current), through, bars, symbol=symbol,
-            min_sessions=min_sessions, corporate_actions_verified=True, observed_at=now)
+        value = result['calculated_value']
         if value is None:
             result['reasons'].append('invalid_or_zero_history_volume')
         else:
