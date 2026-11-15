@@ -51,6 +51,15 @@ def parser():
         if name == 'watchlist-export':
             cmd.add_argument('--output',type=Path,required=True)
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
+    for name, help_text in (
+        ('prepare-paper','기존 분봉·시총 자료를 새 실데이터 Paper 원장으로 복사; 실행 엔진을 먼저 중지'),
+        ('paper-status','Paper 시세·RVOL·차단·뉴스·체결 요약; 외부 호출 없음'),
+        ('paper-news-probe','기업 한 곳의 실제 뉴스→LLM→전략 맥락 진단; 유료 생성 시도 최대 1회, 엔진 중지 필요')):
+        paper=sub.add_parser(name,help=help_text)
+        paper.add_argument('--config',type=Path,default=Path('config/sessionquant.realtime-paper.example.yaml'))
+        paper.add_argument('--output',type=Path,help='새 JSON 파일로 결과 저장')
+        if name=='prepare-paper':paper.add_argument('--source-config',type=Path,default=Path('config/sessionquant.candidates.example.yaml'))
+        if name=='paper-news-probe':paper.add_argument('--symbol',default='NVDA')
     diagnostic=sub.add_parser('watchlist-diagnose',help='시총 누락 원인 진단; --connect는 누락 티커의 토스 기본 정보만 조회')
     diagnostic.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
     diagnostic.add_argument('--connect',action='store_true')
@@ -178,7 +187,14 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == 'record-export':
+        if args.command in {'prepare-paper','paper-status','paper-news-probe'}:
+            from .session_config import load_session_config
+            from .paper_operations import command
+            source=load_session_config(args.source_config) if args.command=='prepare-paper' else None
+            result=asyncio.run(command(load_session_config(args.config),args.command,
+                source=source,symbol=getattr(args,'symbol','AAPL'),output=args.output))
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+        elif args.command == 'record-export':
             from .session_config import load_session_config
             from .session_runtime import _open
             from .research.bundle import export_recording

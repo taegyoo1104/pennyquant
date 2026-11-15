@@ -23,6 +23,8 @@ class BudgetClient:
         now=utc(owner._clock());call_id=uuid4().hex
         async with owner.ledger.semaphore:
             owner._check_health()
+            if owner.generation_call_limit is not None and owner.generation_calls >= owner.generation_call_limit:
+                raise BudgetBlocked('진단 생성 호출 한도 도달')
             now=utc(owner._clock())
             metadata['request_started_at']=now.isoformat()
             try:
@@ -34,6 +36,7 @@ class BudgetClient:
                 owner.audit._bodies.pop(call_id,None)
                 raise AuditUnavailable('요청 전 예산·감사 기록 미확인') from exc
             trace['call_ids'].append(call_id)
+            owner.generation_calls += 1
             try:
                 response=await owner.client.post(url,**kwargs)
             except (httpx.HTTPError,asyncio.CancelledError) as exc:

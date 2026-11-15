@@ -36,7 +36,7 @@ class SessionEngine:
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
-                 candidate_settings=None):
+                 candidate_settings=None, paper_data_policy='strict'):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.selection_frame=None
@@ -55,8 +55,11 @@ class SessionEngine:
         self.repo, self.universe = repository, universe
         self.strategy, self.synthetic, self.use_news = strategy, synthetic, use_news
         self.use_market_filter = use_market_filter
-        self.market = MarketEngine(universe, strategy, use_market_filter=use_market_filter, strict_data=strict_market_data)
+        self.market = MarketEngine(universe, strategy, use_market_filter=use_market_filter, strict_data=strict_market_data,
+                                   paper_data_policy=paper_data_policy)
         self.broker = PaperBroker(settings or PortfolioSettings())
+        if paper_data_policy == 'observed_paper_v1' and self.broker.settings.paper_fill_model != 'market_v2':
+            raise ValueError('실데이터 Paper 정책은 market_v2 체결 모형이 필요합니다.')
         self.failed = False
         self.risk_provider = risk_provider
         self.last_time = None
@@ -80,6 +83,7 @@ class SessionEngine:
                     or (stored.get('strict_market_data',False) and not strict_market_data)
                     or stored.get("strategy") != strategy or stored.get("synthetic") != synthetic
                     or stored.get("use_news", True) != use_news
+                    or stored.get('paper_data_policy','strict') != paper_data_policy
                     or stored.get("use_market_filter", True) != use_market_filter):
                 raise ValueError("저장된 실행 환경·전략·자료 유형이 다릅니다. 기존 기록을 덮어쓰지 않습니다.")
             self.broker = PaperBroker.from_state(stored["broker"], settings)
@@ -217,6 +221,7 @@ class SessionEngine:
                  'candidate_selection':asdict(self.candidate_selector.settings),
                  'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_provider_cache':self.risk_provider_cache,
                  "strict_market_data":self.market.strict_data,
+                 'paper_data_policy':self.market.paper_data_policy,
                  "synthetic": self.synthetic, "use_news": self.use_news, "use_market_filter": self.use_market_filter, "broker": broker_state,
                  "cursor": self.cursor, "last_time": self.last_time.isoformat() if self.last_time else None,
                  'last_decision_at':self.last_decision_at.isoformat() if self.last_decision_at else None,
@@ -244,6 +249,7 @@ class SessionEngine:
         self.repo.record("market_regimes", {"id": now.isoformat(), "timestamp": now, **regime})
         context = {"environment": "PAPER_LOCAL", "mode": "paper", "live_orders_enabled": False,
                    "synthetic": self.synthetic, "strategy": self.strategy, "updated_at": now.isoformat(),
+                   'paper_data_policy':self.market.paper_data_policy,
                    "market_regime": regime, "session": serialize(session_status), "account": account,
                    "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else 'DEGRADED' if self._risk_lookup_errors else "ENABLED",
                    'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_snapshot':risk_snapshot,
@@ -326,7 +332,11 @@ class SessionEngine:
                 session_status = self.exit_manager.tick(now, self.market.quotes)
                 quotes = [parse_event(raw).data for raw in events if raw["kind"] == "quote"]
                 for quote in quotes:
-                    self.broker.process_quote(quote, now)
+                    paper_tradable = None
+                    if self.market.paper_data_policy == 'observed_paper_v1':
+                        from .market.paper_policy import paper_eligibility
+                        paper_tradable = paper_eligibility(self.market.eligibility.get(quote.symbol),now)['allowed']
+                    self.broker.process_quote(quote, now, paper_tradable=paper_tradable)
                 for symbol in list(self.broker.positions):
                     quote = self.market.quotes.get(symbol)
                     risk = self.risk_context(now,symbol)
@@ -408,8 +418,9 @@ class SessionEngine:
                         selected.update(final_candidate=True,portfolio_status='FINAL_CANDIDATE')
                         frame['final_candidate_count']+=1
                     allocation = self.manager.plan_entry(decision.symbol, quote.ask, stop, now,bid=quote.bid,
-                        market_state=decision.regime if self.use_market_filter else "BULLISH", tradable=evidence.tradable is True,
-                        fractional_supported=evidence.fractional is True, trend_confirmed=True,
+                        market_state=decision.regime if self.use_market_filter else "BULLISH",
+                        tradable=(decision.indicators.get('paper_eligibility') or {}).get('allowed',evidence.tradable is True),
+                        fractional_supported=(decision.indicators.get('paper_eligibility') or {}).get('allowed',evidence.fractional is True), trend_confirmed=True,
                         support_confirmed=signal.allow_add, rebound_confirmed=signal.allow_add,
                         major_bad_news=risk.get("major_adverse") is True, add=add, signal_id=signal.id,
                         session_allowed=self.exit_manager.permits_entry(now), strategy=self.strategy)
@@ -422,6 +433,10 @@ class SessionEngine:
                             order_intent_id=allocation.intent.client_id if allocation.approved else None)
                     if allocation.approved:
                         self.repo.record("order_intents", serialize(allocation.intent)|{'signal_id':signal.id,'risk_audit':allocation.audit,'risk_policy_version':2,
+                            'paper_data_policy':self.market.paper_data_policy,
+                            'paper_assumptions':decision.indicators.get('paper_eligibility'),
+                            'strategy_rvol':decision.indicators.get('relative_volume'),
+                            'strategy_rvol_status':decision.indicators.get('data_quality',{}).get('strategy_rvol_status'),
                             **({'selection_id':frame['id'],'candidate_rank':selected['rank'],'candidate_score':decision.score,
                                 'selection_policy_version':frame['policy_version']} if frame else {})})
                         self.broker.submit_order(allocation.intent)

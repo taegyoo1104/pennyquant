@@ -92,4 +92,4 @@ def render_watchlist(state, candidates):
             '최근 조회 시도':timestamp(row.get('last_detail_attempt_at')), '상세 자료 지연(초)':age,
             '신규 진입 차단':', '.join(dict.fromkeys(blockers)) if active else '현재 수집 상태 미확인'})
     _table(rows, '시가총액 공급 자료를 확인한 뒤 감시·집중 후보를 표시합니다.')
-    st.caption('관찰 점수는 매수 승인이 아닙니다. RVOL·계좌 거래 가능·소수점 지원·확정봉·시장·손실 제한은 기존 검사를 별도로 통과해야 합니다. 보유·미체결·청산 예정 및 SPY·QQQ는 이 상한과 별도로 관리합니다.')
+    st.caption('관찰 점수는 매수 승인이 아닙니다. 선택한 Paper 거래 조건과 RVOL·확정봉·시장·손실 제한을 별도로 통과해야 합니다. 보유·미체결·청산 예정 및 SPY·QQQ는 이 상한과 별도로 관리합니다.')

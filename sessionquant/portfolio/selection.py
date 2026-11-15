@@ -103,8 +103,13 @@ class PortfolioCandidateSelector:
             if quote:expiry.extend([quote.timestamp+timedelta(seconds=broker.settings.max_quote_age_seconds),
                 quote.received_at+timedelta(seconds=broker.settings.max_quote_age_seconds)])
             if eligibility:
-                expiry.append(eligibility.checked_at+timedelta(seconds=market.max_eligibility_age_seconds))
+                age = 86400 if market.paper_data_policy == 'observed_paper_v1' else market.max_eligibility_age_seconds
+                expiry.append(eligibility.checked_at+timedelta(seconds=age))
                 if eligibility.valid_until:expiry.append(eligibility.valid_until)
+                if market.paper_data_policy == 'observed_paper_v1':
+                    listing=eligibility.field_evidence.get('listing_status',{})
+                    if listing.get('received_at'):expiry.append(utc(listing['received_at'])+timedelta(days=1))
+                    if listing.get('valid_until'):expiry.append(utc(listing['valid_until']))
             rvol=row['indicators'].get('data_quality',{}).get('rvol',{})
             if rvol.get('valid_until'):expiry.append(utc(rvol['valid_until']))
             news=row['news_score_signal']

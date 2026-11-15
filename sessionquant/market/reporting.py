@@ -18,6 +18,9 @@ def current_report(report, now=None):
             stale = True
         if stale:
             row.update(eligibility_verified=False,quote_fresh=False)
+            row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
+            if row.get('paper_eligibility'):
+                row['paper_eligibility'].update(allowed=False,status='STALE')
             row['bars'] = {**row['bars'],'status':'STALE','five_coverage':None,'fifteen_coverage':None}
             row['rvol'] = {**row['rvol'],'value':None,'calculated_value':None,'status':'UNKNOWN','calculation_status':'UNKNOWN'}
             row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'quality_observation_stale']))
@@ -41,11 +44,23 @@ def current_report(report, now=None):
                         for name,value in [('tradable',True),('fractional',True),('halted',False),('corporate_action',False)]))
             except (TypeError,ValueError,KeyError,AttributeError):
                 verified = False
-            if not verified:
-                row['eligibility_verified'] = False
+            experimental = row.get('paper_data_policy')=='observed_paper_v1'
+            if experimental:
+                from .paper_policy import paper_eligibility
+                from .scanner import InstrumentEligibility
+                try: row['paper_eligibility']=paper_eligibility(InstrumentEligibility(**evidence),now)
+                except (ValueError,TypeError):row['paper_eligibility']={'allowed':False,'blockers':['paper_listing_evidence_missing']}
+                row['blockers']=list(dict.fromkeys([*row.get('blockers',[]),*row['paper_eligibility']['blockers']]))
+            row['eligibility_verified'] = bool(row.get('eligibility_verified') and verified)
+            if not verified and not experimental:
                 row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'eligibility_unverified']))
             if row['rvol'].get('valid_until') and utc(row['rvol']['valid_until']) < now:
                 row['rvol'].update(value=None,status='UNKNOWN')
+                row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
+            if row['rvol'].get('calculated_valid_until') and utc(row['rvol']['calculated_valid_until']) < now:
+                row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
+            if row.get('strategy_rvol') is not None and (row['bars']['status']!='COMPLETE' or not row['quote_fresh']):
+                row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
     refreshed = quality_summary(rows, now, source_state=report.get('source_state'),synthetic=report.get('synthetic',False))
     refreshed['captured_at'] = report.get('observed_at')
     refreshed['market_reference_quality'] = report.get('market_reference_quality',{})

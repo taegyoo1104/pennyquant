@@ -27,6 +27,9 @@ def render_quality(state):
             '정정 충돌 분':bars.get('conflicting_minutes'),'명시적 거래량 0분':bars.get('explicit_zero_volume_minutes'),
             '분봉 지연(초)':bars.get('age_seconds'),'수신 지연(초)':bars.get('latest_receipt_lag_seconds'),
             'RVOL(검증됨)':volume.get('value'),'RVOL(계산값·비교 근거 미확인 가능)':volume.get('calculated_value'),
+            'Paper 거래 조건':(item.get('paper_eligibility') or {}).get('status','strict'),
+            'Paper 가정':', '.join((item.get('paper_eligibility') or {}).get('assumptions',[])),
+            '전략에 전달한 RVOL':item.get('strategy_rvol'),'전략 RVOL 근거 상태':item.get('strategy_rvol_status'),
             '완전한 과거 거래일':volume.get('complete_sessions'),
             '필요 거래일':volume.get('required_sessions',20),'RVOL 부족 입력':', '.join(volume.get('reasons',[])),
             '계좌 검증 범위':(item.get('eligibility') or {}).get('account_scope','UNKNOWN'),
@@ -38,7 +41,7 @@ def render_quality(state):
         _table(source.get('read_measurements',[]),'수집 주기 계측 자료가 없습니다.')
         _table([{'종목':s,**row} for s,row in source.get('history_progress',{}).items()],'과거 봉 보충 이력이 없습니다.')
         _table([{'종목':s,**row} for s,row in report.get('market_reference_quality',{}).items()])
-    st.caption('토스 ACTIVE·보유·매수 가능 현금·빈 유의사항은 소수점 주문 자격의 증거가 아닙니다. 누락 봉은 보간하지 않으며 분할 전후 거래량 비교가 미확인이면 RVOL은 UNKNOWN입니다.')
+    st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. observed_paper_v1에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
 
 
 def render_watchlist_rvol(view, backfill):

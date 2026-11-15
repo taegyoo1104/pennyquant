@@ -43,7 +43,12 @@ def _evidence_semantics(quote: str, status: str) -> bool:
 class BudgetedAnalyzer:
     """기존 기업 분석 인터페이스와 거시 분석을 같은 예산·캐시에 연결한다."""
     def __init__(self, repository, settings: LLMSettings | None = None, *, api_key: str | None = None,
-                 client: httpx.AsyncClient | None = None, clock=None, audit_settings=None,environment='PAPER_LOCAL'):
+                 client: httpx.AsyncClient | None = None, clock=None, audit_settings=None,environment='PAPER_LOCAL',
+                 generation_call_limit=None):
+        if generation_call_limit is not None and (type(generation_call_limit) is not int or generation_call_limit < 1):
+            raise ValueError('진단 생성 호출 한도는 양의 정수여야 합니다.')
+        self.generation_call_limit = generation_call_limit
+        self.generation_calls = 0
         self.repo, self.settings = repository, settings or LLMSettings()
         self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
         self.client = client or httpx.AsyncClient(timeout=20, follow_redirects=False)
@@ -52,6 +57,8 @@ class BudgetedAnalyzer:
         self.run_id=uuid4().hex
         self.audit=AuditTrail(repository,audit_settings,environment=environment,clock=self._clock,secrets=(self.api_key,))
         self.ledger = BudgetLedger(repository, self.settings)
+        if generation_call_limit is not None:
+            self.ledger.semaphore = asyncio.Semaphore(1)  # 진단 한도 확인과 예약/전송을 직렬화
         repository.set_control('session_llm_limits_v1',{key:str(getattr(self.settings,key)) for key in (
             'monthly_soft_budget_usd','monthly_hard_budget_usd','daily_primary_call_cap','daily_escalation_call_cap',
             'hourly_primary_call_cap','hourly_escalation_call_cap')})

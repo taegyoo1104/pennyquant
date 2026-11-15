@@ -124,6 +124,15 @@ class NewsPipeline:
     def _completed_key(self,article):
         return 'news_macro_analyzed:'+stable_hash([article.id,article.content_hash,self.analysis_version])
 
+    async def refresh_company(self, symbols, now=None):
+        """운영과 단일 기업 진단이 같은 수집·저장·전략 맥락 경로를 사용한다."""
+        results = await self.company.refresh(symbols, utc(now or self.clock()))
+        for event in self.company.events:self.repo.record('news_events',event)
+        for result in results:
+            row=result.to_dict();row.update(id=row['analysis_id'],category='company')
+            self.repo.record('news_analysis',row);self._analyses[row['id']]=row
+        return results
+
     async def refresh(self, symbols, *, held_symbols=(),allowlist=(), now=None) -> dict:
         from ..news.intake import macro_reason,archive,statistics
         from datetime import timedelta
@@ -142,11 +151,7 @@ class NewsPipeline:
             background=[pool[(cursor+i)%len(pool)] for i in range(min(2,len(pool)))]
             selected=priority+background
             try:
-                results = await self.company.refresh(selected, now)
-                for event in self.company.events:self.repo.record('news_events',event)
-                for result in results:
-                    row=result.to_dict();row.update(id=row['analysis_id'],category='company')
-                    self.repo.record('news_analysis',row);self._analyses[row['id']]=row
+                results = await self.refresh_company(selected, now)
                 issues.extend(self.company.status)
                 self.schedule.success('company_cycle',len(results),now)
                 self.repo.set_control('news_background_cursor_v1',cursor+len(background))

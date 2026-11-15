@@ -32,6 +32,44 @@ def test_real_mysql_rvol_history_restart_namespace_and_schema7(mysql_repositorie
         assert cursor.fetchone()[0]==7
 
 
+def test_real_mysql_prepare_paper_preserves_history_and_does_not_copy_trades(mysql_repositories,tmp_path,monkeypatch):
+    from pathlib import Path
+    from sessionquant.market.history import KIND
+    from sessionquant.paper_operations import prepare_paper
+    from sessionquant.session_config import SessionConfig
+    from sessionquant.market.paper_policy import OBSERVED
+    from test_watchlist_history import seeded
+    from sessionquant.database.config import MySQLConfig
+    src,dst=mysql_repositories(),mysql_repositories()
+    seeded(src)
+    src.record('orders',{'id':'old-order','qty':'0.123456'})
+    base=MySQLConfig.from_env()
+    # _open의 실제 파일 잠금·MySQL lease·복사를 유지하고 두 테스트 namespace에 매핑한다.
+    from sessionquant import paper_operations
+    monkeypatch.setenv('SQ_ENVIRONMENT','PAPER_LOCAL')
+    monkeypatch.setenv('SQ_DB_BACKEND','mysql')
+    def open_fixture(path,backend):
+        namespace=src.namespace if Path(path).name=='source.db' else dst.namespace
+        from sessionquant.database.mysql_repository import MySQLRepository
+        from contextlib import ExitStack
+        from sessionquant.locking import exclusive_lock
+        stack=ExitStack()
+        stack.enter_context(exclusive_lock(str(path)+'.engine.lock',message='test engine active'))
+        repo=MySQLRepository(path,replace(base,namespace=namespace,environment=None))
+        stack.callback(repo.close);stack.enter_context(repo.engine_lease())
+        return stack,repo
+    monkeypatch.setattr(paper_operations,'_open',open_fixture)
+    monkeypatch.delenv('SQ_DB_NAMESPACE',raising=False)
+    monkeypatch.delenv('PQ_DB_NAMESPACE',raising=False)
+    source=SessionConfig(db_path=tmp_path/'source.db')
+    target=replace(source,db_path=tmp_path/'target.db',paper_data_policy=OBSERVED)
+    report=prepare_paper(source,target)
+    assert report['copied_symbol_days']==21
+    assert dst.all(KIND)==src.all(KIND) and dst.all('orders')==[]
+    assert src.all('orders')[0]['qty']=='0.123456'
+    with pytest.raises(ValueError,match='이미'):prepare_paper(source,target)
+
+
 @pytest.fixture
 def mysql_repositories():
     from sessionquant.database.config import MySQLConfig

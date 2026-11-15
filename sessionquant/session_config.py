@@ -33,6 +33,8 @@ class SessionConfig:
     market_cap_input: Path = Path('data/market-cap-input.json')
     market_cap_provider: str = 'auto'
     watchlist_missing_cap_policy: str = 'exclude'
+    paper_data_policy: str = 'strict'
+    actual_account_monitor_enabled: bool = True
     watchlist_refresh_days: int = 7
     watchlist_data_max_age_seconds: int = 120
     focus_min_hold_seconds: int = 300
@@ -56,6 +58,10 @@ class SessionConfig:
     candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        from .market.paper_policy import validate_policy
+        validate_policy(self.paper_data_policy)
+        if type(self.actual_account_monitor_enabled) is not bool:
+            raise ValueError('실계좌 조회 설정은 불리언이어야 합니다.')
         if self.environment != "PAPER_LOCAL":
             raise ValueError("Phase 0~4 실행 환경은 PAPER_LOCAL만 허용합니다. 실제 주문은 비활성화되어 있습니다.")
         if self.database_backend not in {"mysql", "sqlite"}:

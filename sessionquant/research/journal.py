@@ -71,6 +71,7 @@ def start(repo, engine, *, source):
     state = {'active': True, 'run_id': uuid4().hex, 'source': source, 'synthetic': engine.synthetic}
     repo.set_control(CONTROL, state)
     append(repo, 'recording_start', {'strict_market_data': engine.market.strict_data,
+        'paper_data_policy':engine.market.paper_data_policy,
         'initial_flat': not engine.broker.positions and not engine.broker.get_open_orders(),
         'settings': serialize(engine.broker.settings), 'strategy': engine.strategy,
         'exit_policy': serialize(engine.exit_policy),
