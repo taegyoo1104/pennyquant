@@ -74,6 +74,8 @@ class PaperBroker:
 
     def roll_session(self, now: datetime):
         day = aware(now).astimezone(ZoneInfo('America/New_York')).date().isoformat()
+        if self.session_date is not None and day<self.session_date:
+            raise ValueError('과거 거래일로 장부를 되돌려 손실 제한을 초기화할 수 없습니다.')
         if self.session_date != day:
             self.session_date = day
             self.day_start_equity = self.equity

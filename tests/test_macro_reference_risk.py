@@ -143,7 +143,8 @@ def test_filter_off_preserves_exact_baseline_orders_fills_and_cash(repo, tmp_pat
 
 def test_active_unknown_blocks_new_signals_and_cancels_pending_buy(repo):
     rows, opened = synthetic_tape()
-    sample = run_tape(repo, rows, opened, monitor=active(repo))
+    # 청산 시각까지 진행한 뒤 과거로 돌아가지 않고, 진입 시간 안에서 대기 주문 취소를 검사한다.
+    sample = run_tape(repo, [row for row in rows if event_time(row)<=NOW], opened, monitor=active(repo))
     assert sample.broker.orders == {}
     assert any('macro_reference_risk_restriction' in row['blockers'] for row in repo.all('candidates'))
     at = NOW+timedelta(seconds=1)
