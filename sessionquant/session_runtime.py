@@ -102,6 +102,8 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
 
 def batch_events(batch) -> list[dict]:
     result = [{"kind": "bar", "data": jsonable(x)} for x in batch.bars]
+    result += [{"kind":"bar","data":jsonable(x),"restored_at":jsonable(batch.observed_at)}
+               for x in getattr(batch,'cached_bars',())]
     result += [{"kind": "quote", "data": jsonable(x)} for x in batch.quotes]
     result += [{"kind": "eligibility", "data": jsonable(x)} for x in batch.eligibility]
     return sorted(result, key=event_time)
@@ -134,19 +136,34 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                 from .macro.models import LLMSettings
                 from .macro.service import NewsPipeline
                 news = NewsPipeline(repo, companies=config.companies, settings=LLMSettings.from_dict(config.llm),
-                                    include_alpaca=config.include_alpaca)
+                                    include_alpaca=config.include_alpaca,
+                                    macro_refresh_seconds=config.macro_news_refresh_seconds,
+                                    company_refresh_seconds=config.company_news_refresh_seconds,
+                                    calendar_refresh_seconds=config.economic_calendar_refresh_seconds,
+                                    company_max_age_hours=config.company_new_analysis_max_age_hours,
+                                    macro_max_age_hours=config.macro_new_analysis_max_age_hours,
+                                    calendar_enabled=True,enrichment_policies=config.news_enrichment.get('publishers',{}),
+                                    weekend_slowdown=config.news_weekend_slowdown,
+                                    enrichment_min_chars=config.news_enrichment.get('min_chars',300),
+                                    enrichment_min_sentences=config.news_enrichment.get('min_sentences',3),
+                                    audit_settings=config.llm_debug_audit,macro_context_llm=config.macro_context_llm,
+                                    environment=config.environment)
             from .trading_controls import begin_session
             control_state=begin_session(repo,mode="paper")
             from .trading_controls import finish_session
             stack.callback(finish_session,repo,control_state)
             if config.watchlist_enabled:
                 from .watchlist.selection import WatchlistManager
-                watchlist = WatchlistManager(repo, universe, config)
+                from .watchlist.history_selection import DailyHistorySelection
+                if config.source == 'toss':control_state['data_ready'] = False
+                watchlist = WatchlistManager(repo, universe, config,
+                    history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' else None)
             from .market_reference.risk import MacroReferenceRiskMonitor
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
-                                   strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled)
+                                   strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
+                                   candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)
@@ -154,6 +171,13 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             for snapshot in universe.snapshots:
                 repo.record("universe_history", snapshot)
             if config.source == "toss":
+                from .market.history import HistoryStore
+                history_store = HistoryStore(repo) if watchlist is not None else None
+                warmup = None
+                if history_store is not None:
+                    from .market.warmup import StartupWarmup
+                    warmup = StartupWarmup(repo,history_store,watchlist.history_selection,control_state)
+                    engine.market.history_provider = lambda symbol,stamp: history_store.load(symbol,stamp,record=config.recording_enabled)
                 def receive_priority(batch):
                     # 위험 자료는 후보 탐색 완료를 기다리지 않고 단일 작성자 엔진에 전달한다.
                     raw = batch_events(batch)
@@ -168,7 +192,8 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                 market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
-                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference)
+                    history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference,
+                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup)
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:
@@ -186,7 +211,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     priority = list(dict.fromkeys([*engine.broker.positions, *engine.broker.exit_intents,
                         *(o.intent.symbol for o in engine.broker.get_open_orders())]))
                     market_task = asyncio.create_task(market.poll(list(universe.members(current)), priority_symbols=priority))
-                if market and account_task is None and monotonic>=next_account:
+                if config.actual_account_monitor_enabled and market and account_task is None and monotonic>=next_account:
                     from .account_monitor import fetch_account_snapshot
                     account_task=asyncio.create_task(fetch_account_snapshot(market.client))
                     next_account=monotonic+30
@@ -208,8 +233,8 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     else:
                         symbols = list(dict.fromkeys([*priority, *engine.market.quotes]))
                     symbols = [s for s in symbols if s not in {"SPY", "QQQ"}][:20]
-                    news_task = asyncio.create_task(news.refresh(symbols, held_symbols=tuple(engine.broker.positions)))
-                    next_news = monotonic + config.news_refresh_seconds
+                    news_task = asyncio.create_task(news.refresh(symbols, held_symbols=tuple(engine.broker.positions),allowlist=contract['company_allowlist'] if watchlist else ()))
+                    next_news = monotonic + min(config.company_news_refresh_seconds,config.macro_news_refresh_seconds,config.economic_calendar_refresh_seconds)
                 if news_task and news_task.done():
                     try:
                         news_task.result()

@@ -18,8 +18,8 @@ def test_empty_dashboard_does_not_invent_account(tmp_path, monkeypatch):
     assert not app.exception
     assert app.title[0].value == "SessionQuant"
     assert app.metric[0].value == "—"
-    assert app.metric[4].value == "확인 필요"
-    assert {"시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"}.issubset({item.label for item in app.tabs})
+    assert len(app.metric)==4
+    assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     assert not any("실거래 활성화" == button.label for button in app.button)
     assert not (tmp_path / "absent.db").exists()
 
@@ -29,8 +29,8 @@ def test_dashboard_decimal_positions_and_unknown_timestamps():
                                                    "positions": {"AAPL": {"qty": "0.1", "avg_price": "200", "entry_fee": "0.01", "stop_price": "196"}}}})
     view = build_view(data, datetime(2026, 11, 13, 17, tzinfo=timezone.utc))
     assert view["positions"][0]["보유 수량"] == "0.1"
-    assert view["positions"][0]["비중"] == "20.0%"
-    assert view["positions"][0]["평가 손익"] == "$-0.01"
+    assert view["positions"][0]["비중"] == "—"
+    assert view["positions"][0]["평가 손익"] == "—"
     assert view["lag"] is None
     assert view["regime"] == "UNKNOWN"
     assert decimal_value("NaN") is None
@@ -84,7 +84,9 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
     assert data.connected
     assert calls[-1] == "closed"
     assert ('fred_reference_observations', 30) in calls
-    assert all(limit == (30 if name == 'fred_reference_observations' else 2000) for name, limit in calls[:-1])
+    expected_limits = {'fred_reference_observations': 30, 'llm_calls': 500}
+    assert ('llm_calls', 500) in calls
+    assert all(limit == expected_limits.get(name, 2000) for name, limit in calls[:-1])
 
 
 def test_dashboard_reads_actual_engine_flat_state_and_context():
@@ -122,13 +124,16 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception and not app.error
-    assert any('LIVE_LOCAL' in row.value for row in app.caption)
-    assert [metric.value for metric in app.metric][:4] == ['$1,200.50', '$321.45', '₩350,000', '—']
-    assert {"시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"}.issubset({item.label for item in app.tabs})
+    assert any('실제 계좌' in row.value for row in app.caption)
+    assert [metric.value for metric in app.metric][:3] == ['$1,200.50', '$321.45', '—']
+    assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert any(metric.label == '프로그램 누적 비용 · 추정' and metric.value == '$0.20' for metric in app.metric)
     assert any(metric.label == 'OpenAI 충전 누계 · 직접 기록' and metric.value == '$10.00' for metric in app.metric)
     assert any('잔액 부족' in row.value for row in app.warning)
+    app.radio(key='dashboard_page').set_value('매매 내역').run()
     assert any('0.123456' in str(frame.value) for frame in app.dataframe)
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     app.text_input(key='openai-deposit').set_value('0')
     app.button(key='save-openai-deposit').click().run()
     assert not app.exception
@@ -155,4 +160,62 @@ def test_main_screen_with_closed_market_null_schedule(tmp_path, monkeypatch):
     monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception
+    app.radio(key='dashboard_page').set_value('매매 내역').run()
     assert any('청산 시작: — · 미청산 경고: —' in row.value for row in app.caption)
+
+
+def test_stage06_main_news_scopes_verified_current_company_and_keeps_details():
+    from copy import deepcopy
+    from datetime import timedelta
+    from sessionquant.dashboard.news_panel import current_company_news, provider_rows, calendar_rows
+    from sessionquant.models import jsonable, NewsEvent
+    now = datetime(2026, 11, 13, 16, tzinfo=timezone.utc)
+    data = DashboardData(state={'broker': {'positions': {'AAPL': {'qty': '1', 'avg_price': '100'}}}},
+        watchlist_state={'status': 'VALID', 'updated_at': now.isoformat(), 'items': [
+            {'ticker': 'MSFT', 'focused': True, 'focus_valid_until': (now+timedelta(minutes=5)).isoformat()}]})
+    def news(identity, ticker='AAPL', **changes):
+        event = jsonable(NewsEvent(identity, (ticker,), 'Results', now-timedelta(minutes=1), now,
+            'Company IR', 'https://issuer.test/news', 'Full verified company release.', True, False))
+        return {'event': event | changes, 'ticker': ticker, 'source_kind': 'rss', 'primary_verified': True,
+                'analyzed_at': now.isoformat()}
+    rows = [news('rss:held'), news('rss:focus', 'MSFT'), news('rss:unrelated', 'AMZN'),
+            news('rss:stale', published_at=(now-timedelta(hours=25)).isoformat()),
+            news('rss:unverified', verified=False), news('rss:future', published_at=(now+timedelta(minutes=1)).isoformat()),
+            news('rss:empty', body=''), news('rss:error') | {'error': 'llm_budget_limit'}]
+    before = deepcopy(rows)
+    assert {r['event']['id'] for r in current_company_news(rows, data, build_view(data, now), now)} == {'rss:held', 'rss:focus'}
+    assert rows == before
+    assert provider_rows({'schedule': {'gdelt': {'status': 'PROVIDER_RATE_LIMITED', 'http_429': 1}}})[0]['429'] == 1
+    event = {'id': 'a', 'logical_id': 'jobs', 'name': 'Jobs', 'verified': True, 'known_at': now.isoformat(),
+             'scheduled_at': (now+timedelta(hours=1)).isoformat(), 'source_url': 'https://www.bls.gov/', 'revision': 0}
+    cancelled = event | {'id': 'b', 'revision': 1, 'status': 'CANCELLED', 'known_at': (now+timedelta(minutes=1)).isoformat()}
+    assert calendar_rows([event, cancelled], now)[0]['상태'] == 'CONFIRMED'
+    assert calendar_rows([event, cancelled], now+timedelta(minutes=1))[0]['상태'] == 'CANCELLED'
+
+
+def test_stage06_dashboard_renders_populated_provider_and_enrichment_details(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from sessionquant.database.repository import Repository
+    now = datetime.now(timezone.utc)
+    path = tmp_path/'news-dashboard.db'
+    repo = Repository(path, backend='sqlite')
+    repo.set_control('session_news_status', {'updated_at': now.isoformat(),
+        'issues': [{'provider': 'bls', 'code': 'http_403'}]})
+    repo.set_control('news_provider_schedule_v1', {'gdelt': {'status': 'PROVIDER_RATE_LIMITED', 'calls': 1,
+        'http_429': 1, 'cooldown_until': (now+timedelta(hours=1)).isoformat()}})
+    repo.record('news_ingestions', {'id': 'old', 'provider': 'alpaca', 'published_at': '2015-01-01T00:00:00Z',
+        'skip_reason': 'stale_article', 'eligible_for_llm': False})
+    repo.record('news_enrichments', {'id': 'one', 'publisher_domain': 'publisher.test', 'status': 'RIGHTS_UNKNOWN',
+        'body': None, 'body_char_count': 0, 'eligible_for_llm': False})
+    repo.close()
+    monkeypatch.setenv('SQ_DB_BACKEND', 'sqlite')
+    monkeypatch.setenv('SQ_DB', str(path))
+    monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception and not app.error
+    assert len(app.radio(key='dashboard_page').options)==6
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
+    assert any('뉴스 공급자' in item.label for item in app.expander)
+    values = ' '.join(frame.value.to_string() for frame in app.dataframe)
+    assert '공급자 요청 제한' in values and '이용 권한 미확인' in values and '오래된 기사' in values
+    assert 'PROVIDER_RATE_LIMITED' not in values and 'stale_article' not in values

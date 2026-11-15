@@ -1,0 +1,67 @@
+# 개발 안내
+
+이 프로젝트는 사람이 기획하고 AI Codex를 활용해 구현·수정·검증하는 과정에 있습니다. 제품의 목적과 배경은 [프로젝트 소개](../README.md), 현재 이어서 할 일은 [HANDOFF](../HANDOFF.md)를 참고하세요.
+
+## 현재 실행 기준
+
+기본 사용 안내는 [실데이터 모의매매 설정](../config/sessionquant.realtime-paper.example.yaml)을 기준으로 합니다. `run`은 가상 계좌로만 거래하며 현재 기본 전략은 `pullback`입니다. 네 전략을 동시에 실행하는 설정으로 설명하지 않습니다.
+
+| 구분 | 현재 설정·구현 |
+| --- | --- |
+| 종목 범위 | 시총 확인 S&P 500 후보 최대 50 → 과거 분봉 준비 종목 → 집중 분석 최대 20 |
+| 전략 | 기본 눌림목 매수. `momentum`, `gap_breakout`, `vwap`도 구현되어 설정으로 단독 선택 |
+| 계산 | 확정 1분봉으로 당일 5분·15분봉, 추세·가격 변동폭·거래량 지표 계산 |
+| 신규 매수 | 일반 거래일 미국 동부시간 10:45~13:30 |
+| 정리 | 14:40부터 청산 시도, 소수점 접수 마감 15:00. 조기 폐장은 거래소 달력 반영 |
+| 초기 자금·보유 | 모의 $100, 권장 2종목. 현재 예시는 권장 수 초과를 허용하지 않음 |
+| 분석 | 뉴스 수집과 LLM 분석은 시세·손절 작업과 별도 주기로 실행 |
+| 운영 환경 | 로컬 PC/MySQL 우선. GCP 이전은 추후 작업 |
+
+75분 시작 조건은 현재 ATR14 계산과 기술 전략이 당일 5분봉 15개를 요구하는 것과 일치합니다. 최적 매매 시간으로 검증한 값은 아닙니다. 신규 매수 시간을 바꿀 때 지표의 최소 자료량도 확인해야 합니다.
+
+## 코드를 찾는 곳
+
+| 위치 | 역할 |
+| --- | --- |
+| [session_runtime.py](../sessionquant/session_runtime.py) | 실행·수집 작업·대시보드 시작 |
+| [session_engine.py](../sessionquant/session_engine.py) | 입력을 받아 전략·위험·모의 주문 처리 |
+| [market](../sessionquant/market) | 시세·분봉·지표·전략·시장 상태·예열 |
+| [watchlist](../sessionquant/watchlist) | 시총 후보·분봉 준비 목록·집중 분석 선정 |
+| [portfolio](../sessionquant/portfolio) | 모의 체결·잔고·비중·손절·청산 |
+| [news](../sessionquant/news), [macro](../sessionquant/macro) | 기업·경제 뉴스 수집·분석·비용 관리 |
+| [database](../sessionquant/database) | MySQL/SQLite 저장·실행 공간 분리 |
+| [research](../sessionquant/research) | 당시 입력과 판단 기록·재생·비교 |
+| [dashboard](../sessionquant/dashboard) | 한국어 화면과 매매 제어 요청 |
+| [tests](../tests) | 데이터 품질·주문·복구·UI 등의 자동 검사 |
+
+## 변경할 때 유지할 기준
+
+- 모의 거래와 실거래, 실제 계좌와 가상 장부를 구분합니다. 미확인된 실제 거래 권한을 모의 가정으로 검증 완료 처리하지 않습니다.
+- 분봉 누락을 0으로 만들거나 과거 수신 시각을 바꿔 매수 조건을 통과시키지 않습니다. 거래량 비교 근거가 부족하면 그 상태와 모의 운영 가정을 기록합니다.
+- 완료된 과거 검사는 DB 내용 해시·달력 경계·검사 버전·확인 시각이 맞을 때만 재사용합니다. 자료가 변경되면 해당 구간을 다시 검사합니다.
+- LLM은 뉴스 근거와 위험 분석을 보조합니다. 유효한 응답과 정확한 분류는 다르며, 모델이 주문을 직접 실행하지 않습니다.
+- 신규 매수 중지와 기존 보유 손절·청산 처리를 구분합니다. 주문 요청만으로 체결·청산 완료를 기록하지 않습니다.
+- 설정과 데이터가 다른 장부를 임의로 합치지 않습니다. 사용자 로컬 API 키·DB 비밀번호·수정한 SQL은 개발 예제로 덮어쓰지 않습니다.
+
+## 개발 환경과 검사
+
+프로젝트 가상환경에서 설치합니다.
+
+```powershell
+python -m pip install --require-hashes -r requirements-dev.lock
+python -m pip install --no-deps -e .
+python -m sessionquant doctor
+python -m ruff check sessionquant tests
+$env:SQ_TEST_OFFLINE = "1"
+python -m pytest -q
+```
+
+`SQ_TEST_OFFLINE=1`은 검사 중 외부 네트워크 연결을 막습니다. MySQL 통합 검사는 별도 폐기 가능한 MySQL 8에서 `PQ_TEST_MYSQL=1`과 테스트용 접속 변수를 지정한 경우에만 실행합니다. [CI 설정](../.github/workflows/ci.yml)에서 같은 절차를 확인할 수 있습니다. 일반 테스트가 실제 사용자 계정·유료 LLM·실주문을 검증한 것은 아닙니다.
+
+기록 내보내기와 같은 입력 재생은 [운영 안내](REALTIME_PAPER.md#4-장-마감-후-전략-실행-분석), 상세 입력 규칙은 [입력 형식](reference/EVENT_FORMAT.md)을 참고하세요.
+
+## 남은 검증과 문서 관리
+
+실제 장중의 시세 최신성, API 지연, 뉴스 분류의 적절성, 전략대로 발생한 주문·체결·손절을 기록으로 대조해야 합니다. 장기간 비용 차감 성과와 실거래 적합성은 아직 확정하지 않았습니다. KIS 연결은 취소된 범위입니다.
+
+사용자 안내를 바꾸면 README·시작·운영 문서 중 해당 위치를 갱신하고, 작업 결과를 README 앞에 계속 덧붙이지 않습니다. 단계별 세부 구현 근거는 [보관 기록](archive/stages)에, 최신 인수인계는 [HANDOFF](../HANDOFF.md)에 둡니다. 이전 문서의 승인 대기·테스트 실패·설정 수치는 해당 시점의 기록이므로 현재 상태와 대조합니다.

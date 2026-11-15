@@ -48,7 +48,7 @@ def _url_identity(url: str) -> str:
 
 
 def parse_feed(xml: bytes, *, source: str, received_at: datetime,
-               symbols: tuple[str, ...] = (), verified: bool = False) -> list[NewsEvent]:
+               symbols: tuple[str, ...] = (), verified: bool = False, rejected=None) -> list[NewsEvent]:
     """기업 전용 피드와 종목 연결을 확인한 호출자만 symbols와 verified를 지정한다.
 
     updated는 수정 시각이므로 발행 시각을 대체하지 않는다. 짧거나 오래된 본문도
@@ -84,8 +84,10 @@ def parse_feed(xml: bytes, *, source: str, received_at: datetime,
         try:
             published = utc(date_text) if is_atom else utc(parsedate_to_datetime(date_text))
         except (ValueError, TypeError, AttributeError):
+            if rejected is not None:rejected.append({'title':title,'url':link,'raw_published_at':date_text,'published_at':None,'received_at':utc(received_at).isoformat(),'skip_reason':'published_at_unknown'})
             continue
         if published > utc(received_at):
+            if rejected is not None:rejected.append({'title':title,'url':link,'raw_published_at':date_text,'published_at':published.isoformat(),'received_at':utc(received_at).isoformat(),'skip_reason':'invalid_timestamp'})
             continue
         identity = _url_identity(link) if link else guid
         if not title or not identity:
@@ -100,11 +102,15 @@ def parse_feed(xml: bytes, *, source: str, received_at: datetime,
 
 
 class RSSCollector:
-    def __init__(self, *, client: httpx.AsyncClient | None = None):
+    def __init__(self, *, client: httpx.AsyncClient | None = None, repository=None, schedule=None):
         self.client = client or httpx.AsyncClient(timeout=15, follow_redirects=False)
         self._owns_client = client is None
         self.limiter = RateLimiter(1)
         self._host_limiters = {}
+        self.repository=repository
+        from ..news.schedule import NewsSchedule
+        self.schedule=schedule or NewsSchedule(repository)
+        self.cache={};self.status=[];self.rejected=[]
 
     async def fetch(self, url: str, *, source: str, symbols: tuple[str, ...] = (),
                     verified: bool = False) -> list[NewsEvent]:
@@ -112,10 +118,36 @@ class RSSCollector:
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("인증정보 없는 HTTPS 피드 URL이 필요합니다")
         limiter = self._host_limiters.setdefault(parsed.hostname, RateLimiter(1))
-        response = await get_readonly(self.client, url, limiter=limiter,
-                                      headers={"Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.1"})
-        return parse_feed(response.content, source=source, received_at=now_utc(),
-                          symbols=symbols, verified=verified)
+        from ..macro.models import stable_hash
+        cache_key='news_feed_cache:'+stable_hash(url)
+        cached=self.repository.get_control(cache_key,{}) if self.repository else self.cache.get(cache_key,{})
+        name='rss:'+stable_hash(url)
+        if not self.schedule.claim(name,0):
+            self.status=[{'provider':source,'code':'provider_cooldown'}];return []
+        headers={'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml'}
+        for field,key in [('If-None-Match','etag'),('If-Modified-Since','last_modified')]:
+            if cached.get(key):headers[field]=cached[key]
+        try:
+            response = await get_readonly(self.client,url,limiter=limiter,headers=headers,attempts=1,allow_not_modified=True)
+            if response.status_code==304:
+                self.schedule.success(name,0);self.status=[{'provider':source,'code':'not_modified'}];return []
+            mime=response.headers.get('content-type','').split(';')[0].lower()
+            if mime and mime not in {'application/rss+xml','application/atom+xml','application/xml','text/xml'}:
+                raise DataQualityError('피드 응답 MIME 형식이 XML이 아닙니다.')
+            self.rejected=[]
+            events=parse_feed(response.content,source=source,received_at=now_utc(),symbols=symbols,verified=verified,rejected=self.rejected)
+            value={'etag':response.headers.get('etag'),'last_modified':response.headers.get('last-modified')}
+            if self.repository:self.repository.set_control(cache_key,value)
+            else:self.cache[cache_key]=value
+            self.schedule.success(name,len(events));self.status=[{'provider':source,'code':'ok' if events else 'empty_feed','count':len(events)}]
+            if self.repository:
+                from ..news.intake import archive
+                for row in self.rejected:archive(self.repository,row,provider=source,reason=row['skip_reason'])
+            return events
+        except (httpx.HTTPError,ValueError,RuntimeError) as exc:
+            self.schedule.failure(name,exc)
+            self.status=[{'provider':source,'code':'http_'+str(exc.response.status_code) if isinstance(exc,httpx.HTTPStatusError) else 'invalid_feed'}]
+            raise
 
     async def enrich(self, event: NewsEvent, *, allowed_hosts: tuple[str, ...], max_chars: int = 20000) -> NewsEvent:
         """관리자가 확인한 공식 호스트의 공개 본문만 보완한다. 리디렉션은 따라가지 않는다."""

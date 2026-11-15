@@ -5,7 +5,7 @@ from decimal import Decimal, ROUND_DOWN
 from .models import ZERO, QUANTITY_STEP, FractionalPosition, aware, decimal
 
 
-def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill_qty=None):
+def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill_qty=None, paper_tradable=None):
     now = aware(now or quote.received_at)
     if broker.last_event_at and now < broker.last_event_at:
         return []
@@ -53,7 +53,8 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
             if not permits_new_entry(now,min_entry_to_exit_minutes=broker.settings.min_entry_to_exit_minutes):
                 broker.cancel_order(order.client_id,now)
                 continue
-            if broker.halted or not quote.tradable:
+            # 별도 Paper 정책은 호출자가 재검사한다. 원본 quote.tradable은 변경하지 않는다.
+            if broker.halted or not (quote.tradable if paper_tradable is None else paper_tradable):
                 order.unfilled_reason = 'buy_halted_or_untradable'
                 continue
         # 시장가에는 내부 예상 가격을 상한/하한으로 적용하지 않는다.

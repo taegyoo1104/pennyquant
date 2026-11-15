@@ -10,8 +10,8 @@ from ..market_reference.contracts import identity
 
 CONTROL = 'research_recording_v1'
 KINDS = {'news_events', 'news_analysis', 'macro_news', 'macro_analysis', 'economic_events',
-         'llm_usage', 'universe_history', 'market_reference_observations', 'fred_reference_observations'}
-CONTROLS = {'market_reference_view_v1', 'watchlist_snapshots_v1'}
+         'llm_usage', 'universe_history', 'market_reference_observations', 'fred_reference_observations','news_ingestions','news_enrichments','macro_context_snapshots'}
+CONTROLS = {'market_reference_view_v1', 'watchlist_snapshots_v1', 'watchlist_history_selection_v1'}
 
 
 def clock():
@@ -71,9 +71,11 @@ def start(repo, engine, *, source):
     state = {'active': True, 'run_id': uuid4().hex, 'source': source, 'synthetic': engine.synthetic}
     repo.set_control(CONTROL, state)
     append(repo, 'recording_start', {'strict_market_data': engine.market.strict_data,
+        'paper_data_policy':engine.market.paper_data_policy,
         'initial_flat': not engine.broker.positions and not engine.broker.get_open_orders(),
         'settings': serialize(engine.broker.settings), 'strategy': engine.strategy,
         'exit_policy': serialize(engine.exit_policy),
+        'candidate_selection':serialize(engine.candidate_selector.settings),
         'source_reference_filter':serialize(engine.macro_reference_risk.settings) if engine.macro_reference_risk else None,
         'recording_version': 1})
     for name in CONTROLS:
@@ -94,8 +96,10 @@ def frame(engine, events, now, *, manual_halt):
     normalized = [{**raw,'timing':{
         'event_at':time_or_none(raw['data'].get('timestamp') or raw['data'].get('published_at')),
         'published_at':time_or_none(raw['data'].get('published_at')),
-        'received_at':event_time(raw),'available_at':now,'source':raw['data'].get('source','UNKNOWN')}} for raw in events]
+        'received_at':utc(raw['data']['received_at']) if 'restored_at' in raw else event_time(raw),
+        'available_at':now,'source':raw['data'].get('source','UNKNOWN')}} for raw in events]
     append(engine.repo, 'engine_batch', {'decision_at': now, 'events': normalized,
+        'candidate_scope_symbols':engine._batch_candidate_scope,'portfolio_selection':engine.selection_frame,
         'news_contexts': engine._batch_news_contexts, 'scope_blockers': engine._batch_scope_blockers,
         'decisions': engine._batch_decisions,
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars')}

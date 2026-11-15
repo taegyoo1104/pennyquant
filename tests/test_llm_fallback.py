@@ -31,13 +31,17 @@ async def test_exhausted_credit_warns_and_cools_down_across_restart(tmp_path, co
         return httpx.Response(429, json={'error': {'code': code}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         analyzer = BudgetedAnalyzer(repo, api_key='mock-key', client=client, clock=lambda: NOW)
-        article = MacroArticle('https://example.com/news', 'Market update', 'Test article body', 'fixture', NOW, NOW)
+        article = MacroArticle('https://www.federalreserve.gov/newsevents/pressreleases/fixture.htm',
+            'Policy statement', 'The committee released its monetary policy statement.',
+            'Federal Reserve', NOW, NOW, official=True)
         result = await analyzer.analyze_macro(article)
         assert result['status'] == 'UNKNOWN' and result['force_liquidation'] is False
         assert repo.get_control('llm_provider_health')['code'] == 'NO_CREDIT'
         assert any('잔액' in row['message'] for row in repo.all('alerts'))
         assert len(repo.all('llm_usage')) == 1
-        assert Decimal(repo.all('llm_usage')[0]['cost_usd']) == 0
+        assert Decimal(repo.all('llm_usage')[0]['cost_usd']) > 0
+        assert repo.all('llm_usage')[0]['cost_status'] == 'UNCONFIRMED_RESERVED_ESTIMATE'
+        assert repo.all('llm_usage')[0]['provider_billed_cost_usd'] is None
         restarted = BudgetedAnalyzer(repo, api_key='mock-key', client=client, clock=lambda: NOW+timedelta(seconds=1))
         again = await restarted.analyze_macro(article)
         assert again['error'] == 'llm_budget_limit'

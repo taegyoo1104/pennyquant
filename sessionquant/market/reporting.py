@@ -18,8 +18,11 @@ def current_report(report, now=None):
             stale = True
         if stale:
             row.update(eligibility_verified=False,quote_fresh=False)
+            row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
+            if row.get('paper_eligibility'):
+                row['paper_eligibility'].update(allowed=False,status='STALE')
             row['bars'] = {**row['bars'],'status':'STALE','five_coverage':None,'fifteen_coverage':None}
-            row['rvol'] = {**row['rvol'],'value':None,'status':'UNKNOWN'}
+            row['rvol'] = {**row['rvol'],'value':None,'calculated_value':None,'status':'UNKNOWN','calculation_status':'UNKNOWN'}
             row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'quality_observation_stale']))
         else:
             bars = row['bars']
@@ -41,11 +44,23 @@ def current_report(report, now=None):
                         for name,value in [('tradable',True),('fractional',True),('halted',False),('corporate_action',False)]))
             except (TypeError,ValueError,KeyError,AttributeError):
                 verified = False
-            if not verified:
-                row['eligibility_verified'] = False
+            experimental = row.get('paper_data_policy')=='observed_paper_v1'
+            if experimental:
+                from .paper_policy import paper_eligibility
+                from .scanner import InstrumentEligibility
+                try: row['paper_eligibility']=paper_eligibility(InstrumentEligibility(**evidence),now)
+                except (ValueError,TypeError):row['paper_eligibility']={'allowed':False,'blockers':['paper_listing_evidence_missing']}
+                row['blockers']=list(dict.fromkeys([*row.get('blockers',[]),*row['paper_eligibility']['blockers']]))
+            row['eligibility_verified'] = bool(row.get('eligibility_verified') and verified)
+            if not verified and not experimental:
                 row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'eligibility_unverified']))
             if row['rvol'].get('valid_until') and utc(row['rvol']['valid_until']) < now:
                 row['rvol'].update(value=None,status='UNKNOWN')
+                row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
+            if row['rvol'].get('calculated_valid_until') and utc(row['rvol']['calculated_valid_until']) < now:
+                row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
+            if row.get('strategy_rvol') is not None and (row['bars']['status']!='COMPLETE' or not row['quote_fresh']):
+                row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
     refreshed = quality_summary(rows, now, source_state=report.get('source_state'),synthetic=report.get('synthetic',False))
     refreshed['captured_at'] = report.get('observed_at')
     refreshed['market_reference_quality'] = report.get('market_reference_quality',{})
@@ -55,7 +70,8 @@ def current_report(report, now=None):
 
 def persist_quality(engine, now):
     manager = engine.watchlist_policy
-    focus = manager.focus(now) if manager and hasattr(manager,'focus') else []
+    focus = (manager.focus(now) if manager and hasattr(manager,'focus') else
+             manager.candidate_symbols(now) if manager and hasattr(manager,'candidate_symbols') else [])
     priority = list(dict.fromkeys([*engine.broker.positions,*engine.broker.exit_intents,
         *(order.intent.symbol for order in engine.broker.get_open_orders())]))
     targets = list(dict.fromkeys([*priority,*focus])) if manager else list(engine.market.quality_rows)
@@ -68,7 +84,7 @@ def persist_quality(engine, now):
                 'rvol':{'status':'UNKNOWN','value':None,'reasons':['symbol_not_yet_evaluated']},
                 'blockers':['symbol_not_yet_evaluated','eligibility_unverified','relative_volume_unknown_or_low','quote_missing']}
         rows.append(row)
-    report = quality_summary(rows,now,source_state=manager.state if manager else {},synthetic=engine.synthetic)
+    report = quality_summary(rows,now,source_state=getattr(manager,'state',{}),synthetic=engine.synthetic)
     # 가격 이력·집중 근거 전체를 중복 저장하지 않고 수집 계측만 연결한다.
     report['source_state'] = {k:v for k,v in report['source_state'].items() if k in {
         'last_cycle_calls','cycle_call_budget','last_cycle_duration_seconds','backoff_until',

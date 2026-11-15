@@ -24,12 +24,14 @@ class MarketBatch:
     eligibility: list[InstrumentEligibility] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
     observed_at: datetime | None = None
+    cached_bars: list[Bar] = field(default_factory=list)
 
 
 class TossSessionSource:
     def __init__(self, client: TossMarketClient | None = None, *, candidates_per_cycle: int = 2, clock=None,
                  watchlist=None, max_api_calls=24, light_refresh_seconds=30, ranking_refresh_seconds=60,
-                 max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None):
+                 max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None,
+                 history_store=None, watchlist_candles_per_cycle=4, warmup=None):
         if type(candidates_per_cycle) is not int or not 1 <= candidates_per_cycle <= 10:
             raise ValueError("한 주기에 상세 수집할 종목 수는 1~10개입니다")
         self.client = client or TossMarketClient()
@@ -45,6 +47,11 @@ class TossSessionSource:
         self.history_pages_per_cycle = history_pages_per_cycle
         self.on_priority_batch = on_priority_batch
         self.reference_monitor = reference_monitor
+        self.history_store = history_store
+        self.warmup = warmup
+        self.watchlist_candles_per_cycle = watchlist_candles_per_cycle
+        if type(watchlist_candles_per_cycle) is not int or not 0 <= watchlist_candles_per_cycle <= 10:
+            raise ValueError('감시목록 분봉 조회 수는 0~10개입니다.')
         if type(max_cycle_seconds) is not int or not 5 <= max_cycle_seconds <= 30:
             raise ValueError('후보 조회 마감 예산은 5~30초 정수여야 합니다.')
         if type(history_pages_per_cycle) is not int or not 0 <= history_pages_per_cycle <= 3:
@@ -132,6 +139,7 @@ class TossSessionSource:
         token = retry_budget.set(budget)
         priority = list(dict.fromkeys([*priority_symbols, 'SPY', 'QQQ']))
         measurements = []
+        updated_history = set()
 
         async def call(source, method, *args, symbol='*', optional=False, **kwargs):
             budget.reserved = 0
@@ -218,21 +226,26 @@ class TossSessionSource:
                     batch.eligibility.append(evidence)
 
         async def deliver():
-            if self.on_priority_batch and (batch.bars or batch.quotes):
+            if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars):
                 batch.observed_at = utc(self.clock())
                 self.on_priority_batch(batch)
                 batch.bars, batch.quotes, batch.eligibility = [], [], []
+                batch.cached_bars = []
                 state['priority_delivered_at'] = utc(self.clock()).isoformat()
 
-        def accept(symbol,bars):
+        def accept(symbol,bars, *, cached=False):
+            if self.history_store is not None and bars and not cached:
+                self.history_store.ingest(bars)
+                updated_history.add(symbol)
             seen = self._seen.setdefault(symbol,set())
             for bar in bars:
                 identity = (bar.timestamp,bar.open,bar.high,bar.low,bar.close,bar.volume)
                 if identity not in seen:
-                    seen.add(identity); batch.bars.append(bar)
+                    seen.add(identity)
+                    (batch.cached_bars if cached else batch.bars).append(bar)
             if len(seen) > 20000:
                 self._seen[symbol] = set(sorted(seen,key=lambda x:x[0])[-20000:])
-            if bars:
+            if bars and not cached:
                 state.setdefault('last_detail_success',{})[symbol] = utc(self.clock()).isoformat()
 
         async def candles(symbol, *, optional=False):
@@ -289,6 +302,17 @@ class TossSessionSource:
             current_snapshot=manager.store.at(utc(self.clock())) or {}
             force_cap=isinstance(manager.provider,TossMarketCapProvider) and manager.provider.state.get('complete',False) and current_snapshot.get('contract')!='toss_reported_security_krw_v1'
             await manager.refresh(utc(self.clock()),force=force_cap)
+            if self.warmup is not None:
+                async def warmup_read(symbol,cursor):
+                    return await call('toss_startup_backfill',self.client.candles,symbol,count=200,
+                                      before=cursor,symbol=symbol,optional=True)
+                await self.warmup.advance(manager,warmup_read,accept,
+                    lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols,
+                    hydrate=lambda symbol,bars:accept(symbol,bars,cached=True))
+                await deliver()
+                if not self.warmup.control.get('data_ready'):
+                    batch.observed_at = utc(self.clock())
+                    return batch
             if self.reference_monitor is not None:
                 async def reference_read(stream,symbol):
                     from ..market_reference.contracts import REFERENCES
@@ -337,12 +361,29 @@ class TossSessionSource:
                 else:
                     state['budget_exhausted'] = True
             await quotes(chosen,optional=True)
+            if self.history_store is not None:
+                attempts = state.setdefault('last_watchlist_candle_attempt',{})
+                remaining_symbols = [s for s in pool if s not in priority and s not in chosen]
+                remaining_symbols.sort(key=lambda s:(attempts.get(s,''),s))
+                for symbol in remaining_symbols[:self.watchlist_candles_per_cycle]:
+                    if budget.used >= budget.limit or monotonic()-started >= self.max_cycle_seconds:
+                        break
+                    before = budget.used
+                    await candles(symbol,optional=True)
+                    if budget.used > before:
+                        attempts[symbol] = utc(self.clock()).isoformat()
             history = state.setdefault('history_progress',{})
-            order = sorted([s for s in dict.fromkeys([*priority,*focus]) if history.get(s,{}).get('cursor') and not history[s].get('done')],
+            history_targets = [*priority,*focus,*(pool if self.history_store is not None else [])]
+            order = sorted([s for s in dict.fromkeys(history_targets) if history.get(s,{}).get('cursor') and not history[s].get('done')],
                            key=lambda s:(history[s].get('last_attempt_at',''),s))
             for symbol in order[:self.history_pages_per_cycle]:
                 progress = history[symbol]
                 cursor = progress['cursor']
+                bounds = session_bounds(utc(self.clock()))
+                if (self.history_store is not None and utc(cursor) <= (bounds[0] if bounds else utc(self.clock()))
+                        and self.history_store.ready(symbol,utc(self.clock()))):
+                    progress.update(done=True,status='WINDOW_CACHED')
+                    continue
                 progress['last_attempt_at'] = utc(self.clock()).isoformat()
                 response = await call('toss_history_backfill',self.client.candles,symbol,count=200,before=utc(cursor),symbol=symbol,optional=True)
                 if response is None:
@@ -359,6 +400,8 @@ class TossSessionSource:
                 progress['done'] = not following or stalled or reached
                 progress['cursor'] = following
             batch.observed_at = utc(self.clock())
+            if self.history_store is not None:
+                self.history_store.publish(pool,batch.observed_at,updated=updated_history)
             batch.bars.sort(key=lambda bar:(bar.received_at,bar.timestamp,bar.symbol))
             return batch
         finally:

@@ -115,9 +115,10 @@ repo.close()
     app=AppTest.from_string(source).run(timeout=10)
     assert not app.exception
     repo=Repository(path,backend='sqlite'); assert repo.all('order_intents')==[]; repo.close()
+    app.checkbox(key='confirm-start-'+state['run_id']).check().run()
     app.button(key='trading-start').click().run()
     assert app.button(key='trading-start').disabled
-    app.checkbox(key='confirm-stop').check().run()
+    app.checkbox(key='confirm-stop-'+state['run_id']).check().run()
     assert not app.button(key='trading-stop').disabled
     app.button(key='trading-stop').click().run()
     repo=Repository(path,backend='sqlite')

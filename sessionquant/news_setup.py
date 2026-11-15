@@ -29,8 +29,22 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
         'company_rss_catalog_scope':'sp500_top100_market_cap' if config.company_rss_catalog else 'disabled',
         'company_rss_issuer_count':len({c.get('cik') or ticker for ticker,c in config.companies.items() if c.get('rss_urls')}),
         'company_rss_count':sum(len(c.get('rss_urls',[])) for c in config.companies.values()),'connections':{}}
+    from .macro.calendar import CALENDARS
+    report['intervals_seconds']={'company':config.company_news_refresh_seconds,
+        'macro':config.macro_news_refresh_seconds,'calendar':config.economic_calendar_refresh_seconds,'fred':86400}
+    report['new_analysis_max_age_hours']={'company':config.company_new_analysis_max_age_hours,
+        'macro':config.macro_new_analysis_max_age_hours}
+    report['calendar']={'automatic_feeds':CALENDARS,'manual_verified_import':['fed','eia','treasury'],
+        'requires_known_at':True}
+    report['enrichment']={'configured_publishers':len(config.news_enrichment.get('publishers',{})),
+        'body_retention':'HASH_AND_METADATA_ONLY','default_fetch_allowed':False,'probe_fetches_articles':False}
+    report['llm_audit']={'metadata':'ENABLED','body_audit_enabled':config.llm_debug_audit.get('enabled',False),
+        'retention_days':config.llm_debug_audit.get('retention_days',7),'raw_body_read_requires_local_opt_in':True}
+    report['macro_context_llm']={'enabled':config.macro_context_llm.get('enabled',False),
+        'cooldown_seconds':config.macro_context_llm.get('cooldown_seconds',3600),'automatic_order_link':False}
+    report['limits'].update(hourly_primary_calls=llm.hourly_primary_call_cap,hourly_escalation_calls=llm.hourly_escalation_call_cap)
     if not connect: return report
-    providers=('openai','fred','alpaca','sec','rss','official','treasury','gdelt') if provider=='all' else (provider,)
+    providers=('openai','fred','alpaca','sec','rss','official','treasury','gdelt','calendar') if provider=='all' else (provider,)
     for name in providers:
         clients=[]
         try:
@@ -102,6 +116,13 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
             elif name=='gdelt':
                 client=GDELTClient(topics=('us_monetary_policy',)); clients.append(client)
                 rows=await client.fetch(); result={'status':aggregate_status(client.status),'events':len(rows),'topics':client.status,'fact_verification':False}
+            elif name=='calendar':
+                from .macro.calendar import EconomicCalendarClient
+                client=EconomicCalendarClient(); clients.append(client)
+                rows=await client.fetch()
+                feeds=[row for row in client.status if row.get('provider') in CALENDARS]
+                result={'status':aggregate_status(feeds),'events':len(rows),'feeds':client.status,
+                    'fact_verification':False}
             else: raise ValueError('unknown_provider')
             report['connections'][name]=result
         except FREDRequestError as exc:

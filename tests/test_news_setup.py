@@ -71,3 +71,32 @@ async def test_fred_error_never_prints_api_key_in_request_url(tmp_path,monkeypat
 async def test_empty_rss_mapping_is_not_reported_as_configured(tmp_path):
     report=await check_news(config_file(tmp_path),connect=True,provider='rss')
     assert report['connections']['rss']['status']=='not_configured'
+
+
+async def test_offline_reports_independent_cadence_calendar_and_default_rights(tmp_path):
+    report = await check_news(config_file(tmp_path))
+    assert report['intervals_seconds'] == {'company': 180, 'macro': 900, 'calendar': 3600, 'fred': 86400}
+    assert report['new_analysis_max_age_hours'] == {'company': 24, 'macro': 72}
+    assert set(report['calendar']['automatic_feeds']) == {'bls', 'bea'}
+    assert report['enrichment']['configured_publishers'] == 0
+    assert not report['enrichment']['probe_fetches_articles']
+
+
+async def test_calendar_probe_uses_only_get_and_reports_403_without_llm(tmp_path, monkeypatch):
+    from sessionquant.macro.calendar import EconomicCalendarClient
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(403)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = EconomicCalendarClient(client=http)
+    client.limiter.interval = 0
+    monkeypatch.setattr('sessionquant.macro.calendar.EconomicCalendarClient', lambda: client)
+    try:
+        report = await check_news(config_file(tmp_path), connect=True, provider='calendar')
+        assert len(calls) == 2 and all(r.method == 'GET' for r in calls)
+        assert report['connections']['calendar']['status'] == 'unavailable'
+        assert report['llm_generation_calls'] == 0 and not report['live_orders_enabled']
+        assert all(row['http_status'] == 403 for row in report['connections']['calendar']['feeds'] if row['provider'] in {'bls', 'bea'})
+    finally:
+        await http.aclose()

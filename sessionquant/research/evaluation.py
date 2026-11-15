@@ -11,6 +11,7 @@ from .journal import identity
 from .quality import quality_report, NY
 from .replay import replay_recording, POLICIES
 from .proxies import proxy_report
+from .costs import summarize_llm_costs
 
 
 def split_plan(dates, *, train_days=20, validation_days=5, holdout_days=5):
@@ -68,8 +69,7 @@ def evaluate_recording(bundle, report, *, strategy='all',train_days=20,validatio
     usage=[]
     for row in events(bundle/'events.jsonl'):
         if row['kind']=='llm_usage':usage.append(row['data'])
-    known_costs=[decimal(row['cost_usd'],nonnegative=True) for row in usage if row.get('cost_usd') is not None and row.get('pricing_verified') is True and row.get('cost_is_estimate') is False]
-    llm_cost=sum(known_costs,Decimal(0)) if usage and len(known_costs)==len(usage) else None
+    llm_costs=summarize_llm_costs(usage)
     api=decimal(api_cost_usd,nonnegative=True) if api_cost_usd is not None else None
     infra=decimal(infrastructure_cost_usd,nonnegative=True) if infrastructure_cost_usd is not None else None
     variants=[(name+':'+policy,name,policy,True,True,None) for name in strategies for policy in POLICIES]
@@ -111,7 +111,7 @@ def evaluate_recording(bundle, report, *, strategy='all',train_days=20,validatio
         'plan':plan,'variants':variants,'min_trades':min_trades,
         'policy_versions':{label:row['risk_settings'] for label,row in results['diagnostic_all'].items()},
         'api_cost_usd':api,'infrastructure_cost_usd':infra}),'quality':quality,'split_plan':plan,'results':results,
-        'proxy_analysis':proxy_report(bundle/'events.jsonl'),'costs':{'llm_recorded_verified_usd':llm_cost,
+        'proxy_analysis':proxy_report(bundle/'events.jsonl'),'costs':{**llm_costs,
         'api_actual_usd':api,'infrastructure_actual_usd':infra,'included_in_strategy_pnl':False,
         'allocation':'기간·정책 사이에 실비를 자동 배분하지 않습니다. 누락 비용은 0이 아니라 UNKNOWN입니다.'},
         'recommended_parameters':None,'actual_out_of_sample_validated':False,'operating_filter_activated':False,

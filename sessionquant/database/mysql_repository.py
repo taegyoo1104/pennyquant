@@ -131,6 +131,13 @@ class MySQLRepository:
         self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(4,%s)",
                       ("실제 수신·분석·전략 처리 시점의 불변 연구 기록",))
 
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(5,%s)",
+                      ("뉴스 수신·원문 검증 이력과 거시 맥락 스냅샷 추가",))
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(6,%s)",
+                      ("LLM 호출 감사·제한된 암호화 본문·이벤트 맥락 분석 추가",))
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(7,%s)",
+                      ("감시 종목의 거래일별 1분봉·RVOL 비교 이력 저장",))
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         with self._mutex:
@@ -291,6 +298,25 @@ class MySQLRepository:
                 return True
         return False
 
+    def record_fingerprints(self, kind, record_ids, *, include_payload=False):
+        """Hash JSON on the server so unchanged history does not cross the network."""
+        table = self._kind(kind)
+        ids = list(dict.fromkeys(record_ids))
+        if any(not isinstance(item,str) for item in ids):
+            raise ValueError('기록 식별자는 문자열이어야 합니다')
+        found = {}
+        for start in range(0,len(ids),200):
+            batch = ids[start:start+200]
+            hashes = [sha256(item.encode()).digest() for item in batch]
+            placeholders = ','.join('%s' for _ in batch)
+            extra = ',payload' if include_payload else ''
+            rows = self._execute(f'SELECT record_id,SHA2(CAST(payload AS CHAR CHARACTER SET utf8mb4),256){extra} '
+                                 f'FROM {table} WHERE namespace=%s AND record_hash IN ({placeholders})',
+                                 (self.namespace,*hashes),fetch='all')
+            for row in rows:
+                found[row[0]] = {'fingerprint':row[1],**({'payload':self._decode(row[2])} if include_payload else {})}
+        return found
+
     def iter_records(self,kind,*,batch_size=500):
         """다른 네임스페이스를 읽지 않는 순번 기반 페이지 조회."""
         table = self._kind(kind)
@@ -357,8 +383,32 @@ class MySQLRepository:
                             (self.namespace, name), fetch="one")
         return self._decode(row[0]) if row else default
 
+    def update_control(self, name: str, update, default=None):
+        """Lock the namespace/key before reading so independent connections cannot lose updates."""
+        self._control_name(name)
+        with self.transaction():
+            self._execute("INSERT INTO pq_controls(namespace,name,payload) VALUES(%s,%s,%s) "
+                          "ON DUPLICATE KEY UPDATE name=VALUES(name)",
+                          (self.namespace, name, self._json(default)))
+            row = self._execute("SELECT payload FROM pq_controls WHERE namespace=%s AND name=%s FOR UPDATE",
+                                (self.namespace, name), fetch="one")
+            value = update(self._decode(row[0]))
+            self.set_control(name, value)
+            return value
+
     def log(self, level: str, message: str, **extra) -> None:
         self.record("system_logs", {"timestamp": datetime.now(timezone.utc), "level": level, "message": message, **extra})
+
+    def expire_llm_bodies(self, now, *, dry_run=False):
+        """선택한 namespace의 만료된 감사 암호문만 정리한다."""
+        stamp = utc(now).isoformat()
+        with self.transaction():
+            count = self._execute("SELECT COUNT(*) FROM pq_llm_audit_bodies WHERE namespace=%s "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.expires_at'))<=%s", (self.namespace,stamp),fetch='one')[0]
+            if not dry_run:
+                self._execute("DELETE FROM pq_llm_audit_bodies WHERE namespace=%s "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.expires_at'))<=%s", (self.namespace,stamp))
+            return count
 
     def storage_stats(self) -> dict:
         names = tuple("pq_" + kind for kind in self.kinds) + ("pq_engine_state", "pq_controls")

@@ -16,6 +16,22 @@ from ..portfolio.models import decimal, serialize
 
 HISTORY = 'watchlist_snapshots_v1'
 ATTEMPT = 'watchlist_refresh_v1'
+EXCLUDABLE_CAP_ISSUES = {'market_cap_missing', 'market_cap_value_missing'}
+
+
+def cap_selection_metadata(issues, items, missing_cap_policy):
+    """A usable known-cap subset is distinct from a verified full-universe ranking."""
+    if missing_cap_policy not in {'block','exclude'}:
+        raise ValueError('시총 누락 정책은 block 또는 exclude여야 합니다.')
+    excluded = sorted({r['ticker'] for r in issues if r['code'] in EXCLUDABLE_CAP_ISSUES}) if missing_cap_policy=='exclude' else []
+    usable = bool(items) and (not issues or (missing_cap_policy=='exclude'
+                                           and all(r['code'] in EXCLUDABLE_CAP_ISSUES for r in issues)))
+    return {'data_status':'VALID' if usable else 'PARTIAL',
+            'missing_cap_policy':missing_cap_policy, 'coverage_status':'PARTIAL' if issues else 'COMPLETE',
+            'ranking_scope':'available_market_caps' if excluded else 'full_universe',
+            'ranking_verified':bool(items) and not issues, 'excluded_market_cap_symbols':excluded,
+            'market_cap_exclusions':[{'ticker':s,'reasons':sorted({r['code'] for r in issues if r['ticker']==s})}
+                                     for s in excluded]}
 
 
 def utc(value):
@@ -68,17 +84,21 @@ class WatchlistSnapshot:
 
 
 class WatchlistSelector:
-    def __init__(self, size=100, max_age_days=7):
+    def __init__(self, size=100, max_age_days=7, *, missing_cap_policy='block'):
         if type(size) is not int or not 1 <= size <= 100:
             raise ValueError('감시목록 크기는 1~100이어야 합니다.')
         self.size, self.max_age = size, timedelta(days=max_age_days)
+        if missing_cap_policy not in {'block','exclude'}:
+            raise ValueError('시총 누락 정책은 block 또는 exclude여야 합니다.')
+        self.missing_cap_policy = missing_cap_policy
 
     def select(self, batch, universe, now, *, allow_synthetic=False):
         """불완전 입력의 순위를 전체 S&P 500의 확정 순위로 표시하지 않는다."""
         now = utc(now)
         if isinstance(batch,dict) and batch.get('schema_version') == 2:
             from .toss_capitalization import select_toss
-            return select_toss(batch,universe,now,size=self.size,allow_synthetic=allow_synthetic)
+            return select_toss(batch,universe,now,size=self.size,allow_synthetic=allow_synthetic,
+                               missing_cap_policy=self.missing_cap_policy)
         members = universe.members(now)
         if not members:
             raise ValueError('S&P 500 편입 정보가 없거나 만료됐습니다.')
@@ -120,7 +140,6 @@ class WatchlistSelector:
             if symbol not in members:
                 continue
             try:
-                amount = decimal(row.get('market_cap_usd'), positive=True)
                 if row.get('data_status') != 'VERIFIED' or row.get('issuer_verified') is not True:
                     raise ValueError('issuer_or_value_unverified')
                 issuer = row.get('issuer_id')
@@ -130,6 +149,10 @@ class WatchlistSelector:
                     raise ValueError('mixed_times')
                 if row.get('currency', 'USD') != 'USD' or row.get('market_cap_basis', 'issuer_total') != 'issuer_total':
                     raise ValueError('mixed_definition')
+                if row.get('market_cap_usd') is None or row.get('market_cap_usd') == '':
+                    issues.append({'ticker':symbol,'code':'market_cap_value_missing'})
+                    continue
+                amount = decimal(row.get('market_cap_usd'), positive=True)
                 valid.append({**row, 'market_cap_usd': str(amount), 'issuer_id': issuer})
             except (ValueError, TypeError):
                 issues.append({'ticker': symbol, 'code': 'market_cap_or_issuer_unknown'})
@@ -178,6 +201,10 @@ class WatchlistSelector:
             'membership_hash': symbols_digest(members), 'membership_count': len(members),
             'membership_known_at': universe.snapshot(now)['known_at'], 'items': items, 'issues': issues,
             'valid_observations': len(valid), 'size_limit': self.size}
+        payload.update(cap_selection_metadata(issues,items,self.missing_cap_policy))
+        for row in items:
+            row['data_status'] = 'VERIFIED' if payload['data_status']=='VALID' else 'PARTIAL'
+            row['rank_scope'] = payload['ranking_scope']
         payload = serialize(payload)
         payload['id'] = sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         return WatchlistSnapshot(payload)
@@ -185,8 +212,9 @@ class WatchlistSelector:
 
 class WatchlistStore:
     """기존 장부를 건드리지 않고 PAPER 네임스페이스의 제어 원장에 이력을 추가한다."""
-    def __init__(self, repo, universe, *, max_age_days=7):
+    def __init__(self, repo, universe, *, max_age_days=7, missing_cap_policy=None):
         self.repo, self.universe, self.max_age = repo, universe, timedelta(days=max_age_days)
+        self.missing_cap_policy = missing_cap_policy
 
     def add(self, snapshot):
         data = snapshot.payload if isinstance(snapshot, WatchlistSnapshot) else snapshot
@@ -210,6 +238,8 @@ class WatchlistStore:
         if row:
             result['items'] = row['items']
             result['status'] = row['data_status']
+            if self.missing_cap_policy=='block' and row.get('excluded_market_cap_symbols'):
+                result['status'] = 'PARTIAL'
             if now-utc(row['as_of_at']) > self.max_age or (row.get('valid_until') and now>=utc(row['valid_until'])):
                 result['status'] = 'EXPIRED'
             if not members:
@@ -218,4 +248,8 @@ class WatchlistStore:
                 result['status'] = 'MEMBERSHIP_CHANGED'
             if row['synthetic'] and not allow_synthetic:
                 result['status'] = 'SYNTHETIC_BLOCKED'
+            result.update(ranking_scope=row.get('ranking_scope','full_universe'),
+                          ranking_verified=result['status']=='VALID' and row.get('ranking_verified',True),
+                          market_cap_coverage=row.get('coverage_status','COMPLETE' if row['data_status']=='VALID' else 'PARTIAL'),
+                          excluded_market_cap_symbols=row.get('excluded_market_cap_symbols',[]))
         return result

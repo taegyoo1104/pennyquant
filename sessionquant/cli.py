@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import closing
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -38,7 +39,7 @@ def parser():
     news_check=sub.add_parser("check-news",help="뉴스 키·소스·모델 설정 점검; 기본은 연결하지 않음")
     news_check.add_argument("--config",type=Path,default=Path("config/sessionquant.yaml"))
     news_check.add_argument("--connect",action="store_true",help="주문·LLM 생성 없이 API 읽기 연결 검사")
-    news_check.add_argument("--provider",choices=("all","openai","fred","alpaca","sec","rss","official","treasury","gdelt"),default="all")
+    news_check.add_argument("--provider",choices=("all","openai","fred","alpaca","sec","rss","official","treasury","gdelt","calendar"),default="all")
     news_check.add_argument("--symbol",default="AAPL")
     setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
     setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")
@@ -50,8 +51,31 @@ def parser():
         if name == 'watchlist-export':
             cmd.add_argument('--output',type=Path,required=True)
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
+    for name, help_text in (
+        ('prepare-paper','기존 분봉·시총 자료를 새 실데이터 Paper 원장으로 복사; 실행 엔진을 먼저 중지'),
+        ('paper-status','Paper 시세·RVOL·차단·뉴스·체결 요약; 외부 호출 없음'),
+        ('news-status','저장된 뉴스 수집·LLM 요청·분류 결과 확인; 외부 호출·추가 과금 없음'),
+        ('paper-news-probe','기업 한 곳의 실제 뉴스→LLM→전략 맥락 진단; 유료 생성 시도 최대 1회, 엔진 중지 필요')):
+        paper=sub.add_parser(name,help=help_text)
+        paper.add_argument('--config',type=Path,default=Path('config/sessionquant.realtime-paper.example.yaml'))
+        paper.add_argument('--output',type=Path,help='새 JSON 파일로 결과 저장')
+        if name=='prepare-paper':paper.add_argument('--source-config',type=Path,default=Path('config/sessionquant.candidates.example.yaml'))
+        if name=='paper-news-probe':paper.add_argument('--symbol',default='NVDA')
+    diagnostic=sub.add_parser('watchlist-diagnose',help='시총 누락 원인 진단; --connect는 누락 티커의 토스 기본 정보만 조회')
+    diagnostic.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
+    diagnostic.add_argument('--connect',action='store_true')
     quality = sub.add_parser('market-data-status',help='저장된 시세·적격성·RVOL 확보율 조회; 외부 호출 없음')
     quality.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'),help='PAPER_LOCAL 설정 파일')
+    for name in ('history-backfill','history-status'):
+        history = sub.add_parser(name,help='감시목록 과거 분봉 DB 수집' if name=='history-backfill' else '과거 분봉 수집·RVOL 상태 조회')
+        history.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
+        if name == 'history-backfill':
+            history.add_argument('--max-requests',type=int,default=5000)
+            history.add_argument('--refresh-complete',action='store_true',help='완료 거래일도 다시 조회해 정정 충돌 확인')
+            history.add_argument('--allow-partial-watchlist',action='store_true',help='시총 누락만 있는 PARTIAL 후보의 분봉 사전 수집; 매수 허용 아님')
+        else:
+            history.add_argument('--details',action='store_true',help='저장된 DB에서 날짜별 누락·충돌 분을 검사; API 호출 없음')
+            history.add_argument('--output',type=Path,help='상세 진단을 새 JSON 파일로 저장; 기존 파일 덮어쓰기 없음')
     export = sub.add_parser('record-export',help='중지한 PAPER 원장에서 시점 보존 연구 묶음 내보내기')
     export.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
     export.add_argument('--out',type=Path,required=True,help='새 출력 폴더')
@@ -126,6 +150,15 @@ def parser():
     evaluation.add_argument("--input", type=Path, required=True)
     evaluation.add_argument("--output", type=Path, default=Path("data/model-evaluation.json"))
     evaluation.add_argument("--execute", action="store_true", help="실제 API 호출과 토큰 과금 허용")
+    evaluation.add_argument('--offset',type=int,default=0)
+    evaluation.add_argument('--limit',type=int,default=20,help='한 평가 batch 최대 200건, 기본 20건')
+    candidate_evaluation=sub.add_parser('evaluate-candidates',help='동일 기록의 뉴스·업종 후보 가점 비교; 주문·LLM 네트워크 없음')
+    candidate_evaluation.add_argument('--bundle',required=True,type=Path)
+    candidate_evaluation.add_argument('--report',required=True,type=Path)
+    audit_prune=sub.add_parser('llm-audit-prune',help='만료된 감사 암호문 정리; 기본은 조회만')
+    audit_prune.add_argument('--db',type=Path,default=Path('data/sessionquant-paper-local.db'))
+    audit_prune.add_argument('--backend',choices=('sqlite','mysql'),default='mysql')
+    audit_prune.add_argument('--apply',action='store_true')
     calendar = sub.add_parser("calendar-import", help="확인된 공식 경제 발표 일정 가져오기")
     calendar.add_argument("--input", type=Path, required=True)
     calendar.add_argument("--db", type=Path, default=Path("data/sessionquant-paper-local.db"))
@@ -155,7 +188,14 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command == 'record-export':
+        if args.command in {'prepare-paper','paper-status','paper-news-probe','news-status'}:
+            from .session_config import load_session_config
+            from .paper_operations import command
+            source=load_session_config(args.source_config) if args.command=='prepare-paper' else None
+            result=asyncio.run(command(load_session_config(args.config),args.command,
+                source=source,symbol=getattr(args,'symbol','AAPL'),output=args.output))
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+        elif args.command == 'record-export':
             from .session_config import load_session_config
             from .session_runtime import _open
             from .research.bundle import export_recording
@@ -184,6 +224,19 @@ def main(argv=None):
                 api_cost_usd=args.api_cost_usd,infrastructure_cost_usd=args.infrastructure_cost_usd)
             print(json.dumps({'report':str(args.report),'split_status':result['split_plan']['status'],
                 'actual_out_of_sample_validated':False,'live_order_writes':0,'llm_generation_calls':0},ensure_ascii=False,indent=2))
+        elif args.command == 'watchlist-diagnose':
+            from .session_config import load_session_config
+            from .watchlist.diagnostics import command
+            print(json.dumps(asyncio.run(command(load_session_config(args.config),connect=args.connect)),ensure_ascii=False,indent=2))
+        elif args.command in {'history-backfill','history-status'}:
+            from .session_config import load_session_config
+            from .market.history_commands import command
+            report = asyncio.run(command(load_session_config(args.config),args.command,
+                max_requests=getattr(args,'max_requests',5000),refresh=getattr(args,'refresh_complete',False),
+                allow_partial=getattr(args,'allow_partial_watchlist',False),details=getattr(args,'details',False),
+                output=getattr(args,'output',None)))
+            print(json.dumps(report,ensure_ascii=False,indent=2))
+            if args.command == 'history-backfill' and report['status'] != 'COMPLETE':return 1
         elif args.command == 'market-data-status':
             from .session_config import load_session_config
             from .database.repository import Repository
@@ -231,7 +284,16 @@ def main(argv=None):
                 ensure_ascii=False, indent=2))
         elif args.command == "llm-evaluate":
             from .macro.evaluation import evaluate_models
-            print(json.dumps(asyncio.run(evaluate_models(args.input,args.output,execute=args.execute)),ensure_ascii=False,indent=2))
+            print(json.dumps(asyncio.run(evaluate_models(args.input,args.output,execute=args.execute,offset=args.offset,limit=args.limit)),ensure_ascii=False,indent=2))
+        elif args.command == 'llm-audit-prune':
+            from .database.repository import Repository
+            from datetime import datetime,timezone
+            with closing(Repository(args.db,backend=args.backend)) as repo:
+                print(json.dumps({'dry_run':not args.apply,'expired_bodies':repo.expire_llm_bodies(datetime.now(timezone.utc),dry_run=not args.apply),
+                    'llm_generation_calls':0,'live_orders_enabled':False},ensure_ascii=False))
+        elif args.command == 'evaluate-candidates':
+            from .research.candidate_evaluation import evaluate_candidates
+            print(json.dumps(evaluate_candidates(args.bundle,args.report),ensure_ascii=False,indent=2))
         elif args.command == "calendar-import":
             from .macro.models import EconomicEvent
             from .macro.sources import official_url

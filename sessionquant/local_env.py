@@ -10,7 +10,7 @@ DB_KEYS=frozenset({'SQ_DB_BACKEND','SQ_ENVIRONMENT','SQ_DB_NAMESPACE',
     'PQ_DB_BACKEND','PQ_ENVIRONMENT','PQ_DB_NAMESPACE',
     *('PQ_MYSQL_'+suffix for suffix in ('HOST','PORT','DATABASE','USER','PASSWORD'))})
 CONNECTION_KEYS=DB_KEYS|frozenset({'TOSS_CLIENT_ID','TOSS_CLIENT_SECRET','TOSS_ACCOUNT_SEQ',
-    'APCA_API_KEY_ID','APCA_API_SECRET_KEY','OPENAI_API_KEY','OPENAI_MODEL','SEC_USER_AGENT','FRED_API_KEY',
+    'APCA_API_KEY_ID','APCA_API_SECRET_KEY','OPENAI_API_KEY','OPENAI_MODEL','SEC_USER_AGENT','FRED_API_KEY','SQ_LLM_AUDIT_ALLOW_READ',
     'PQ_DB','PQ_REPORT','SQ_DB'})
 DEFAULTS={'SQ_DB_BACKEND':'mysql','SQ_ENVIRONMENT':'PAPER_LOCAL','SQ_MYSQL_HOST':'127.0.0.1',
     'SQ_MYSQL_PORT':'3306','SQ_MYSQL_DATABASE':'sessionquant','SQ_MYSQL_USER':'sessionquant'}
@@ -49,6 +49,8 @@ def save_local_env(values: dict[str,str],*,path: Path | None = None) -> Path:
     if not target.exists():
         fd=os.open(target,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
         os.close(fd)
+    # dotenv의 원자적 재작성도 기존 권한을 보존한다. 새 비밀값을 쓰기 전에 제한한다.
+    if os.name!='nt': target.chmod(0o600)
     for name,value in values.items():
         if name in CONNECTION_KEYS and isinstance(value,str) and value!='':
             set_key(str(target),name,value,quote_mode='always',encoding='utf-8')

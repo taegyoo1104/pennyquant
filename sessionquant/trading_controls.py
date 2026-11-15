@@ -58,54 +58,95 @@ def heartbeat(repo,state,*,now,flat=False):
         state['status']='STOPPED' if flat else 'LIQUIDATING'
     elif state.get('pending_manual_sells'): state['status']='LIQUIDATING'
     elif state.get('completed'): state['status']='STOPPED'
+    elif state.get('data_ready') is False: state['status']='WARMING'
     elif state['running']: state['status']='RUNNING'
     else: state['status']='WAITING'
     state['heartbeat']=utc(now).isoformat()
     repo.set_control(KEY,state)
 
 
-def render_controls(repo,*,positions,now=None):
-    """확인 버튼에서만 명령을 저장하고 자동 갱신은 아무 주문도 생성하지 않는다."""
+def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
+    """동일 제어 행을 잠가 복수 화면의 요청을 직렬화하고 현재 실행을 재검증한다."""
+    from hashlib import sha256
+    now=utc(now or datetime.now(timezone.utc))
+    result=[]
+    def locked(state):
+        mode='live' if environment=='LIVE_LOCAL' else 'paper' if environment=='PAPER_LOCAL' else None
+        if mode is None or state.get('mode')!=mode or state.get('run_id')!=run_id:
+            raise ValueError('화면과 엔진 실행 환경이 다릅니다.')
+        if not state.get('armed') or not 0<=(now-utc(state['heartbeat'])).total_seconds()<=60:
+            raise ValueError('엔진 연결이 만료됐습니다.')
+        if action=='start' and (state.get('status')!='WAITING' or state.get('data_ready') is False or state.get('draining') or state.get('completed')):
+            raise ValueError('현재 엔진 상태에서 시작할 수 없습니다.')
+        for row in repo.recent('order_intents',10000):
+            if (row.get('kind')=='dashboard_command' and row.get('run_id')==run_id
+                and row.get('status')=='pending' and row.get('action')==action and row.get('symbol')==symbol):
+                result.append(row);return state
+        if action=='sell_symbol':
+            from .portfolio.models import decimal
+            ledger=repo.load_state() or {}
+            position=(ledger.get('broker',{}).get('positions') or {}).get(symbol,{})
+            if mode!='paper' or decimal(position.get('qty','0'))<=0:
+                raise ValueError('전략 관리 수량을 검증할 수 없습니다.')
+            orders=repo.recent('orders',10000)
+            if any(r.get('symbol')==symbol and str(r.get('side')).lower()=='sell' and str(r.get('status')).lower() not in {'filled','cancelled','rejected'} for r in orders):
+                raise ValueError('매도 주문이 진행 중입니다.')
+        cid='ui-'+sha256(f"{run_id}:{state.get('heartbeat')}:{action}:{symbol}".encode()).hexdigest()
+        result.append(enqueue(repo,action,run_id=run_id,account_seq=state.get('account_seq'),symbol=symbol,now=now,command_id=cid))
+        return state
+    repo.update_control(KEY,locked,{})
+    return result[0]
+
+
+def render_controls(repo,*,positions,now=None,environment=None,readonly=False,compact=False):
+    """실행별 확인 상태를 보존하고 최종 버튼 클릭에서만 기존 큐를 사용한다."""
     import streamlit as st
-    now=now or datetime.now(timezone.utc)
-    state=repo.get_control(KEY,{})
-    if not state: return
-    st.subheader('매매 제어')
-    st.caption('실제 주문 제어' if state['mode']=='live' else 'Paper 모의매매 제어')
-    active=bool(state.get('armed')) and 0<=(now-utc(state['heartbeat'])).total_seconds()<=60
-    labels={'WAITING':'시작 대기','RUNNING':'매매 중','LIQUIDATING':'청산 중','STOPPED':'매매 종료'}
-    st.write('상태: '+labels.get(state.get('status'),'엔진 확인 필요'))
-    if state.get('completed'): st.caption('이번 Phase 5 소액 검증의 1회 신규 매수가 완료되어 추가 진입은 제한됩니다.')
-    if not active: st.warning('거래 엔진이 비활성화됐거나 연결이 끊어졌습니다. 버튼으로 실주문 권한을 활성화할 수 없습니다.')
-    requests=repo.recent('order_intents',200)
-    unresolved=[r for r in requests if r.get('kind')=='dashboard_command' and r.get('run_id')==state['run_id'] and r.get('status')=='pending']
+    now=utc(now or datetime.now(timezone.utc));state=repo.get_control(KEY,{})
+    if not compact:st.subheader('실행 상태')
+    if not state:
+        st.caption('프로그램 연결 확인 필요')
+        if compact:
+            st.button('매매 시작',disabled=True,key='trading-start')
+            st.button('일괄 매매 종료·청산',disabled=True,key='trading-stop')
+        return
+    environment=environment or ('LIVE_LOCAL' if state.get('mode')=='live' else 'PAPER_LOCAL')
+    try:active=state.get('armed') and 0<=(now-utc(state['heartbeat'])).total_seconds()<=60
+    except (KeyError,ValueError,TypeError):active=False
+    expected='live' if environment=='LIVE_LOCAL' else 'paper' if environment=='PAPER_LOCAL' else None
+    active=bool(active and expected==state.get('mode') and not readonly)
+    from .dashboard.labels import label
+    st.write('**실행 상태 · '+(label(state.get('status','UNKNOWN')) if active else '연결 확인 필요 · 조회만 가능')+'**')
+    run=state['run_id']
+    requests=[r for r in repo.recent('order_intents',200) if r.get('kind')=='dashboard_command' and r.get('run_id')==run]
+    unresolved=[r for r in requests if r.get('status')=='pending']
     def submit(action,symbol=None):
         try:
-            enqueue(repo,action,run_id=state['run_id'],account_seq=state.get('account_seq'),symbol=symbol)
+            request_command(repo,action,run_id=run,environment=environment,symbol=symbol,now=now)
             st.rerun()
-        except (ValueError,RuntimeError): st.error('요청을 전달하지 못했습니다. 엔진과 DB 상태를 확인하세요.')
-    busy=bool(unresolved)
-    if st.button('매매 시작',disabled=not active or busy or state['running'] or state.get('completed') or (state['draining'] and state.get('status')!='STOPPED'),key='trading-start'):
-        submit('start')
-    with st.expander('전체 매매 종료'):
-        st.caption('신규 매수 중단 → 미체결 매수 취소 → 이 시스템이 관리하는 포지션 전량 청산. 기존 외부 보유는 개별 매도 버튼으로 선택하세요.')
-        confirm=st.checkbox('시스템 보유 포지션 전량 시장가 매도를 요청합니다.',key='confirm-stop')
-        if st.button('전체 매매 종료 · 청산 요청',disabled=not active or any(r['action']=='stop_all' for r in unresolved) or not confirm,key='trading-stop'):
-            submit('stop_all')
-    for row in positions:
-        symbol=row.get('symbol'); qty=row.get('qty',row.get('quantity'))
-        if not symbol: continue
-        with st.expander(f'{symbol} 시장가 매도 · 보유 {qty}'):
-            supported=row.get('currency','USD')=='USD'
-            confirm=st.checkbox(f'{symbol}의 표시된 보유 수량 전량을 시장가로 매도합니다.',key='confirm-sell-'+symbol)
-            if not supported: st.caption('현재 실주문 제어는 미국 주식만 지원합니다.')
-            if st.button('시장가 매도 요청',key='sell-'+symbol,disabled=not active or any(r.get('symbol')==symbol and r['action']=='sell_symbol' for r in unresolved) or not confirm or not supported):
+        except Exception:st.error('요청을 전달하지 못했습니다. 현재 실행·관리 수량·미체결을 확인하세요.')
+    with st.expander('매매 시작 확인'):
+        confirm=st.checkbox('표시된 계좌와 모드를 확인했습니다.',key='confirm-start-'+run)
+        if st.button('매매 시작',disabled=not active or bool(unresolved) or state.get('status')!='WAITING' or state.get('data_ready') is False or not confirm,key='trading-start'):submit('start')
+    with st.expander('일괄 매매 종료·청산 확인'):
+        st.caption('신규 매수 차단 → 미체결 매수 취소 → 전략 관리 포지션 시장가 청산. 시장 시간·유동성에 따라 부분체결/미체결될 수 있습니다.')
+        st.caption('대상: '+(', '.join(str(r.get('symbol'))+' '+str(r.get('qty')) for r in positions) or '관리 포지션 없음/미확인'))
+        confirm=st.checkbox('시스템 관리 포지션 전량 청산 위험을 확인했습니다.',key='confirm-stop-'+run)
+        live_ok=st.checkbox('마스킹된 실제 계좌 **의 청산 요청을 추가 확인합니다.',key='confirm-live-'+run) if expected=='live' else True
+        if st.button('일괄 매매 종료·청산 요청',disabled=not active or not confirm or not live_ok or any(r.get('action')=='stop_all' for r in unresolved),key='trading-stop'):submit('stop_all')
+    from .portfolio.models import decimal
+    for row in positions[:5] if compact else positions:
+        symbol=row.get('symbol');qty=row.get('qty')
+        if not symbol:continue
+        try:positive=decimal(qty)>0
+        except (ValueError,TypeError):positive=False
+        with st.expander(f'{symbol} 전량 매도 · 전략 관리 {qty}'):
+            st.caption(label(environment)+' · 시장가 위험/미체결 수량은 엔진에서 다시 확인합니다.')
+            confirm=st.checkbox(f'{symbol} 전략 관리 수량 전량 시장가 매도를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
+            if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or any(r.get('symbol')==symbol and r.get('status') in {'pending','accepted'} for r in requests)):
                 submit('sell_symbol',symbol)
-    for row in [r for r in requests if r.get('kind')=='dashboard_command' and r.get('run_id')==state['run_id']][-5:]:
-        st.caption(f"{row['action']} {row.get('symbol') or ''}: {row['status']} · {row.get('message','엔진 처리 대기')}")
-    for alert in repo.recent('alerts',20)[-5:]:
-        if alert.get('message'): st.warning(alert['message'])
-    st.caption('청산 요청 접수는 체결 완료가 아닙니다. 실제 잔량·미체결 주문이 0인지 확인하세요.')
+    st.caption('주문 처리와 남은 수량은 매매 내역에서 확인하세요.')
+    if not compact:
+        for row in requests[-5:]:st.caption(str(row.get('action'))+': '+str(row.get('status')))
 
 
 def finish_session(repo,state):

@@ -16,6 +16,122 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+async def test_mysql_startup_repair_and_readiness_survive_new_connection(mysql_repositories):
+    from types import SimpleNamespace
+    from sessionquant.market.history import HistoryStore
+    from sessionquant.market.warmup import StartupWarmup, CONTROL
+    from sessionquant.watchlist.history_selection import DailyHistorySelection
+    from sessionquant.trading_controls import begin_session, heartbeat, request_command
+    from test_history_selection import prepare
+    from test_startup_warmup import NOW, Provider, finish
+    repo=mysql_repositories();other=mysql_repositories()
+    store=HistoryStore(repo)
+    prepare(store,'AAPL',NOW,omit_last=True)
+    control=begin_session(repo,mode='paper',now=NOW)
+    clock=SimpleNamespace(now=NOW)
+    selection=DailyHistorySelection(repo,startup_pending=True)
+    worker=StartupWarmup(repo,store,selection,control,clock=lambda:clock.now)
+    heartbeat(repo,control,now=NOW)
+    reopened=mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    assert reopened.namespace==repo.namespace
+    with pytest.raises(ValueError):
+        request_command(reopened,'start',run_id=control['run_id'],environment='PAPER_LOCAL',now=NOW)
+    manager=SimpleNamespace(allow_synthetic=False,base_symbols=lambda _:['AAPL'],
+        store=SimpleNamespace(status=lambda *args,**kwargs:{'status':'VALID'}))
+    await finish(worker,manager,Provider(clock))
+    heartbeat(repo,control,now=NOW)
+    assert reopened.get_control(CONTROL)['status']=='READY'
+    assert reopened.get_control('trade_control_state')['data_ready'] is True
+    assert other.get_control(CONTROL) is None
+    assert repo.all('orders')==other.all('orders')==[]
+
+
+def test_real_mysql_rvol_history_restart_namespace_and_schema7(mysql_repositories):
+    from sessionquant.market.history import HistoryStore, KIND
+    from test_watchlist_history import seeded, NOW
+    repo,other = mysql_repositories(),mysql_repositories()
+    repo.record('orders',{'id':'existing-order','qty':'0.123456'})
+    seeded(repo)
+    reopened = mysql_repositories(repo.namespace)
+    report = HistoryStore(reopened).report('AAPL',NOW)
+    assert report['calculated_value']==2 and report['value'] is None
+    assert report['complete_sessions']==20 and len(reopened.all(KIND))==21
+    assert other.all(KIND)==[] and repo.all('orders')[0]['qty']=='0.123456'
+    with repo.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=7')
+        assert cursor.fetchone()[0]==7
+
+
+async def test_mysql_history_inspections_skip_payloads_and_detect_sql_change(mysql_repositories,monkeypatch):
+    from sessionquant.market.history import HistoryStore,KIND,history_plan,record_id
+    from sessionquant.market.history_inspections import CONTROL
+    from test_history_selection import prepare
+    from test_history_inspection_cache import worker,SUNDAY
+    from test_startup_warmup import finish
+    repo=mysql_repositories();other=mysql_repositories()
+    prepare(HistoryStore(repo),'AAPL',SUNDAY)
+    first,manager,provider=worker(repo)
+    await finish(first,manager,provider)
+    reopened=mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    with monkeypatch.context() as patch:
+        def no_decode(*_):pytest.fail('MySQL cache hit must not download/parse full history')
+        patch.setattr('sessionquant.market.history_inspections.decode_history',no_decode)
+        second,manager,provider=worker(reopened)
+        await finish(second,manager,provider)
+        assert second.report['reused_history_tasks']==20 and second.report['required_tasks']==0
+        assert not provider.calls
+    assert other.get_control(CONTROL) is None
+    day,opened,_=history_plan(SUNDAY)[-1]
+    key=record_id('AAPL',day)
+    before=repo.record_fingerprints(KIND,[key])
+    with repo.db.cursor() as cursor:
+        cursor.execute("UPDATE pq_market_history_sessions SET payload=JSON_REMOVE(payload,'$.bars[10]') WHERE namespace=%s AND record_id=%s",(repo.namespace,key))
+    assert reopened.record_fingerprints(KIND,[key])!=before
+    third,manager,provider=worker(reopened)
+    await finish(third,manager,provider)
+    assert third.report['reused_history_tasks']==19 and third.report['required_tasks']==1
+    assert provider.calls==[('AAPL',opened+timedelta(minutes=11))]
+    assert third.report['status']=='READY'
+
+
+def test_real_mysql_prepare_paper_preserves_history_and_does_not_copy_trades(mysql_repositories,tmp_path,monkeypatch):
+    from pathlib import Path
+    from sessionquant.market.history import KIND
+    from sessionquant.paper_operations import prepare_paper
+    from sessionquant.session_config import SessionConfig
+    from sessionquant.market.paper_policy import OBSERVED
+    from test_watchlist_history import seeded
+    from sessionquant.database.config import MySQLConfig
+    src,dst=mysql_repositories(),mysql_repositories()
+    seeded(src)
+    src.record('orders',{'id':'old-order','qty':'0.123456'})
+    base=MySQLConfig.from_env()
+    # _open의 실제 파일 잠금·MySQL lease·복사를 유지하고 두 테스트 namespace에 매핑한다.
+    from sessionquant import paper_operations
+    monkeypatch.setenv('SQ_ENVIRONMENT','PAPER_LOCAL')
+    monkeypatch.setenv('SQ_DB_BACKEND','mysql')
+    def open_fixture(path,backend):
+        namespace=src.namespace if Path(path).name=='source.db' else dst.namespace
+        from sessionquant.database.mysql_repository import MySQLRepository
+        from contextlib import ExitStack
+        from sessionquant.locking import exclusive_lock
+        stack=ExitStack()
+        stack.enter_context(exclusive_lock(str(path)+'.engine.lock',message='test engine active'))
+        repo=MySQLRepository(path,replace(base,namespace=namespace,environment=None))
+        stack.callback(repo.close);stack.enter_context(repo.engine_lease())
+        return stack,repo
+    monkeypatch.setattr(paper_operations,'_open',open_fixture)
+    monkeypatch.delenv('SQ_DB_NAMESPACE',raising=False)
+    monkeypatch.delenv('PQ_DB_NAMESPACE',raising=False)
+    source=SessionConfig(db_path=tmp_path/'source.db')
+    target=replace(source,db_path=tmp_path/'target.db',paper_data_policy=OBSERVED)
+    report=prepare_paper(source,target)
+    assert report['copied_symbol_days']==21
+    assert dst.all(KIND)==src.all(KIND) and dst.all('orders')==[]
+    assert src.all('orders')[0]['qty']=='0.123456'
+    with pytest.raises(ValueError,match='이미'):prepare_paper(source,target)
+
+
 @pytest.fixture
 def mysql_repositories():
     from sessionquant.database.config import MySQLConfig
@@ -198,7 +314,7 @@ async def test_real_mysql_watchlist_snapshot_focus_and_fair_order_survive_reconn
     universe = UniverseStore(tmp_path / 'members.json')
     universe.refresh([f'T{i:03}' for i in range(500)], source='SYNTHETIC_FIXTURE',
                      observed_at=NOW-timedelta(days=1))
-    config = SessionConfig(database_backend='mysql', market_cap_input=tmp_path / 'unused.json')
+    config = SessionConfig(database_backend='mysql', market_cap_input=tmp_path / 'unused.json', watchlist_size=100)
     manager = WatchlistManager(repo, universe, config, provider=Provider(cap_batch()), allow_synthetic=True)
     await manager.refresh(NOW)
     now = observe(manager)
@@ -361,3 +477,226 @@ def test_real_mysql_research_journal_revisions_rollback_and_namespace(mysql_repo
     with reader.db.cursor() as cursor:
         cursor.execute('SELECT version FROM sq_schema_versions WHERE version=4')
         assert cursor.fetchone()[0]==4
+
+
+def test_real_mysql_stage06_schedule_atomic_claim_and_counters(mysql_repositories):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sessionquant.news.schedule import NewsSchedule
+    first = mysql_repositories()
+    second = mysql_repositories(first.namespace)
+    now = datetime(2026, 11, 13, 16, tzinfo=timezone.utc)
+    barrier = Barrier(2)
+    def worker(repo):
+        schedule = NewsSchedule(repo, clock=lambda: now)
+        barrier.wait()
+        claimed = schedule.claim('gdelt', 900, now)
+        for _ in range(15): schedule.begin('rss', now)
+        return claimed
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(worker, [first, second])) == [False, True]
+    schedule = NewsSchedule(first, clock=lambda: now)
+    assert schedule.state['rss']['calls'] == 30
+    assert schedule.state['gdelt']['calls'] == 1
+    assert not schedule.due('gdelt', 0, now+timedelta(seconds=299))
+
+
+def test_real_mysql_stage06_journals_schema_namespace_and_order_preservation(mysql_repositories):
+    from sessionquant.news.intake import archive
+    from sessionquant.macro.models import EconomicEvent
+    from test_stage06_regressions import minimal_pipeline
+    repo, other = mysql_repositories(), mysql_repositories()
+    now = datetime(2026, 11, 13, 16, tzinfo=timezone.utc)
+    repo.record('orders', {'id': 'stage05-order', 'qty': '0.123456'})
+    first = archive(repo, {'id': 'article', 'body': 'original', 'received_at': now.isoformat()}, provider='fixture')
+    later = archive(repo, {'id': 'article', 'body': 'original', 'received_at': (now+timedelta(seconds=1)).isoformat()}, provider='fixture')
+    assert later['duplicate'] and later['first_available_at'] == first['first_available_at']
+    repo.record('news_enrichments', {'id': 'enrichment', 'status': 'RIGHTS_UNKNOWN', 'body': None})
+    repo.record('macro_context_snapshots', {'id': 'context', 'causal_inference_verified': False})
+    pipeline = minimal_pipeline(repo)
+    event = EconomicEvent('original', 'CPI', now, now-timedelta(days=1), 'https://www.bls.gov/news.release/cpi.htm',
+                          verified=True, logical_id='cpi')
+    pipeline.add_economic_event(event)
+    pipeline.add_economic_event(replace(event, id='cancel', revision=1, status='CANCELLED', known_at=now+timedelta(minutes=1)))
+    reader = mysql_repositories(repo.namespace)
+    restored = minimal_pipeline(reader)
+    assert restored.risk_context(now)['blackout']
+    assert not restored.risk_context(now+timedelta(minutes=1))['blackout']
+    assert reader.all('orders')[0] == {'id': 'stage05-order', 'qty': '0.123456'}
+    for kind in ('news_ingestions', 'news_enrichments', 'macro_context_snapshots', 'economic_events'):
+        assert reader.all(kind) and other.all(kind) == []
+    with reader.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=5')
+        assert cursor.fetchone()[0] == 5
+
+
+def test_real_mysql_stage06_diagnostics_sql_is_select_only_and_scoped(mysql_repositories):
+    from pathlib import Path
+    from sessionquant.news.schedule import NewsSchedule
+    repo = mysql_repositories()
+    other = mysql_repositories()
+    repo.record('news_ingestions', {'id': 'one', 'provider': 'fixture', 'eligible_for_llm': False})
+    other.record('news_ingestions', {'id': 'other', 'provider': 'other', 'eligible_for_llm': True})
+    NewsSchedule(repo).begin('rss:fixture')
+    sql = (Path(__file__).resolve().parents[1]/'sql/news_enrichment_diagnostics.sql').read_text()
+    sql = '\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    statements = [part.strip() for part in sql.replace('REPLACE_WITH_PAPER_NAMESPACE', repo.namespace).split(';') if part.strip()]
+    results = []
+    with repo.db.cursor() as cursor:
+        for statement in statements:
+            assert statement.startswith('SELECT')
+            cursor.execute(statement)
+            results.append(cursor.fetchall())
+    assert results[0][0] == ('news_ingestions', 1)
+    assert results[1][0][0] == 'fixture'
+    assert results[4][0][0] == 'rss:fixture'
+    assert len(repo.all('news_ingestions')) == len(other.all('news_ingestions')) == 1
+
+
+async def test_real_mysql_stage07_call_usage_join_sql_and_namespace(mysql_repositories):
+    import json
+    from pathlib import Path
+    import httpx
+    from sessionquant.macro.analysis import BudgetedAnalyzer
+    from test_stage07_audit import company,response,NOW
+    repo,other=mysql_repositories(),mysql_repositories()
+    repo.record('orders',{'id':'pre-stage07-order','qty':'0.123456'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json=response()))) as http:
+        result=await BudgetedAnalyzer(repo,api_key='fixture-key',client=http,clock=lambda:NOW).analyze(company(),'TEST',source_kind='rss',primary_verified=True)
+    repo.record('news_analysis',result.to_dict())
+    repo.record('news_enrichments',{'id':'funnel-fixture','article_id':'unanalysed-fixture',
+        'content_hash':'body-hash-v1','document_version':'document-v1',
+        'publisher_name':'FixturePublisher','body_char_count':500,'eligible_for_llm':True})
+    other.record('news_enrichments',{'id':'other-funnel','article_id':'other-article',
+        'content_hash':'other-document','publisher_name':'OtherPublisher','body_char_count':500,'eligible_for_llm':True})
+    assert result.llm_call_ids and other.all('llm_calls')==other.all('llm_usage')==[]
+    assert repo.all('orders')[0]['id']=='pre-stage07-order'
+    with repo.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=6')
+        assert cursor.fetchone()[0]==6
+        cursor.execute("SELECT c.payload->>'$.article_id',u.payload->>'$.llm_call_id' FROM pq_llm_calls c "
+            "JOIN pq_llm_usage u ON u.namespace=c.namespace AND u.payload->>'$.llm_call_id'=c.payload->>'$.llm_call_id' WHERE c.namespace=%s",(repo.namespace,))
+        assert cursor.fetchone()==(company().id,result.llm_call_ids[0])
+        text=(Path(__file__).resolve().parents[1]/'sql/llm_call_audit.sql').read_text()
+        text='\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('--'))
+        results=[]
+        for statement in text.replace('REPLACE_WITH_PAPER_NAMESPACE',repo.namespace).split(';'):
+            if not statement.strip():continue
+            assert statement.lstrip().startswith(('SELECT','WITH'))
+            cursor.execute(statement);results.append(cursor.fetchall())
+    assert results[0][0][0]=='SUCCEEDED'
+    assert results[1][0][0]==result.llm_call_ids[0]
+    assert results[4]==results[5]==results[6]==()
+    assert results[7]==()
+    assert results[8][0][0]=='FixturePublisher' and results[8][0][1:7]==(1,1,1,0,0,0)
+    assert len(results[8])==1
+
+
+def test_real_mysql_stage07_parallel_budget_caps_and_idempotent_settlement(mysql_repositories):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sessionquant.macro.analysis import BudgetLedger,BudgetBlocked
+    from sessionquant.macro.models import LLMSettings
+    first=mysql_repositories();second=mysql_repositories(first.namespace)
+    now=datetime(2026,11,13,16,tzinfo=timezone.utc)
+    settings=LLMSettings(hourly_primary_call_cap=1)
+    barrier=Barrier(2)
+    def reserve(repo):
+        barrier.wait()
+        try:return asyncio.run(BudgetLedger(repo,settings).reserve('primary',{'messages':[]},now))
+        except BudgetBlocked:return None
+    with ThreadPoolExecutor(max_workers=2) as pool:reservations=list(pool.map(reserve,[first,second]))
+    assert sum(value is not None for value in reservations)==1
+    reservation=next(value for value in reservations if value is not None)
+    barrier=Barrier(2)
+    def settle(repo):
+        barrier.wait()
+        return asyncio.run(BudgetLedger(repo,settings).settle(reservation,'primary',settings.primary_model,
+            input_tokens=100,output_tokens=20,now=now))
+    with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(settle,[first,second]))
+    assert len(first.all('llm_usage'))==1
+    assert first.all('llm_usage')[0]['cost_usd']=='0.000072'
+    assert BudgetLedger(first,settings).snapshot(now)['reserved_usd']=='0'
+
+
+async def test_real_mysql_stage07_encrypted_expiry_does_not_cross_namespace(mysql_repositories,tmp_path):
+    import httpx
+    from sessionquant.macro.analysis import BudgetedAnalyzer
+    from test_stage07_audit import company,response,NOW
+    repo,other=mysql_repositories(),mysql_repositories()
+    options={'enabled':True,'key_file':str(tmp_path/'mysql-audit.key'),'retention_days':1,
+             'publishers':{'issuer.test':'https://issuer.test/terms'}}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json=response()))) as http:
+        analyzer=BudgetedAnalyzer(repo,api_key='fixture-key',client=http,clock=lambda:NOW,audit_settings=options)
+        result=await analyzer.analyze(company(),'TEST',source_kind='rss',primary_verified=True)
+    assert repo.all('llm_audit_bodies')
+    other.record('llm_audit_bodies',repo.all('llm_audit_bodies')[0])
+    assert repo.expire_llm_bodies(NOW+timedelta(days=2),dry_run=True)==1
+    assert repo.expire_llm_bodies(NOW+timedelta(days=2))==1
+    assert repo.all('llm_audit_bodies')==[] and other.all('llm_audit_bodies')
+    assert repo.get_record('llm_calls',result.llm_call_ids[0])['status']=='SUCCEEDED'
+    assert len(repo.all('llm_usage'))==1
+
+
+def test_real_mysql_stage08_selection_intent_sql_and_namespace(mysql_repositories):
+    from pathlib import Path
+    from test_stage08_selection import market_fixture,batch_for,NOW
+    from sessionquant.session_engine import SessionEngine
+    from sessionquant.portfolio.selection import VIEW
+    repo,other=mysql_repositories(),mysql_repositories()
+    repo.record('orders',{'id':'prior-order-stage07','qty':'0.123456'})
+    market=market_fixture()
+    engine=SessionEngine(repo,market.universe,synthetic=True,candidate_settings={})
+    engine.apply_batch(batch_for(market),NOW)
+    frame=repo.get_control(VIEW)
+    assert frame['approved_new_count']==2 and other.get_control(VIEW) is None
+    assert other.all('order_intents')==[]
+    assert any(row.get('id')=='prior-order-stage07' for row in repo.all('orders'))
+    sql=(Path(__file__).parents[1]/'sql/portfolio_candidate_diagnostics.sql').read_text()
+    sql='\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    results=[]
+    with repo.db.cursor() as cursor:
+        for statement in sql.replace('REPLACE_WITH_PAPER_NAMESPACE',repo.namespace).split(';'):
+            if not statement.strip():continue
+            assert statement.lstrip().startswith('SELECT')
+            cursor.execute(statement);results.append(cursor.fetchall())
+    assert results[0][0][0]==frame['id']
+    assert len(results[1])==4 and sum(row[12] is not None for row in results[1])==2
+    assert results[2]==results[3]==()
+
+
+def test_dashboard_ui_commands_are_idempotent_across_mysql_connections(mysql_repositories):
+    from sessionquant.trading_controls import begin_session,request_command
+    now=datetime.now(timezone.utc)
+    first=mysql_repositories();second=mysql_repositories(first.namespace)
+    state=begin_session(first,mode='paper',now=now)
+    a=request_command(first,'start',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
+    b=request_command(second,'start',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
+    assert a['id']==b['id'] and len(first.all('order_intents'))==1 and first.all('orders')==[]
+
+
+async def test_missing_cap_subset_metadata_and_policy_survive_mysql_restart(mysql_repositories):
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.session_config import SessionConfig
+    from sessionquant.watchlist.selection import WatchlistManager
+    from watchlist_fixtures import NOW, cap_batch, Provider
+    repo=mysql_repositories()
+    universe=UniverseStore()
+    universe.refresh([f'T{i:03}' for i in range(8)],source='SYNTHETIC_FIXTURE',observed_at=NOW-timedelta(days=1))
+    batch=cap_batch(8)
+    batch['observations']=batch['observations'][4:]
+    provider=Provider(batch)
+    config=SessionConfig(company_rss_catalog=False,watchlist_size=5,focus_size=5)
+    manager=WatchlistManager(repo,universe,config,provider=provider,allow_synthetic=True)
+    result=await manager.refresh(NOW)
+    assert result['status']=='VALID' and not result['ranking_verified']
+    reopened=mysql_repositories(repo.namespace)
+    restored=WatchlistManager(reopened,universe,config,provider=provider,allow_synthetic=True)
+    status=restored.store.status(NOW,allow_synthetic=True)
+    assert status['snapshot']==result['snapshot']
+    assert status['excluded_market_cap_symbols']==['T000','T001','T002','T003']
+    assert restored.light_symbols(NOW)==['T007','T006','T005','T004']
+    strict=WatchlistManager(reopened,universe,replace(config,watchlist_missing_cap_policy='block'),
+                            provider=provider,allow_synthetic=True)
+    assert strict.entry_blockers('T007',NOW)==['watchlist_partial']

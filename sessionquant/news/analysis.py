@@ -1,7 +1,7 @@
 """Bounded, evidence-checked LLM extraction; the model never places orders."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, replace, field
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
@@ -15,9 +15,10 @@ import httpx
 
 from ..models import NewsEvent, jsonable, symbol_valid, utc
 from .classifier import classify
+from ..llm.evidence import prepare_article, evidence_span, parse_completion, ValidationFailure
 
 
-PROMPT_VERSION = "news-facts-v2"
+PROMPT_VERSION = "news-facts-v3"
 SENTIMENTS = {"POSITIVE", "NEGATIVE", "NEUTRAL", "MIXED", "UNKNOWN"}
 EVENT_TYPES = {
     "FDA_APPROVAL", "CLINICAL_SUCCESS", "MAJOR_CONTRACT", "EARNINGS_BEAT", "STRATEGIC_PARTNERSHIP",
@@ -79,6 +80,15 @@ class NewsAnalysis:
     analyzed_at: datetime | None = None
     error: str = ""
     input_digest: str = ""
+    llm_call_ids: tuple[str,...] = ()
+    adopted_llm_call_id: str | None = None
+    precheck_id: str | None = None
+    cached: bool = False
+    validation_error_code: str = ""
+    failed_field: str = ""
+    evidence_source_spans: tuple[dict,...] = ()
+    provenance: dict = field(default_factory=dict)
+    logical_analysis_id: str = ""
 
     @property
     def news_id(self) -> str:
@@ -178,10 +188,9 @@ class NewsAnalyzer:
         now = utc(now or datetime.now(timezone.utc))
         baseline = NewsAnalysis(ticker, event, source_kind=source_kind, model=self.model, analyzed_at=now,
                                 input_digest=event_digest(event, ticker))
-        if ticker not in event.symbols or not event.verified or not event.source.strip():
-            return replace(baseline, error="unverified_source_or_ticker", reason="기업·종목·출처 확인 필요")
-        if not self._fresh(event, now):
-            return replace(baseline, error="stale_or_inconsistent_time", reason="뉴스 시각 또는 수신 지연 확인 필요")
+        from .intake import company_reason
+        reason=company_reason(event,ticker,source_kind,primary_verified,now,self.max_age_hours)
+        if reason:return replace(baseline,error=reason,reason='뉴스의 출처·종목·시각·본문 확인이 필요합니다.')
         is_primary = primary_verified is True and source_kind in {"sec", "rss"}
         if source_kind == "sec":
             is_primary = is_primary and event.id.startswith("sec:") and urlsplit(event.url).hostname == "www.sec.gov"
@@ -200,7 +209,11 @@ class NewsAnalyzer:
             return replace(baseline, error="unconfirmed_catalyst", reason=rules.reason, model="rules-v2")
         if not event.body.strip() or event.body.startswith("Filing metadata only;"):
             return replace(baseline, error="article_body_missing", reason="원문 본문 확인 필요")
-        article_text = (event.title + "\n" + event.body)[:self.max_input_chars]
+        prepared = prepare_article(event.title,event.body,self.max_input_chars)
+        if not prepared['body'].strip():
+            return replace(baseline,error='article_body_missing',validation_error_code='INSUFFICIENT_EVIDENCE',
+                           failed_field='body',reason='안전한 길이의 원문 근거가 부족합니다.')
+        article_text = prepared['text']
         identity = json.dumps({"id": event.id, "ticker": ticker, "text": article_text,
                                "published_at": utc(event.published_at).isoformat(), "source": event.source,
                                "primary": is_primary, "kind": source_kind, "model": self.model,
@@ -218,7 +231,12 @@ class NewsAnalyzer:
         payload = {
             "model": self.model,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                         {"role": "user", "content": json.dumps({"ticker": ticker, "article_data": article_text}, ensure_ascii=False)}],
+                         {"role": "user", "content": json.dumps({"ticker": ticker, "article_data": article_text,
+                             "article_metadata":{"article_id":event.id,"article_url":event.url,"publisher":event.source,
+                                 "published_at":utc(event.published_at).isoformat(),"first_available_at":utc(event.received_at).isoformat(),
+                                 "publisher_verified":event.verified,"primary_official_verified":is_primary,
+                                 **{key:value for key,value in prepared.items() if key not in {'text','body','title','paragraphs'}},
+                                 "paragraphs":[{key:value for key,value in paragraph.items() if key!='text'} for paragraph in prepared['paragraphs']]}}, ensure_ascii=False)}],
             "response_format": {"type": "json_schema", "json_schema": {
                 "name": "issuer_news_facts", "strict": True, "schema": _schema()}},
             "max_completion_tokens": 1200,
@@ -232,62 +250,64 @@ class NewsAnalyzer:
             response = await self.client.post(self.base_url + "/chat/completions", json=payload,
                                               headers={"Authorization": "Bearer " + self.api_key})
             response.raise_for_status()
-            if len(response.content) > 100000:
-                raise ValueError("response size")
-            data = response.json()
-            choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop" or choice["message"].get("refusal"):
-                raise ValueError("incomplete response")
-            result = self._validate(json.loads(choice["message"]["content"]), article_text, baseline)
+            data, usage = parse_completion(response)
+            result = self._validate(data, article_text, baseline)
+            spans=tuple(evidence_span(prepared,item.evidence,item.status) for item in result.events)
+            result=replace(result,evidence_source_spans=spans)
             if rule_hazard:
                 # Preserve conservative entry blocking, while only the validated
                 # extracted events can qualify a subsequent protective sell.
                 result = replace(result, sentiment="NEGATIVE", entry_eligible=False,
                                  dilution_risk=result.dilution_risk or rules.dilution_risk)
-            usage = data.get("usage", {})
             token_counts = (usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
             if any(type(value) is not int or value < 0 for value in token_counts):
-                raise ValueError("invalid token usage")
+                raise ValidationFailure('SCHEMA_MISMATCH','usage')
             result = finished(replace(result, input_tokens=token_counts[0], output_tokens=token_counts[1]))
             if len(self._cache) >= 10000:
                 self._cache.pop(next(iter(self._cache)))
             self._cache[cache_key] = result
             return result
         except httpx.HTTPStatusError as exc:
-            return finished(replace(baseline, error=f"llm_http_{exc.response.status_code}", reason="LLM API 권한·요금·서비스 상태 확인 필요"))
-        except httpx.RequestError:
-            return finished(replace(baseline, error="llm_connection_error", reason="LLM 연결 실패; 자동 진입 보류"))
+            return finished(replace(baseline, error=f"llm_http_{exc.response.status_code}", validation_error_code='HTTP_ERROR',
+                failed_field='http_status',reason="LLM API 권한·요금·서비스 상태 확인 필요"))
+        except httpx.RequestError as exc:
+            return finished(replace(baseline, error="llm_connection_error",validation_error_code='TIMEOUT' if isinstance(exc,httpx.TimeoutException) else 'TRANSPORT_ERROR',
+                failed_field='transport',reason="LLM 연결 실패; 자동 진입 보류"))
+        except ValidationFailure as exc:
+            return finished(replace(baseline,error='llm_invalid_output',validation_error_code=exc.code,
+                failed_field=exc.field,reason='LLM 출력·근거 검증 실패; 자동 진입 보류'))
         except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-            return finished(replace(baseline, error="llm_invalid_output", reason="LLM 출력·근거 검증 실패; 자동 진입 보류"))
+            return finished(replace(baseline, error="llm_invalid_output",validation_error_code='SCHEMA_MISMATCH',
+                failed_field='response',reason="LLM 출력·근거 검증 실패; 자동 진입 보류"))
 
     def _validate(self, data: dict, article_text: str, baseline: NewsAnalysis) -> NewsAnalysis:
         if not isinstance(data, dict) or set(data) != set(_schema()["required"]):
-            raise ValueError("schema keys")
+            raise ValidationFailure('SCHEMA_MISMATCH','response.keys')
         if data["ticker"] != baseline.ticker or data["overall_sentiment"] not in SENTIMENTS:
-            raise ValueError("identity or sentiment")
+            raise ValidationFailure('SCHEMA_MISMATCH','ticker.overall_sentiment')
         confidence = data["confidence"]
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
-            raise ValueError("confidence")
+            raise ValidationFailure('SCHEMA_MISMATCH','confidence')
         if type(data["requires_verification"]) is not bool or not isinstance(data["reason"], str) or not data["reason"].strip():
-            raise ValueError("required analysis fields")
+            raise ValidationFailure('SCHEMA_MISMATCH','requires_verification.reason')
         missing = data["missing_information"]
         if not isinstance(missing, list) or len(missing) > 20 or any(not isinstance(value, str) for value in missing):
-            raise ValueError("missing information")
+            raise ValidationFailure('SCHEMA_MISMATCH','missing_information')
         if not isinstance(data["events"], list) or not 1 <= len(data["events"]) <= 8:
-            raise ValueError("event count")
+            raise ValidationFailure('SCHEMA_MISMATCH','events')
         extracted = []
         for item in data["events"]:
             if not isinstance(item, dict) or set(item) != set(_schema()["properties"]["events"]["items"]["required"]):
-                raise ValueError("event schema")
+                raise ValidationFailure('SCHEMA_MISMATCH','events.keys')
             if item["type"] not in EVENT_TYPES or item["status"] not in {"CONFIRMED", "PLANNED", "RUMOR", "UNKNOWN"}:
-                raise ValueError("event type")
+                raise ValidationFailure('SCHEMA_MISMATCH','events.type.status')
             if item["company_impact"] not in SENTIMENTS or item["shareholder_impact"] not in SENTIMENTS:
-                raise ValueError("impact")
+                raise ValidationFailure('SCHEMA_MISMATCH','events.impact')
             if item["importance"] not in {"LOW", "MEDIUM", "HIGH"} or type(item["dilution_risk"]) is not bool:
-                raise ValueError("importance")
+                raise ValidationFailure('SCHEMA_MISMATCH','events.importance')
             quote = item["evidence"]
             if not isinstance(quote, str) or not 8 <= len(quote) <= 1000 or _text(quote) not in _text(article_text):
-                raise ValueError("evidence quote")
+                raise ValidationFailure('EVIDENCE_QUOTE_MISMATCH','events.evidence')
             extracted.append(ExtractedEvent(**item))
         dilution = any(event.dilution_risk or event.type in RISK_TYPES for event in extracted)
         negative = any(event.status == "CONFIRMED" and event.shareholder_impact == "NEGATIVE" for event in extracted)

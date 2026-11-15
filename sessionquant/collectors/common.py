@@ -49,7 +49,7 @@ def retry_after(value: str | None, fallback: float) -> float:
 
 
 async def get_readonly(client: httpx.AsyncClient, url: str, *, limiter: RateLimiter,
-                       attempts: int = 3, **kwargs) -> httpx.Response:
+                       attempts: int = 3, allow_not_modified=False, **kwargs) -> httpx.Response:
     """GET only. Authentication failures fail immediately without credential churn."""
     if not 1 <= attempts <= 5:
         raise ValueError("attempts must be 1..5")
@@ -76,6 +76,7 @@ async def get_readonly(client: httpx.AsyncClient, url: str, *, limiter: RateLimi
         if response.status_code in {429, 500, 502, 503, 504} and attempt + 1 < attempts:
             await asyncio.sleep(retry_after(response.headers.get("Retry-After"), 0.25 * 2**attempt))
             continue
+        if response.status_code==304 and allow_not_modified:return response
         response.raise_for_status()
         return response
     raise AssertionError("unreachable")

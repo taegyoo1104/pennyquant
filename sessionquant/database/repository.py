@@ -15,7 +15,7 @@ KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_even
          "alerts", "pipeline_status", "order_intents", "broker_state",
          "market_regimes", "macro_news", "macro_analysis", "llm_usage", "session_state",
          "universe_history", "reconciliations", "account_snapshots", "schema_migrations",
-         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events")
+         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events", "news_ingestions", "news_enrichments", "macro_context_snapshots", "llm_calls", "llm_audit_bodies", "macro_context_analysis", "market_history_sessions")
 
 
 class Repository:
@@ -42,8 +42,8 @@ class Repository:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS {name} (seq INTEGER PRIMARY KEY, record_id TEXT UNIQUE, payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS engine_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS controls (name TEXT PRIMARY KEY, payload TEXT NOT NULL)")
-        if self.db.execute("PRAGMA user_version").fetchone()[0] < 4:
-            self.db.execute("PRAGMA user_version=4")
+        if self.db.execute("PRAGMA user_version").fetchone()[0] < 7:
+            self.db.execute("PRAGMA user_version=7")
         self.db.commit()
         self._in_transaction = False
 
@@ -146,6 +146,25 @@ class Repository:
                 return True
         return False
 
+    def record_fingerprints(self, kind, record_ids, *, include_payload=False):
+        """Hash stored bytes in the DB; normal reads return no large JSON payloads."""
+        from hashlib import sha256
+        if kind not in KINDS:
+            raise ValueError('지원하지 않는 기록 종류입니다')
+        ids = list(dict.fromkeys(record_ids))
+        if any(not isinstance(item,str) for item in ids):
+            raise ValueError('기록 식별자는 문자열이어야 합니다')
+        self.db.create_function('sq_payload_sha256',1,lambda value:sha256(value.encode('utf-8')).hexdigest(),deterministic=True)
+        found = {}
+        for start in range(0,len(ids),200):
+            batch = ids[start:start+200]
+            placeholders = ','.join('?' for _ in batch)
+            extra = ',payload' if include_payload else ''
+            rows = self.db.execute(f'SELECT record_id,sq_payload_sha256(payload){extra} FROM {kind} WHERE record_id IN ({placeholders})',batch)
+            for row in rows:
+                found[row[0]] = {'fingerprint':row[1],**({'payload':json.loads(row[2])} if include_payload else {})}
+        return found
+
     def storage_stats(self) -> dict:
         counts, sizes = {}, {}
         for name in (*KINDS, "engine_state", "controls"):
@@ -183,8 +202,25 @@ class Repository:
         row = self.db.execute("SELECT payload FROM controls WHERE name=?", (name,)).fetchone()
         return json.loads(row[0]) if row else default
 
+    def update_control(self, name: str, update, default=None):
+        """Read and replace under a database write lock, including the first insert."""
+        with self.transaction():
+            value = update(self.get_control(name, default))
+            self.set_control(name, value)
+            return value
+
     def log(self, level: str, message: str, **extra) -> None:
         self.record("system_logs", {"timestamp": datetime.now(timezone.utc), "level": level, "message": message, **extra})
+
+    def expire_llm_bodies(self, now, *, dry_run=False):
+        """만료된 암호문만 정리하고 호출 메타데이터·금융 원장은 보존한다."""
+        from ..models import utc
+        stamp = utc(now).isoformat()
+        with self.transaction():
+            count = self.db.execute("SELECT COUNT(*) FROM llm_audit_bodies WHERE json_extract(payload,'$.expires_at')<=?", (stamp,)).fetchone()[0]
+            if not dry_run:
+                self.db.execute("DELETE FROM llm_audit_bodies WHERE json_extract(payload,'$.expires_at')<=?", (stamp,))
+            return count
 
     def close(self):
         self.db.close()

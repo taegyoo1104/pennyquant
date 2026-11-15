@@ -8,7 +8,17 @@ source: toss
 poll_seconds: 10
 symbols_per_cycle: 2
 news_enabled: true
-news_refresh_seconds: 600
+# 구 news_refresh_seconds는 명시한 경우에만 기업·거시 주기의 fallback이다.
+company_news_refresh_seconds: 180
+macro_news_refresh_seconds: 900
+economic_calendar_refresh_seconds: 3600
+company_new_analysis_max_age_hours: 24
+macro_new_analysis_max_age_hours: 72
+news_weekend_slowdown: false
+news_enrichment:
+  publishers: {}
+  min_chars: 300
+  min_sentences: 3
 include_alpaca: true
 # 기업별 RSS는 해당 기업의 공식 IR 피드인지 확인한 뒤 추가한다.
 companies: {}
@@ -17,3 +27,12 @@ portfolio:
   min_entry_to_exit_minutes: 30
 # 모델 접근 권한과 비용은 본인 OpenAI 계정에서 별도 확인한다.
 llm: {}
+# 07 메타데이터 감사는 기본 적용. 원문 보관·사건 해설은 별도 opt-in이다.
+llm_debug_audit:
+  enabled: false
+macro_context_llm:
+  enabled: false
+# 08: 집중 목록의 같은 시점 후보 비교. 검증되지 않은 뉴스·업종은 가점 없음.
+candidate_selection:
+  enabled: true
+  allow_above_preferred: false

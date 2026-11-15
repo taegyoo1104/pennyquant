@@ -62,8 +62,8 @@ class FREDRequestError(RuntimeError):
 
 
 class OfficialNewsClient:
-    def __init__(self, *, rss=None, feeds: dict | None = None, enrich: bool = False):
-        self.rss = rss or RSSCollector()
+    def __init__(self, *, rss=None, feeds: dict | None = None, enrich: bool = False, repository=None):
+        self.rss = rss or RSSCollector(repository=repository)
         self.feeds = feeds if feeds is not None else OFFICIAL_FEEDS
         self.enrich = enrich
         self.status = []
@@ -97,36 +97,54 @@ class OfficialNewsClient:
 
 
 class GDELTClient:
-    def __init__(self, *, client: httpx.AsyncClient | None = None, topics: tuple[str, ...] | None = None):
+    def __init__(self, *, client: httpx.AsyncClient | None = None, topics: tuple[str, ...] | None = None, repository=None):
         self.client = client or httpx.AsyncClient(timeout=20, follow_redirects=False)
         self._owns_client = client is None
+        self.repo=repository
+        from ..news.schedule import NewsSchedule
+        self.schedule=NewsSchedule(repository)
         self.topics = topics if topics is not None else tuple(TOPICS)
         if any(topic not in TOPICS for topic in self.topics):
             raise ValueError("GDELT 주제 이름을 확인하십시오")
         self.limiter = RateLimiter(0.2)
         self.status = []
+        self._topic_cursor = 0
 
     async def fetch(self, *, now: datetime | None = None) -> list[MacroArticle]:
         now = utc(now or datetime.now(timezone.utc))
         self.status, articles, seen = [], [], set()
-        for topic in self.topics:
+        if not self.schedule.claim('gdelt',900,now):
+            self.status=[{'provider':'gdelt','code':'provider_cooldown'}];return []
+        cursor=self.repo.get_control('gdelt_topic_cursor_v1',0) if self.repo else self._topic_cursor
+        topics=[self.topics[(cursor+i)%len(self.topics)] for i in range(min(2,len(self.topics)))]
+        failed=False
+        for topic in topics:
+            if not self.schedule.claim('gdelt:'+topic,900,now):continue
+            count_before=len(articles)
             try:
                 response = await get_readonly(self.client, "https://api.gdeltproject.org/api/v2/doc/doc",
-                    limiter=self.limiter, attempts=2, params={"query": TOPICS[topic], "mode": "artlist",
-                    "format": "json", "maxrecords": 25, "timespan": "1h", "sort": "datedesc"})
+                    limiter=self.limiter, attempts=1, params={"query": TOPICS[topic], "mode": "artlist",
+                    "format": "json", "maxrecords": 25, "timespan": "72h", "sort": "datedesc"})
                 if len(response.content) > 2_000_000:
                     raise DataQualityError("GDELT 응답 크기 초과")
                 for item in response.json().get("articles", [])[:25]:
                     article = MacroArticle(str(item["url"]), str(item["title"]), "",
                         str(item.get("domain", "")), None, now, topic, False,
-                        str(item.get("language", "unknown")), "gdelt", str(item.get("domain", "")))
+                        str(item.get("language", "unknown")), "gdelt", str(item.get("domain", "")),provider_seen_at=item.get("seendate"))
                     # seendate는 GDELT 발견 시각으로 실제 공개 시각을 대신하지 않는다.
                     if article.id not in seen:
                         articles.append(article)
                         seen.add(article.id)
                 self.status.append({"provider": "gdelt", "topic": topic, "code": "ok"})
+                self.schedule.success('gdelt:'+topic,len(articles)-count_before,now)
             except (httpx.HTTPError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+                self.schedule.failure('gdelt',exc,now=now);self.schedule.failure('gdelt:'+topic,exc,now=now)
                 self.status.append({"provider": "gdelt", "topic": topic, "code": "discovery_unavailable", **source_error(exc)})
+                failed=True
+                break
+        if not failed:self.schedule.success('gdelt',len(articles),now)
+        self._topic_cursor=(cursor+len(topics))%max(1,len(self.topics))
+        if self.repo:self.repo.set_control('gdelt_topic_cursor_v1',self._topic_cursor)
         return articles
 
     async def aclose(self):
