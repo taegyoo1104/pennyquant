@@ -24,6 +24,7 @@ class MarketBatch:
     eligibility: list[InstrumentEligibility] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
     observed_at: datetime | None = None
+    cached_bars: list[Bar] = field(default_factory=list)
 
 
 class TossSessionSource:
@@ -225,24 +226,26 @@ class TossSessionSource:
                     batch.eligibility.append(evidence)
 
         async def deliver():
-            if self.on_priority_batch and (batch.bars or batch.quotes):
+            if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars):
                 batch.observed_at = utc(self.clock())
                 self.on_priority_batch(batch)
                 batch.bars, batch.quotes, batch.eligibility = [], [], []
+                batch.cached_bars = []
                 state['priority_delivered_at'] = utc(self.clock()).isoformat()
 
-        def accept(symbol,bars):
-            if self.history_store is not None and bars:
+        def accept(symbol,bars, *, cached=False):
+            if self.history_store is not None and bars and not cached:
                 self.history_store.ingest(bars)
                 updated_history.add(symbol)
             seen = self._seen.setdefault(symbol,set())
             for bar in bars:
                 identity = (bar.timestamp,bar.open,bar.high,bar.low,bar.close,bar.volume)
                 if identity not in seen:
-                    seen.add(identity); batch.bars.append(bar)
+                    seen.add(identity)
+                    (batch.cached_bars if cached else batch.bars).append(bar)
             if len(seen) > 20000:
                 self._seen[symbol] = set(sorted(seen,key=lambda x:x[0])[-20000:])
-            if bars:
+            if bars and not cached:
                 state.setdefault('last_detail_success',{})[symbol] = utc(self.clock()).isoformat()
 
         async def candles(symbol, *, optional=False):
@@ -304,7 +307,8 @@ class TossSessionSource:
                     return await call('toss_startup_backfill',self.client.candles,symbol,count=200,
                                       before=cursor,symbol=symbol,optional=True)
                 await self.warmup.advance(manager,warmup_read,accept,
-                    lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols)
+                    lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols,
+                    hydrate=lambda symbol,bars:accept(symbol,bars,cached=True))
                 await deliver()
                 if not self.warmup.control.get('data_ready'):
                     batch.observed_at = utc(self.clock())

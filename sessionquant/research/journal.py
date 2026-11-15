@@ -96,7 +96,8 @@ def frame(engine, events, now, *, manual_halt):
     normalized = [{**raw,'timing':{
         'event_at':time_or_none(raw['data'].get('timestamp') or raw['data'].get('published_at')),
         'published_at':time_or_none(raw['data'].get('published_at')),
-        'received_at':event_time(raw),'available_at':now,'source':raw['data'].get('source','UNKNOWN')}} for raw in events]
+        'received_at':utc(raw['data']['received_at']) if 'restored_at' in raw else event_time(raw),
+        'available_at':now,'source':raw['data'].get('source','UNKNOWN')}} for raw in events]
     append(engine.repo, 'engine_batch', {'decision_at': now, 'events': normalized,
         'candidate_scope_symbols':engine._batch_candidate_scope,'portfolio_selection':engine.selection_frame,
         'news_contexts': engine._batch_news_contexts, 'scope_blockers': engine._batch_scope_blockers,

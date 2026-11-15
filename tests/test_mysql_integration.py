@@ -32,7 +32,8 @@ async def test_mysql_startup_repair_and_readiness_survive_new_connection(mysql_r
     selection=DailyHistorySelection(repo,startup_pending=True)
     worker=StartupWarmup(repo,store,selection,control,clock=lambda:clock.now)
     heartbeat(repo,control,now=NOW)
-    reopened=mysql_repositories(repo.namespace)
+    reopened=mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    assert reopened.namespace==repo.namespace
     with pytest.raises(ValueError):
         request_command(reopened,'start',run_id=control['run_id'],environment='PAPER_LOCAL',now=NOW)
     manager=SimpleNamespace(allow_synthetic=False,base_symbols=lambda _:['AAPL'],
