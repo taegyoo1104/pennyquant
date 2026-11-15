@@ -8,6 +8,7 @@ from ..models import utc
 from ..watchlist.history_selection import operating_session
 from .bars import session_bounds
 from .history import history_plan, session_quality
+from .history_inspections import HistoryInspections
 
 CONTROL = 'startup_data_warmup_v1'
 
@@ -17,6 +18,8 @@ class StartupWarmup:
         self.repo, self.store, self.selection = repo, store, selection
         self.control = control_state
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.inspections = HistoryInspections(repo)
+        self.selection.inspections = self.inspections
         self.session = None
         self.jobs = deque()
         self.symbols = ()
@@ -32,10 +35,12 @@ class StartupWarmup:
         self.symbols = ()
         self.report = {'status':'WAITING_WATCHLIST','started_at':utc(self.clock()).isoformat(),
             'completed_tasks':0,'complete_tasks':0,'required_tasks':0,'received_pages':0,
+            'reused_history_tasks':0,'history_total_tasks':0,
             'issues':[], 'message':'감시 목록을 확인하고 있습니다.'}
         self.publish()
 
     def publish(self):
+        self.inspections.flush(utc(self.clock()))
         self.report['updated_at'] = utc(self.clock()).isoformat()
         self.report['session'] = self.session
         self.repo.set_control(CONTROL, self.report)
@@ -47,8 +52,14 @@ class StartupWarmup:
                            phase='HISTORY',
                            message='과거 비교 자료와 당일 분봉을 준비하고 있습니다.')
         # Recent days first: closing the program early most often leaves yesterday incomplete.
-        for date, start, end in reversed(history_plan(opened)):
+        plan = history_plan(opened)
+        self.inspections.refresh(symbols,plan)
+        self.report['history_total_tasks'] = len(plan)*len(symbols)
+        for date, start, end in reversed(plan):
             for symbol in symbols:
+                if self.inspections.reusable(symbol,date,start,end,now) is not None:
+                    self.report['reused_history_tasks'] += 1
+                    continue
                 self.jobs.append({'symbol':symbol,'day':date,'opened':start,'end':end,
                                   'cursor':end,'pages':0,'current':False})
         self.report['required_tasks'] = len(self.jobs)
@@ -78,6 +89,9 @@ class StartupWarmup:
         return expected-{b.timestamp for b in self._visible(job,now)}
 
     def _quality(self, job, now, known):
+        if not job['current']:
+            quality,_ = self.inspections.inspect(self.store,job['symbol'],job['day'],job['opened'],job['end'],now)
+            return quality
         visible = self._visible(job,now)
         quality = session_quality(visible,job['opened'],job['end'])
         if job['current']:

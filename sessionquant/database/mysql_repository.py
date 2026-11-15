@@ -298,6 +298,25 @@ class MySQLRepository:
                 return True
         return False
 
+    def record_fingerprints(self, kind, record_ids, *, include_payload=False):
+        """Hash JSON on the server so unchanged history does not cross the network."""
+        table = self._kind(kind)
+        ids = list(dict.fromkeys(record_ids))
+        if any(not isinstance(item,str) for item in ids):
+            raise ValueError('기록 식별자는 문자열이어야 합니다')
+        found = {}
+        for start in range(0,len(ids),200):
+            batch = ids[start:start+200]
+            hashes = [sha256(item.encode()).digest() for item in batch]
+            placeholders = ','.join('%s' for _ in batch)
+            extra = ',payload' if include_payload else ''
+            rows = self._execute(f'SELECT record_id,SHA2(CAST(payload AS CHAR CHARACTER SET utf8mb4),256){extra} '
+                                 f'FROM {table} WHERE namespace=%s AND record_hash IN ({placeholders})',
+                                 (self.namespace,*hashes),fetch='all')
+            for row in rows:
+                found[row[0]] = {'fingerprint':row[1],**({'payload':self._decode(row[2])} if include_payload else {})}
+        return found
+
     def iter_records(self,kind,*,batch_size=500):
         """다른 네임스페이스를 읽지 않는 순번 기반 페이지 조회."""
         table = self._kind(kind)

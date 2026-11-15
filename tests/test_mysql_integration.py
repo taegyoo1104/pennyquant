@@ -62,6 +62,38 @@ def test_real_mysql_rvol_history_restart_namespace_and_schema7(mysql_repositorie
         assert cursor.fetchone()[0]==7
 
 
+async def test_mysql_history_inspections_skip_payloads_and_detect_sql_change(mysql_repositories,monkeypatch):
+    from sessionquant.market.history import HistoryStore,KIND,history_plan,record_id
+    from sessionquant.market.history_inspections import CONTROL
+    from test_history_selection import prepare
+    from test_history_inspection_cache import worker,SUNDAY
+    from test_startup_warmup import finish
+    repo=mysql_repositories();other=mysql_repositories()
+    prepare(HistoryStore(repo),'AAPL',SUNDAY)
+    first,manager,provider=worker(repo)
+    await finish(first,manager,provider)
+    reopened=mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    with monkeypatch.context() as patch:
+        def no_decode(*_):pytest.fail('MySQL cache hit must not download/parse full history')
+        patch.setattr('sessionquant.market.history_inspections.decode_history',no_decode)
+        second,manager,provider=worker(reopened)
+        await finish(second,manager,provider)
+        assert second.report['reused_history_tasks']==20 and second.report['required_tasks']==0
+        assert not provider.calls
+    assert other.get_control(CONTROL) is None
+    day,opened,_=history_plan(SUNDAY)[-1]
+    key=record_id('AAPL',day)
+    before=repo.record_fingerprints(KIND,[key])
+    with repo.db.cursor() as cursor:
+        cursor.execute("UPDATE pq_market_history_sessions SET payload=JSON_REMOVE(payload,'$.bars[10]') WHERE namespace=%s AND record_id=%s",(repo.namespace,key))
+    assert reopened.record_fingerprints(KIND,[key])!=before
+    third,manager,provider=worker(reopened)
+    await finish(third,manager,provider)
+    assert third.report['reused_history_tasks']==19 and third.report['required_tasks']==1
+    assert provider.calls==[('AAPL',opened+timedelta(minutes=11))]
+    assert third.report['status']=='READY'
+
+
 def test_real_mysql_prepare_paper_preserves_history_and_does_not_copy_trades(mysql_repositories,tmp_path,monkeypatch):
     from pathlib import Path
     from sessionquant.market.history import KIND
