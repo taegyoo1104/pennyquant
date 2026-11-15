@@ -79,9 +79,40 @@ def test_missing_file_is_optional(tmp_path):
 
 def test_saved_file_permissions_and_unknown_settings_are_preserved(tmp_path):
     target=tmp_path/'.env'; target.write_text('CUSTOM_NOTE=preserved\n')
+    if os.name!='nt': target.chmod(0o644)
     save_local_env({'SQ_MYSQL_PASSWORD':'secret'},path=target)
     assert 'CUSTOM_NOTE=preserved' in target.read_text()
     if os.name!='nt': assert target.stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.skipif(os.name=='nt',reason='POSIX 파일 권한 검사')
+def test_secret_rewrite_never_inherits_permissive_existing_file_mode(tmp_path,monkeypatch):
+    import dotenv
+    target=tmp_path/'.env';target.write_text('CUSTOM_NOTE=preserved\n');target.chmod(0o666)
+    original=dotenv.set_key
+
+    def checked_rewrite(*args,**kwargs):
+        assert target.stat().st_mode & 0o077==0
+        result=original(*args,**kwargs)
+        assert target.stat().st_mode & 0o077==0
+        return result
+
+    monkeypatch.setattr(dotenv,'set_key',checked_rewrite)
+    save_local_env({'SQ_MYSQL_PASSWORD':'fixture-password','TOSS_CLIENT_SECRET':'fixture-secret'},path=target)
+    assert 'CUSTOM_NOTE=preserved' in target.read_text()
+    assert load_local_env(path=target)==('SQ_MYSQL_PASSWORD','TOSS_CLIENT_SECRET')
+
+
+@pytest.mark.skipif(os.name=='nt',reason='POSIX 파일 권한 검사')
+def test_cannot_secure_settings_file_leaves_new_secret_unwritten(tmp_path,monkeypatch):
+    target=tmp_path/'.env';target.write_text('CUSTOM_NOTE=preserved\n');before=target.read_bytes()
+
+    def denied(self,mode,**kwargs):
+        raise PermissionError('fixture: 권한 변경 불가')
+
+    monkeypatch.setattr(Path,'chmod',denied)
+    with pytest.raises(PermissionError):save_local_env({'SQ_MYSQL_PASSWORD':'fixture-password'},path=target)
+    assert target.read_bytes()==before
 
 
 def test_new_python_process_reuses_saved_values_without_shell_input(tmp_path):
