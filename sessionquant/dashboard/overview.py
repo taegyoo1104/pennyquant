@@ -141,8 +141,9 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
     except Exception:summary={}
     finally:
         if cost_repo:cost_repo.close()
-    cols[3].metric('이번 달 AI 비용 / 남은 예산',usd(summary.get('month'))+' / '+usd(summary.get('program_budget_remaining_usd')),
-        help='프로그램의 추정 비용과 자체 예산입니다. OpenAI 실제 잔액과 다를 수 있습니다.')
+    cols[3].metric('이번 달 AI 비용 / 월 한도액',usd(summary.get('month'))+' / '+usd(summary.get('monthly_hard_budget_usd')),
+        help='이번 달 추정 사용액과 프로그램의 월 사용 한도입니다. OpenAI 실제 잔액이 아닙니다.')
+    cols[3].caption('총 충전액(수동 입력): '+usd(summary.get('deposited')))
     st.subheader('보유 종목')
     if actual:st.info('실계좌 관리 포지션 연결은 미확인입니다. 전체 계좌 보유와 자동 합산하지 않습니다.')
     else:_table([{k:r[k] for k in ('종목','보유 수량','평균 매수가','평가액','평가 손익')} for r in view['positions'][:5]],'보유 종목이 없습니다.')
@@ -214,8 +215,9 @@ def compact_cost(repo,now):
     limits=repo.get_control('session_llm_limits_v1',{}) or {}
     spent=decimal(month['spent']) if month and month.get('spent') is not None else None
     hard=decimal(limits['monthly_hard_budget_usd']) if limits.get('monthly_hard_budget_usd') is not None else None
-    reserved=sum((decimal(r['amount']) for r in (month or {}).get('reservations',{}).values()),Decimal(0))
-    return {'month':spent,'program_budget_remaining_usd':max(Decimal(0),hard-spent-reserved) if hard is not None and spent is not None else None}
+    funding=repo.get_control('openai_funding_note',{}) or {}
+    deposited=decimal(funding['total_usd'],nonnegative=True) if funding.get('total_usd') is not None else None
+    return {'month':spent,'monthly_hard_budget_usd':hard,'deposited':deposited}
 
 
 def filter_trades(data):
