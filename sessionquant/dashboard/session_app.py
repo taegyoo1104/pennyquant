@@ -367,11 +367,10 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             _table(_news_rows(rows or data.tables['macro_news']))
             st.caption("GDELT 검색 결과는 사건 확정의 증거가 아닙니다. 출처·공개 시각·독립 검증·실제 시장 반응을 확인하며 미확인 국제 뉴스만으로 강제 청산하지 않습니다.")
         with usage:
-            st.metric("표시된 호출의 추정 비용", usd(view["usage_cost"]))
-            st.caption(f"최근 {view['usage_count']}건 표시 · 화면 합계는 전체 월간 비용이 아닐 수 있습니다. 예산 차단은 엔진의 영속 원장을 사용합니다.")
-            _table([{"모델": row.get("model", ""), "단계": row.get("tier", row.get("stage", "")), "입력 토큰": row.get("input_tokens"),
-                     "출력 토큰": row.get("output_tokens"), "비용 (USD)": str(row.get("cost_usd", row.get("estimated_cost_usd", ""))),
-                     "기록 시각": timestamp(row.get("timestamp", row.get("created_at"))), "상태": row.get("status", "")} for row in data.tables["llm_usage"]])
+            if data.connected:
+                from sessionquant.dashboard.llm_panel import render_llm_details
+                render_llm_details(path,usage_path=usage_path,usage_environment=usage_environment)
+            else:st.info('LLM 호출·사용량 기록이 없습니다. 실제 사용량을 0으로 확정하지 않습니다.')
     with operations:
         st.subheader("주문·체결과 당일 청산")
         session = view["session"] if isinstance(view["session"], dict) else {}

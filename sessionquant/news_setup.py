@@ -38,6 +38,11 @@ async def check_news(config_path,*,connect=False,provider='all',symbol='AAPL'):
         'requires_known_at':True}
     report['enrichment']={'configured_publishers':len(config.news_enrichment.get('publishers',{})),
         'body_retention':'HASH_AND_METADATA_ONLY','default_fetch_allowed':False,'probe_fetches_articles':False}
+    report['llm_audit']={'metadata':'ENABLED','body_audit_enabled':config.llm_debug_audit.get('enabled',False),
+        'retention_days':config.llm_debug_audit.get('retention_days',7),'raw_body_read_requires_local_opt_in':True}
+    report['macro_context_llm']={'enabled':config.macro_context_llm.get('enabled',False),
+        'cooldown_seconds':config.macro_context_llm.get('cooldown_seconds',3600),'automatic_order_link':False}
+    report['limits'].update(hourly_primary_calls=llm.hourly_primary_call_cap,hourly_escalation_calls=llm.hourly_escalation_call_cap)
     if not connect: return report
     providers=('openai','fred','alpaca','sec','rss','official','treasury','gdelt','calendar') if provider=='all' else (provider,)
     for name in providers:

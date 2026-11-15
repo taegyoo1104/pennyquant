@@ -32,6 +32,7 @@ def company_reason(event,ticker,kind,primary,now,max_age_hours=24):
     reason=time_reason(event.published_at,event.received_at,now,max_age_hours)
     if reason:return reason
     if not event.body.strip() or event.body.startswith('Filing metadata only;'):return 'article_body_missing'
+    if ' '.join(event.body.split())==' '.join(event.title.split()):return 'title_only_article'
     return ''
 
 
@@ -40,6 +41,7 @@ def macro_reason(article,now,max_age_hours=72):
     if reason:return reason
     if not article.source.strip():return 'publisher_missing'
     if not article.body.strip():return 'article_body_missing'
+    if ' '.join(article.body.split())==' '.join(article.title.split()):return 'title_only_article'
     from ..macro.sources import official_url
     if article.official:
         if not official_url(article.url):return 'primary_source_unverified'

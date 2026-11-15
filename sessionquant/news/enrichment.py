@@ -18,7 +18,7 @@ from ..models import utc
 from ..macro.models import canonical_url,stable_hash
 from .schedule import NewsSchedule
 
-VERSION='article-enrichment-v2'
+VERSION='article-enrichment-v3'
 AGENT='SessionQuantNews/1.0'
 PERMANENT={'FETCH_401','FETCH_403','FETCH_404','PAYWALL','ROBOTS_DISALLOWED','REDIRECT_INVALID',
     'URL_INVALID','SSRF_BLOCKED','WRONG_ARTICLE','UNSUPPORTED_CONTENT_TYPE','UNSUPPORTED_MEDIA','PUBLISHED_AT_UNKNOWN',
@@ -198,16 +198,17 @@ def extract_article(document,url,title,language,*,min_chars=300,min_sentences=3)
 
 
 class ArticleEnricher:
-    def __init__(self,repo,*,policies=None,fetcher=None,clock=None,min_chars=300,min_sentences=3):
+    def __init__(self,repo,*,policies=None,fetcher=None,clock=None,min_chars=300,min_sentences=3,analysis_version=''):
         self.repo=repo;self.policies=policies or {};self.clock=clock or (lambda:datetime.now(timezone.utc))
         self.fetcher=fetcher or SafeArticleFetcher(self.policies)
         self.schedule=NewsSchedule(repo,clock=self.clock);self.semaphore=asyncio.Semaphore(2)
         self.min_chars,self.min_sentences=min_chars,min_sentences
+        self.analysis_version=analysis_version
 
     async def enrich(self,article):
         now=utc(self.clock());host=urlsplit(article.url).hostname or ''
         key='news_enrich_cache:'+stable_hash([canonical_url(article.url),self.policies.get(host),VERSION,
-            article.title,article.language,self.min_chars,self.min_sentences])
+            article.title,article.language,self.min_chars,self.min_sentences,self.analysis_version])
         cached=self.repo.get_control(key)
         baseline={'article_id':article.id,'discovery_source':article.discovery_source,'discovered_at':article.received_at.isoformat(),
             'source_url':article.url,'publisher_domain':host,'publisher_name':None,'publisher_verified':False,
@@ -265,7 +266,8 @@ class ArticleEnricher:
         if hasattr(self.fetcher,'pacing'):self.fetcher.pacing(host,max(2,delay))
         headers={}
         completed = cached and cached.get('analysis_content_hash') and self.repo.get_control(
-            'news_macro_analyzed:'+stable_hash([article.id,cached['analysis_content_hash']]),False)
+            'news_macro_analyzed:'+stable_hash([article.id,cached['analysis_content_hash'],self.analysis_version]
+                if self.analysis_version else [article.id,cached['analysis_content_hash']]),False)
         if completed:
             for name,key in [('If-None-Match','etag'),('If-Modified-Since','last_modified')]:
                 if cached.get(key):headers[name]=cached[key]
@@ -288,9 +290,12 @@ class ArticleEnricher:
             'last_modified':response['headers'].get('last-modified'),'eligible_for_llm':not duplicate,
             'document_version':document_version,
             'status':'DUPLICATE' if duplicate else 'ELIGIBLE_FOR_LLM',
+            'first_available_at':now.isoformat(),
             'stage_history':['DISCOVERED_ONLY','FETCH_PENDING','FETCHED','BODY_EXTRACTED','SOURCE_AND_TIME_VERIFIED']}
         enriched=replace(article,body=extracted['body'],source=policy['publisher_name'],
-            published_at=extracted['published_at'],publisher_verified=True,llm_use_allowed=True,document_version=document_version)
+            published_at=extracted['published_at'],publisher_verified=True,llm_use_allowed=True,document_version=document_version,
+            enrichment_status='ELIGIBLE_FOR_LLM',enrichment_version=VERSION,
+            published_at_source=extracted['published_at_source'],first_available_at=now,received_at=now)
         row['analysis_content_hash']=enriched.content_hash
         row['body']=None
         row['body_retention']='HASH_AND_METADATA_ONLY'

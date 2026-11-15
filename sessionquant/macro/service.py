@@ -22,19 +22,26 @@ class NewsPipeline:
                  official_client=None, gdelt_client=None, fred_client=None, treasury_client=None,
                  macro_refresh_seconds: float = 900, company_refresh_seconds=180, calendar_refresh_seconds=3600,
                  company_max_age_hours=24,macro_max_age_hours=72,calendar_client=None,calendar_enabled=False,
-                 enrichment_policies=None,weekend_slowdown=False,enrichment_min_chars=300,enrichment_min_sentences=3,clock=None):
+                 enrichment_policies=None,weekend_slowdown=False,enrichment_min_chars=300,enrichment_min_sentences=3,clock=None,
+                 audit_settings=None,macro_context_llm=None,environment='PAPER_LOCAL'):
         import math
         if (isinstance(macro_refresh_seconds,bool) or not isinstance(macro_refresh_seconds,(int,float))
                 or not math.isfinite(macro_refresh_seconds) or not 300 <= macro_refresh_seconds <= 86400):
             raise ValueError("거시 뉴스 수집 주기는 300~86400초여야 합니다")
         self.repo = repository
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        self.analyzer = analyzer or BudgetedAnalyzer(repository, settings, clock=self.clock)
+        self.analyzer = analyzer or BudgetedAnalyzer(repository, settings, clock=self.clock,audit_settings=audit_settings,environment=environment)
+        from .context_analysis import MacroContextAnalyzer
+        self.context_analyzer=MacroContextAnalyzer(repository,self.analyzer,macro_context_llm,clock=self.clock)
         from ..news.schedule import NewsSchedule
         from ..news.enrichment import ArticleEnricher
         from .calendar import EconomicCalendarClient
         self.schedule=NewsSchedule(repository,clock=self.clock)
-        self.enricher=ArticleEnricher(repository,policies=enrichment_policies,clock=self.clock,min_chars=enrichment_min_chars,min_sentences=enrichment_min_sentences)
+        policy=getattr(self.analyzer,'settings',None)
+        self.analysis_version=stable_hash([getattr(policy,'prompt_version','unknown'),getattr(policy,'primary_model','unknown'),
+            getattr(policy,'escalation_model','unknown'),'stage07-v1'])
+        self.enricher=ArticleEnricher(repository,policies=enrichment_policies,clock=self.clock,min_chars=enrichment_min_chars,
+            min_sentences=enrichment_min_sentences,analysis_version=self.analysis_version)
         self.calendar=calendar_client or (EconomicCalendarClient(repository,clock=self.clock) if calendar_enabled else None)
         self.company_refresh_seconds=company_refresh_seconds;self.calendar_refresh_seconds=calendar_refresh_seconds
         self.company_max_age_hours=company_max_age_hours;self.macro_max_age_hours=macro_max_age_hours
@@ -111,8 +118,11 @@ class NewsPipeline:
             self.repo.record("macro_news", {**raw, "event_id": event_id, "category": "macro"})
             self.repo.record("macro_analysis", analysis)
             if not analysis.get('error'):
-                self.repo.set_control('news_macro_analyzed:'+stable_hash([article.id,article.content_hash]),True)
+                self.repo.set_control(self._completed_key(article),True)
         self._analyses[analysis["id"]] = analysis
+
+    def _completed_key(self,article):
+        return 'news_macro_analyzed:'+stable_hash([article.id,article.content_hash,self.analysis_version])
 
     async def refresh(self, symbols, *, held_symbols=(),allowlist=(), now=None) -> dict:
         from ..news.intake import macro_reason,archive,statistics
@@ -174,16 +184,19 @@ class NewsPipeline:
                 self.repo.record('macro_news',{**article.to_dict(),'category':'macro','status':'DISCOVERED_ONLY'})
                 result,enriched=await self.enricher.enrich(article)
                 if enriched is None:
+                    if hasattr(self.analyzer,'record_skip'):self.analyzer.record_skip(article,result['status'])
                     issues.append({'provider':'gdelt_enrichment','code':result['status']});continue
                 article=enriched
             reason=macro_reason(article,max(now,utc(self.clock())),self.macro_max_age_hours)
             receipt=archive(self.repo,article.to_dict(),provider=article.discovery_source,reason=reason,body_allowed=article.discovery_source!='gdelt')
-            completed=self.repo.get_control('news_macro_analyzed:'+stable_hash([article.id,article.content_hash]),False)
+            completed=self.repo.get_control(self._completed_key(article),False)
             if reason or (receipt['duplicate'] and completed):
+                precheck=self.analyzer.record_skip(article,reason or 'duplicate_article') if hasattr(self.analyzer,'record_skip') else None
                 analysis={'id':'macro-analysis:excluded:'+stable_hash([article.id,article.content_hash,reason]),
                     'article_id':article.id,'published_at':article.published_at.isoformat() if article.published_at else None,
                     'received_at':article.received_at.isoformat(),'analyzed_at':utc(self.clock()).isoformat(),
-                    'category':'macro','error':reason or 'duplicate_article','status':'UNKNOWN','force_liquidation':False}
+                    'category':'macro','error':reason or 'duplicate_article','status':'UNKNOWN','force_liquidation':False,
+                    'precheck_id':precheck,'llm_call_ids':[]}
                 self._store_macro(article,analysis);continue
             candidates.append(article)
         # 시간창 검사가 공식성보다 앞선다. 최근 2시간을 우선하며 과거 24~72시간은 배경이다.
@@ -221,8 +234,15 @@ class NewsPipeline:
             'intervals':{'company':company_interval,'macro':macro_interval,'calendar':calendar_interval,'fred':86400}}
         self.repo.set_control('session_news_status',self.status)
         from .context import build_context
-        snapshot=build_context(self.repo,now,analyses=self._analyses.values(),events=self.economic_events_at(now))
+        context_at=max(now,utc(self.clock()))
+        snapshot=build_context(self.repo,context_at,analyses=self._analyses.values(),events=self.economic_events_at(context_at))
         self.repo.record('macro_context_snapshots',snapshot)
+        if self.context_analyzer.settings.enabled:
+            try:
+                await self.context_analyzer.analyze(snapshot,candidates,self._analyses.values(),
+                    market_regime=self.repo.get_control('sessionquant_context',{}).get('market_regime'),now=context_at)
+            except (RuntimeError,OSError,ValueError,TypeError):
+                self.repo.log('WARNING','거시 맥락 LLM 기록 미확인; 기존 시장·청산 관리는 계속합니다.')
         self._analyses={key:row for key,row in self._analyses.items() if self._recent(row,utc(self.clock()))}
         return self.status
 

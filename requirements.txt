@@ -9,3 +9,4 @@ filelock>=3.16,<4
 PyMySQL[rsa]>=1.1,<2
 python-dotenv>=1,<2
 trafilatura>=2.3,<3
+cryptography>=44,<51

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import closing
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -126,6 +127,12 @@ def parser():
     evaluation.add_argument("--input", type=Path, required=True)
     evaluation.add_argument("--output", type=Path, default=Path("data/model-evaluation.json"))
     evaluation.add_argument("--execute", action="store_true", help="실제 API 호출과 토큰 과금 허용")
+    evaluation.add_argument('--offset',type=int,default=0)
+    evaluation.add_argument('--limit',type=int,default=20,help='한 평가 batch 최대 200건, 기본 20건')
+    audit_prune=sub.add_parser('llm-audit-prune',help='만료된 감사 암호문 정리; 기본은 조회만')
+    audit_prune.add_argument('--db',type=Path,default=Path('data/sessionquant-paper-local.db'))
+    audit_prune.add_argument('--backend',choices=('sqlite','mysql'),default='mysql')
+    audit_prune.add_argument('--apply',action='store_true')
     calendar = sub.add_parser("calendar-import", help="확인된 공식 경제 발표 일정 가져오기")
     calendar.add_argument("--input", type=Path, required=True)
     calendar.add_argument("--db", type=Path, default=Path("data/sessionquant-paper-local.db"))
@@ -231,7 +238,13 @@ def main(argv=None):
                 ensure_ascii=False, indent=2))
         elif args.command == "llm-evaluate":
             from .macro.evaluation import evaluate_models
-            print(json.dumps(asyncio.run(evaluate_models(args.input,args.output,execute=args.execute)),ensure_ascii=False,indent=2))
+            print(json.dumps(asyncio.run(evaluate_models(args.input,args.output,execute=args.execute,offset=args.offset,limit=args.limit)),ensure_ascii=False,indent=2))
+        elif args.command == 'llm-audit-prune':
+            from .database.repository import Repository
+            from datetime import datetime,timezone
+            with closing(Repository(args.db,backend=args.backend)) as repo:
+                print(json.dumps({'dry_run':not args.apply,'expired_bodies':repo.expire_llm_bodies(datetime.now(timezone.utc),dry_run=not args.apply),
+                    'llm_generation_calls':0,'live_orders_enabled':False},ensure_ascii=False))
         elif args.command == "calendar-import":
             from .macro.models import EconomicEvent
             from .macro.sources import official_url

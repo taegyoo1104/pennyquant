@@ -37,7 +37,7 @@ def current_company_news(rows, data, view, now=None):
             if row.get('error') or utc(row.get('analyzed_at') or event['received_at']) > now:
                 continue
             value = SimpleNamespace(**{key: event[key] for key in
-                ('id', 'symbols', 'verified', 'source', 'url', 'body', 'published_at', 'received_at')})
+                ('id', 'symbols', 'title', 'verified', 'source', 'url', 'body', 'published_at', 'received_at')})
             kind = row.get('source_kind') or ('sec' if value.id.startswith('sec:') else
                                             'rss' if value.id.startswith('rss:') else 'alpaca')
             primary = row.get('primary_verified', value.verified and kind in {'sec', 'rss'})

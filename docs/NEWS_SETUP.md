@@ -149,6 +149,12 @@ OpenAI의 `accessible: true`는 모델 메타데이터 접근 성공이며 실�
 
 이 명령은 생성 비용 없이 모델 접근과 뉴스 소스 연결을 검사하고 토스 시세·계좌와 DB를 추가 확인한다. `llm_credit_balance_verified: false`는 공식 잔액을 조회하지 않았다는 뜻이다. 표준 API 키만으로 잔액을 확정하거나 키 연결 성공을 충전 성공으로 취급하지 않는다.
 
+## 07 호출 감사·비용 설정
+
+[07 운영 안내](STAGE07_LLM.md)와 [PAPER 설정 예시](../config/sessionquant.llm.example.yaml)를 따른다. 메타데이터 감사는 기본 적용하며 `llm_debug_audit.enabled`와 `macro_context_llm.enabled`는 기본 false다. 06 원문 보강 정책과 별도로 원문 보관 권한이 필요하다. `SQ_LLM_AUDIT_ALLOW_READ=1`은 허용되어 암호화 보관된 원문을 로컬에서 읽는 추가 권한이며, 원문 취득·저장이나 유료 평가를 자동 활성화하지 않는다.
+
+기존 메인 5개 탭을 유지한다. 이번 달 프로그램 추정 비용은 메인 카드에, 호출 필터·실패 필드·정제 결과·수동 잔액 메모는 뉴스 분석의 LLM 상세에 표시한다. 공식 조직 비용은 미연결 UNKNOWN, 선불 잔액은 수동 확인 기준의 추정이다. `llm-evaluate` 기본 미리보기에는 유료 생성이 없으며 실제 `--execute`는 별도 승인 이후에만 사용한다.
+
 ## 연결 결과가 일부 실패하는 경우
 
 `configured: true`는 값이 있다는 뜻이며 인증 성공을 보장하지 않는다. OpenAI 모델 메타데이터 접근 성공도 충전 잔액·실제 생성·주문 권한 검사와 별개다. `llm_credit_balance_verified: false`, `structured_generation_verified: false`, `order_permissions_verified: false`는 이 읽기 전용 점검에서 해당 작업을 하지 않았다는 뜻이다.

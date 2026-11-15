@@ -15,7 +15,7 @@ KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_even
          "alerts", "pipeline_status", "order_intents", "broker_state",
          "market_regimes", "macro_news", "macro_analysis", "llm_usage", "session_state",
          "universe_history", "reconciliations", "account_snapshots", "schema_migrations",
-         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events", "news_ingestions", "news_enrichments", "macro_context_snapshots")
+         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events", "news_ingestions", "news_enrichments", "macro_context_snapshots", "llm_calls", "llm_audit_bodies", "macro_context_analysis")
 
 
 class Repository:
@@ -42,8 +42,8 @@ class Repository:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS {name} (seq INTEGER PRIMARY KEY, record_id TEXT UNIQUE, payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS engine_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS controls (name TEXT PRIMARY KEY, payload TEXT NOT NULL)")
-        if self.db.execute("PRAGMA user_version").fetchone()[0] < 5:
-            self.db.execute("PRAGMA user_version=5")
+        if self.db.execute("PRAGMA user_version").fetchone()[0] < 6:
+            self.db.execute("PRAGMA user_version=6")
         self.db.commit()
         self._in_transaction = False
 
@@ -192,6 +192,16 @@ class Repository:
 
     def log(self, level: str, message: str, **extra) -> None:
         self.record("system_logs", {"timestamp": datetime.now(timezone.utc), "level": level, "message": message, **extra})
+
+    def expire_llm_bodies(self, now, *, dry_run=False):
+        """만료된 암호문만 정리하고 호출 메타데이터·금융 원장은 보존한다."""
+        from ..models import utc
+        stamp = utc(now).isoformat()
+        with self.transaction():
+            count = self.db.execute("SELECT COUNT(*) FROM llm_audit_bodies WHERE json_extract(payload,'$.expires_at')<=?", (stamp,)).fetchone()[0]
+            if not dry_run:
+                self.db.execute("DELETE FROM llm_audit_bodies WHERE json_extract(payload,'$.expires_at')<=?", (stamp,))
+            return count
 
     def close(self):
         self.db.close()

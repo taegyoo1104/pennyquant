@@ -133,6 +133,8 @@ class MySQLRepository:
 
         self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(5,%s)",
                       ("뉴스 수신·원문 검증 이력과 거시 맥락 스냅샷 추가",))
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(6,%s)",
+                      ("LLM 호출 감사·제한된 암호화 본문·이벤트 맥락 분석 추가",))
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -375,6 +377,17 @@ class MySQLRepository:
 
     def log(self, level: str, message: str, **extra) -> None:
         self.record("system_logs", {"timestamp": datetime.now(timezone.utc), "level": level, "message": message, **extra})
+
+    def expire_llm_bodies(self, now, *, dry_run=False):
+        """선택한 namespace의 만료된 감사 암호문만 정리한다."""
+        stamp = utc(now).isoformat()
+        with self.transaction():
+            count = self._execute("SELECT COUNT(*) FROM pq_llm_audit_bodies WHERE namespace=%s "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.expires_at'))<=%s", (self.namespace,stamp),fetch='one')[0]
+            if not dry_run:
+                self._execute("DELETE FROM pq_llm_audit_bodies WHERE namespace=%s "
+                    "AND JSON_UNQUOTE(JSON_EXTRACT(payload,'$.expires_at'))<=%s", (self.namespace,stamp))
+            return count
 
     def storage_stats(self) -> dict:
         names = tuple("pq_" + kind for kind in self.kinds) + ("pq_engine_state", "pq_controls")

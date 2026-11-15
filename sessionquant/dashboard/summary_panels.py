@@ -24,7 +24,8 @@ def cost_summary(repo,now=None):
     month=decimal(current.get('spent','0')) if current else (Decimal(0) if months else None)
     funding=repo.get_control('openai_funding_note',{})
     total=decimal(funding['total_usd'],nonnegative=True) if funding.get('total_usd') is not None else None
-    return {'spent':spent,'month':month,'deposited':total,'funding_updated_at':funding.get('updated_at'),
+    from ..llm.costs import credit_summary
+    return {**credit_summary(repo,now),'spent':spent,'month':month,'deposited':total,'funding_updated_at':funding.get('updated_at'),
         'health':repo.get_control('llm_provider_health',{}),'usage_known':bool(months)}
 
 
@@ -32,37 +33,20 @@ def render_cost_panel(path,*,usage_path=None,usage_environment=None):
     import streamlit as st
     from .session_app import usd
     repo=None
-    st.subheader('OpenAI 사용량·충전 기록')
     try:
         repo=open_cost_repository(usage_path or path,environment=usage_environment)
         if repo is None:
-            st.caption('분석 비용 원장이 아직 없습니다. 사용량을 0으로 확정하지 않습니다.')
-            return
+            st.caption('LLM 비용 원장 미확인');return
         summary=cost_summary(repo)
-        cols=st.columns(3)
-        cols[0].metric('프로그램 누적 비용 · 추정',usd(summary['spent']))
-        cols[1].metric('이번 달 프로그램 비용 · 추정',usd(summary['month']))
-        cols[2].metric('OpenAI 충전 누계 · 직접 기록',usd(summary['deposited']))
-        st.caption('선택한 운영 DB의 토큰 단가 기반 비용입니다. 다른 앱·조직 전체 청구액·공식 현재 잔액과 다릅니다. 충전 미입력이나 $0 기록으로 매매를 차단하지 않습니다.')
+        st.metric('이번 달 프로그램 LLM 비용 · 추정',usd(summary['month']))
+        st.caption('자체 예산 잔여 '+usd(summary['program_budget_remaining_usd'])+' · 수동 확인 기반 추정 잔액 '+
+            usd(summary['estimated_credit_usd'])+' · 상세: 뉴스 분석 → LLM 사용량')
         health=summary['health']
         if health.get('code') not in {None,'UNKNOWN','AVAILABLE'}:
-            st.warning(health.get('message','LLM 미사용: 차트 기반 매매·위험 관리 계속'))
-        elif not health or health.get('code')=='UNKNOWN':
-            st.caption('LLM 생성·잔액 상태는 미확인입니다. 키 정보 조회 성공만으로 잔액이 있다고 판단하지 않습니다.')
-        with st.expander('OpenAI 충전 누계 기록'):
-            value=st.text_input('OpenAI에 충전한 총 달러 금액',value=str(summary['deposited']) if summary['deposited'] is not None else '',key='openai-deposit')
-            if st.button('충전 누계 저장',key='save-openai-deposit'):
-                try:
-                    amount=decimal(value,nonnegative=True)
-                    repo.set_control('openai_funding_note',{'total_usd':str(amount),'updated_at':datetime.now(timezone.utc).isoformat(),'source':'user_entered'})
-                    st.success('직접 입력한 누계를 저장했습니다. 실제 충전·자동 잔액 조회를 수행한 것은 아닙니다.')
-                    st.rerun()
-                except ValueError: st.error('0 이상의 달러 금액을 입력하세요.')
-            st.markdown('[OpenAI 공식 사용량](https://platform.openai.com/usage) · [충전·잔액 확인](https://platform.openai.com/settings/organization/billing/overview)')
-    except Exception:
-        st.warning('OpenAI 비용 기록을 읽지 못했습니다. 이 표시 오류로 매매를 중단하지 않습니다.')
+            st.warning(health.get('message','LLM 미사용: 차트·위험 관리 계속'))
+    except Exception:st.warning('LLM 비용 표시 미확인; 기존 위험 관리는 계속합니다.')
     finally:
-        if repo: repo.close()
+        if repo:repo.close()
 
 
 def render_actual_account(snapshot,status,*,show_metrics=True):
