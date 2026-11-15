@@ -250,12 +250,17 @@ class PaperBroker:
         except (AttributeError, ValueError, TypeError):
             return False
 
-    def process_quote(self, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None) -> list[FractionalFill]:
+    def process_quote(self, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None,
+                      paper_tradable: bool | None = None) -> list[FractionalFill]:
+        if paper_tradable is not None and type(paper_tradable) is not bool:
+            raise ValueError('Paper 거래 허용 값은 불리언이어야 합니다.')
+        if paper_tradable is not None and self.settings.paper_fill_model != 'market_v2':
+            raise ValueError('Paper 조건 분리는 market_v2 체결 모형에서만 지원합니다.')
         if self.settings.paper_fill_model == 'legacy_limit_v1':
             from .legacy_fills import process_legacy_quote
             return process_legacy_quote(self,quote,now,max_fill_qty=max_fill_qty)
         from .market_fills import process_market_quote
-        return process_market_quote(self,quote,now,max_fill_qty=max_fill_qty)
+        return process_market_quote(self,quote,now,max_fill_qty=max_fill_qty,paper_tradable=paper_tradable)
 
     def _fill_record(self, order, qty, price, fee, now, pnl, quote):
         """주문 누적값과 체결별 비교 근거를 동일한 형식으로 기록한다."""

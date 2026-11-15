@@ -51,13 +51,18 @@ def scan(universe: UniverseStore, symbol: str, quote: Quote | None, eligibility:
          data: Indicators, now: datetime, *, relative_volume: float | None = None,
          max_quote_age_seconds: float = 30, max_eligibility_age_seconds: float = 60,
          max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
-         min_rvol: float = 1.0, require_evidence: bool = False) -> list[str]:
+         min_rvol: float = 1.0, require_evidence: bool = False, paper_assumptions: bool = False) -> list[str]:
     """진입 차단 사유를 모두 반환한다. 매도 가능 여부는 별도로 관리한다."""
     now = utc(now)
     blockers = []
     if not universe.contains(symbol, now):
         blockers.append("universe_unknown_stale_or_nonmember")
-    if eligibility is None:
+    if paper_assumptions:
+        from .paper_policy import paper_eligibility
+        blockers.extend(paper_eligibility(eligibility,now)['blockers'])
+        if eligibility is not None and eligibility.symbol != symbol:
+            blockers.append('instrument_symbol_mismatch')
+    elif eligibility is None:
         blockers.append("instrument_eligibility_unknown")
     else:
         if eligibility.symbol != symbol:

@@ -160,7 +160,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
                                    strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
-                                   candidate_settings=config.candidate_selection)
+                                   candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)
@@ -205,7 +205,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     priority = list(dict.fromkeys([*engine.broker.positions, *engine.broker.exit_intents,
                         *(o.intent.symbol for o in engine.broker.get_open_orders())]))
                     market_task = asyncio.create_task(market.poll(list(universe.members(current)), priority_symbols=priority))
-                if market and account_task is None and monotonic>=next_account:
+                if config.actual_account_monitor_enabled and market and account_task is None and monotonic>=next_account:
                     from .account_monitor import fetch_account_snapshot
                     account_task=asyncio.create_task(fetch_account_snapshot(market.client))
                     next_account=monotonic+30

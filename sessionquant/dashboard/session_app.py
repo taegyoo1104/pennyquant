@@ -260,6 +260,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     if data.error: st.error(data.error)
     if not data.connected: st.info('저장된 실행 기록이 없습니다. 계좌·연결 상태는 미확인입니다.')
     if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
+    if data.context.get('paper_data_policy')=='observed_paper_v1':
+        st.info('실데이터 Paper 실험 · 실제 계좌 권한은 검증하지 않고 소수점 거래를 모의 지원합니다. 거래정지·기업행동 미확인 및 분할 비교 근거 없는 계산 RVOL을 가정으로 기록합니다. 실제 주문은 비활성화되어 있습니다.')
     if page=='대시보드':
         render_overview(data,view,path,usage_path,usage_environment)
     elif page=='전략·백테스트': render_strategies(data,view)

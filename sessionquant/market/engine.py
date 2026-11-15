@@ -37,11 +37,16 @@ class MarketEngine:
     def __init__(self, universe: UniverseStore, strategy: str = "pullback", *,
                  max_quote_age_seconds: float = 30, max_eligibility_age_seconds: float = 60,
                  max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
-                 min_rvol: float = 1.0, allow_neutral: bool = False, use_market_filter: bool = True, strict_data: bool = False):
+                 min_rvol: float = 1.0, allow_neutral: bool = False, use_market_filter: bool = True, strict_data: bool = False,
+                 paper_data_policy='strict'):
         if strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
             raise ValueError("지원하지 않는 전략입니다")
         self.universe, self.strategy = universe, strategy
         self.strict_data = strict_data
+        from .paper_policy import validate_policy, OBSERVED
+        self.paper_data_policy = validate_policy(paper_data_policy)
+        if paper_data_policy == OBSERVED and not strict_data:
+            raise ValueError('실데이터 Paper 정책은 엄격한 시세·분봉 검사를 유지해야 합니다.')
         self.quality_rows = {}
         for name, value in (("max_quote_age_seconds", max_quote_age_seconds),
                             ("max_eligibility_age_seconds", max_eligibility_age_seconds),
@@ -124,6 +129,9 @@ class MarketEngine:
         rvol = observed.get("value") if observed.get("verified") and (
             observed["observed_at"] <= now and (now - observed["observed_at"]).total_seconds() <= 330) else None
         eligibility, quote = self.eligibility.get(symbol), self.quotes.get(symbol)
+        from .paper_policy import OBSERVED, paper_eligibility
+        experimental = self.paper_data_policy == OBSERVED
+        paper = paper_eligibility(eligibility,now) if experimental else None
         quality = None
         if self.strict_data:
             from .quality import bar_quality, rvol_report
@@ -134,6 +142,9 @@ class MarketEngine:
             volume = rvol_report(bars,symbol,data.five[-1].timestamp if data.five else None,now,
                                  evidence=eligibility.volume_evidence if eligibility else None)
             rvol = volume['value']
+            if (experimental and rvol is None and volume['calculation_status']=='CALCULATED'
+                    and set(volume['reasons']) == {'split_volume_comparability_unknown'}):
+                rvol = volume['calculated_value']
             valid_eligibility = bool(eligibility and eligibility.symbol == symbol and
                 eligibility.checked_at <= now and (now-eligibility.checked_at).total_seconds() <= self.max_eligibility_age_seconds
                 and eligibility.valid_until and eligibility.valid_until >= now and
@@ -141,6 +152,9 @@ class MarketEngine:
                     for name,expected in [('tradable',True),('fractional',True),('halted',False),('corporate_action',False)]))
             quality = {'symbol':symbol,'observed_at':now.isoformat(), 'bars':bar_quality(bars,symbol,now),
                 'rvol':volume, 'eligibility_verified':valid_eligibility,
+                'paper_data_policy':self.paper_data_policy, 'paper_eligibility':paper,
+                'strategy_rvol':rvol, 'strategy_rvol_status':('EXPERIMENTAL_UNVERIFIED' if rvol is not None and volume['status']!='VERIFIED'
+                                                             else volume['status']),
                 'eligibility_max_age_seconds':self.max_eligibility_age_seconds,
                 'eligibility':jsonable(eligibility) if eligibility else None,
                 'quote_fresh':bool(quote and quote.symbol == symbol and quote.timestamp <= quote.received_at <= now
@@ -156,7 +170,7 @@ class MarketEngine:
                         max_quote_age_seconds=self.max_quote_age_seconds,
                         max_eligibility_age_seconds=self.max_eligibility_age_seconds,
                         max_spread_pct=self.max_spread_pct, min_dollar_volume=self.min_dollar_volume,
-                        min_rvol=self.min_rvol, require_evidence=self.strict_data)
+                        min_rvol=self.min_rvol, require_evidence=self.strict_data, paper_assumptions=experimental)
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         if symbol in REFERENCE_SYMBOLS:
             blockers.append('market_reference_not_trading_candidate')
@@ -174,6 +188,7 @@ class MarketEngine:
         signal = technical_signal(symbol, self.strategy, data, regime.state if self.use_market_filter else "BULLISH", now,
                                   allow_neutral=self.allow_neutral) if not blockers else None
         indicator_values = data.to_dict() | {"relative_volume": rvol, "score_components": components,
+                                            'paper_data_policy':self.paper_data_policy, 'paper_eligibility':paper,
                                             "sector_strength_known": sector_value is not None,
                                             "market_filter_enabled": self.use_market_filter}
         if quality is not None:
