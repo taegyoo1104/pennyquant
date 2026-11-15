@@ -4,6 +4,10 @@
 
 ## 감시 50종목 과거 분봉 DB·RVOL 연결
 
+사용자 로컬에서 `watchlist-refresh`가 PARTIAL/50으로 반환됐고 BNY·FITB·FTV·HON·KHC·SKYD·VYLR의 `market_cap_missing`을 확인했다. 정확한 누락 원인은 아직 미확정이다. `watchlist-diagnose [--connect]`로 섹터 자료 누락과 개별 종목 기본 정보 응답을 구분한다. 완료 시총 자료는 하루 캐시되므로 무조건 재실행을 권하지 않는다. `history-backfill --allow-partial-watchlist`는 시총 누락만 있는 유효 기간 내 토스 PARTIAL 후보의 분봉 사전 저장만 허용하고, 보고서에 순위 미확정을 기록한다. 감시목록 VALID 승격·매수 허용·자동 티커 치환은 하지 않는다. 실제 전체 상위 50의 확정은 여전히 미완료다.
+
+이 후속 변경 검증: 시총 진단·분봉 저장·토스 시총·감시목록 통합 관련 32 passed, 4 warnings; Ruff·diff 검사 통과. 사용자 DB와 API에는 클라우드에서 접근하지 않았다.
+
 사용자는 감시 종목의 과거 분봉을 DB에 저장해 RVOL에 연결하도록 요청한 뒤, 기본 감시 범위를 시총 상위 50종목으로 줄이도록 방향을 조정했다. 기본/현재 예시 YAML은 50, 집중 분석 20, 보유 목표 2를 유지하며 명시적 100 설정도 지원한다. 사용자 YAML의 명시적 100은 자동 변경하지 않는다. 이전 단계 문서의 100은 당시 기본값이다.
 
 - [실행 안내](docs/WATCHLIST_RVOL.md): 같은 설정의 `watchlist-refresh` → `history-backfill` → `history-status` → `run`. 초기 정상장 기준 약 2,000회 조회, 초당 1회에서는 최소 약 34분이다. 사용자 로컬 환경변수·MySQL을 사용하며 클라우드에서 실제 토스/사용자 DB 호출은 수행하지 않았다.

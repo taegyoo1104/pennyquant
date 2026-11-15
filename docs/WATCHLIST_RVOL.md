@@ -23,6 +23,24 @@ Ctrl+C, 호출 예산 소진, 오류로 중단해도 저장된 페이지와 다�
 
 `history-status`의 `backfill.status=COMPLETE`는 요청한 종목×거래일의 분봉 확보를 뜻한다. 오래된 실행의 완료 상태는 `started_at`와 `session_dates`를 함께 봐야 한다. 명령 종료 코드 0은 수집 완료, 1은 부분 완료/중단, 2는 설정 오류다. 수집 명령은 주문·계좌·뉴스·LLM API를 호출하지 않는다.
 
+### 시총 일부 누락으로 PARTIAL인 경우
+
+`watchlist_size: 50`과 `status: PARTIAL`이 함께 나오면 확보된 자료로 후보 50개를 만들었지만 전체 상위 50 순위는 미확정이다. `market_cap_missing`은 섹터 자료에서 해당 티커의 유효한 시총을 확보하지 못했다는 뜻이며, 상장폐지·거래 불가 또는 상위 50 밖이라는 뜻이 아니다. 완료된 토스 시총 수집은 하루 동안 캐시되므로 `watchlist-refresh` 반복만으로 누락이 해소되지는 않는다.
+
+```sh
+python -m sessionquant watchlist-diagnose --config config/sessionquant.candidates.example.yaml --connect
+```
+
+진단은 저장된 섹터 자료의 누락 여부와 누락 티커의 기본 종목 정보를 구분한다. `--connect`를 빼면 DB만 읽고, 지정하면 최대 20개의 누락 티커를 개별 StockInfo GET으로 조회한다. 새 인증에 따른 토큰 충돌을 피하도록 기존 토스 수집기를 종료한 상태에서 실행한다. 이름·ISIN·상장 상태가 조회돼도 시총 누락을 보완하거나 티커를 자동 치환하지 않는다. 실패 응답 본문·인증키·계좌정보는 출력하지 않는다.
+
+순위 검증 전에도 후보의 **분봉만 사전 저장**하려면 다음 옵션을 명시한다.
+
+```sh
+python -m sessionquant history-backfill --config config/sessionquant.candidates.example.yaml --allow-partial-watchlist
+```
+
+이 옵션은 만료되지 않은 토스 PARTIAL 목록에서 문제가 시총 누락뿐이고 설정한 수만큼의 후보가 있을 때만 허용한다. 분봉 수집 보고서의 `selection.status=PARTIAL`, `selection.ranking_verified=false`, 누락 티커 목록을 보존한다. `backfill.status=COMPLETE`가 되어도 **감시목록은 PARTIAL이며 매수 차단·장중 집중 선정 조건은 바뀌지 않는다.** 시총 검증이 완료되어 정상 감시목록에 포함된 종목은 사전 저장한 분봉을 재사용할 수 있다. 충돌·출처 오류·만료·편입 불일치는 이 옵션으로 우회하지 않는다.
+
 ## 장중 연결
 
 ```sh

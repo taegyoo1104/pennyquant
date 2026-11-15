@@ -51,6 +51,9 @@ def parser():
         if name == 'watchlist-export':
             cmd.add_argument('--output',type=Path,required=True)
     sub.add_parser("doctor", help="설치 상태와 실제 주문 비활성화 여부 확인")
+    diagnostic=sub.add_parser('watchlist-diagnose',help='시총 누락 원인 진단; --connect는 누락 티커의 토스 기본 정보만 조회')
+    diagnostic.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
+    diagnostic.add_argument('--connect',action='store_true')
     quality = sub.add_parser('market-data-status',help='저장된 시세·적격성·RVOL 확보율 조회; 외부 호출 없음')
     quality.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'),help='PAPER_LOCAL 설정 파일')
     for name in ('history-backfill','history-status'):
@@ -59,6 +62,7 @@ def parser():
         if name == 'history-backfill':
             history.add_argument('--max-requests',type=int,default=5000)
             history.add_argument('--refresh-complete',action='store_true',help='완료 거래일도 다시 조회해 정정 충돌 확인')
+            history.add_argument('--allow-partial-watchlist',action='store_true',help='시총 누락만 있는 PARTIAL 후보의 분봉 사전 수집; 매수 허용 아님')
     export = sub.add_parser('record-export',help='중지한 PAPER 원장에서 시점 보존 연구 묶음 내보내기')
     export.add_argument('--config',type=Path,default=Path('config/sessionquant.yaml'))
     export.add_argument('--out',type=Path,required=True,help='새 출력 폴더')
@@ -200,11 +204,16 @@ def main(argv=None):
                 api_cost_usd=args.api_cost_usd,infrastructure_cost_usd=args.infrastructure_cost_usd)
             print(json.dumps({'report':str(args.report),'split_status':result['split_plan']['status'],
                 'actual_out_of_sample_validated':False,'live_order_writes':0,'llm_generation_calls':0},ensure_ascii=False,indent=2))
+        elif args.command == 'watchlist-diagnose':
+            from .session_config import load_session_config
+            from .watchlist.diagnostics import command
+            print(json.dumps(asyncio.run(command(load_session_config(args.config),connect=args.connect)),ensure_ascii=False,indent=2))
         elif args.command in {'history-backfill','history-status'}:
             from .session_config import load_session_config
             from .market.history_commands import command
             report = asyncio.run(command(load_session_config(args.config),args.command,
-                max_requests=getattr(args,'max_requests',5000),refresh=getattr(args,'refresh_complete',False)))
+                max_requests=getattr(args,'max_requests',5000),refresh=getattr(args,'refresh_complete',False),
+                allow_partial=getattr(args,'allow_partial_watchlist',False)))
             print(json.dumps(report,ensure_ascii=False,indent=2))
             if args.command == 'history-backfill' and report['status'] != 'COMPLETE':return 1
         elif args.command == 'market-data-status':
