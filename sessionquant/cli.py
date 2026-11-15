@@ -54,6 +54,7 @@ def parser():
     for name, help_text in (
         ('prepare-paper','기존 분봉·시총 자료를 새 실데이터 Paper 원장으로 복사; 실행 엔진을 먼저 중지'),
         ('paper-status','Paper 시세·RVOL·차단·뉴스·체결 요약; 외부 호출 없음'),
+        ('news-status','저장된 뉴스 수집·LLM 요청·분류 결과 확인; 외부 호출·추가 과금 없음'),
         ('paper-news-probe','기업 한 곳의 실제 뉴스→LLM→전략 맥락 진단; 유료 생성 시도 최대 1회, 엔진 중지 필요')):
         paper=sub.add_parser(name,help=help_text)
         paper.add_argument('--config',type=Path,default=Path('config/sessionquant.realtime-paper.example.yaml'))
@@ -187,7 +188,7 @@ def main(argv=None):
     try:
         import os
         os.environ.setdefault("SQ_ENVIRONMENT", "PAPER_LOCAL")
-        if args.command in {'prepare-paper','paper-status','paper-news-probe'}:
+        if args.command in {'prepare-paper','paper-status','paper-news-probe','news-status'}:
             from .session_config import load_session_config
             from .paper_operations import command
             source=load_session_config(args.source_config) if args.command=='prepare-paper' else None

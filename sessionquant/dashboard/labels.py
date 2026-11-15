@@ -1,0 +1,168 @@
+"""화면에서만 쓰는 쉬운 이름. 저장된 코드와 분석 원문은 변경하지 않는다."""
+import re
+
+LABELS = {
+    'PAPER_LOCAL':'모의매매','LIVE_LOCAL':'실제 계좌','LIVE_GCP':'실제 계좌',
+    'UNKNOWN':'확인 필요','NOT_STARTED':'아직 시작 안 함','WAITING':'시작 버튼 대기',
+    'RUNNING':'실행 중','STOPPED':'종료','LIQUIDATING':'매도 진행 중','OFFLINE':'연결 확인 필요',
+    'VALID':'사용 가능','VERIFIED':'확인됨','AVAILABLE':'사용 가능','PARTIAL':'일부 확인 필요',
+    'COMPLETE':'준비 완료','INCOMPLETE':'자료 부족','STALE':'오래된 자료','EXPIRED':'유효기간 지남',
+    'BLOCKED':'보류','READY':'준비 완료','WATCH':'관찰 중','CALCULATED':'계산됨','CLOSED':'장 종료',
+    'SIMULATION_ASSUMPTIONS':'모의 거래 조건','EXPERIMENTAL_UNVERIFIED':'비교 근거 미확인',
+    'strict':'엄격한 확인','observed_paper_v1':'모의 거래 조건','market_v2':'시장가 모의 체결',
+    'SUCCEEDED':'분석 완료','REQUESTED':'응답 대기','RESPONSE_RECEIVED':'응답 검사 중',
+    'OUTCOME_UNKNOWN':'요청 결과 확인 필요','CACHE_HIT':'이전 분석 재사용',
+    'SKIPPED_PRECHECK':'분석 대상 제외','BUDGET_BLOCKED':'예산·호출 제한',
+    'HTTP_FAILED':'연결 요청 실패','RATE_LIMITED':'요청 제한','JSON_PARSE_FAILED':'응답 형식 오류',
+    'SCHEMA_VALIDATION_FAILED':'응답 항목 오류','BUSINESS_RULE_REJECTED':'내용 검사 미통과',
+    'PROVIDER_REFUSED':'AI 응답 거절','PROVIDER_REFUSAL':'AI 응답 거절','SEMANTIC_CONFLICT':'내용 해석 충돌',
+    'LEGACY_UNMAPPED':'이전 기록 · 요청 연결 미확인',
+    'EVIDENCE_QUOTE_MISMATCH':'원문 근거 불일치','SCHEMA_MISMATCH':'응답 항목 불일치',
+    'JSON_PARSE_ERROR':'응답 형식 오류','TIMEOUT':'응답 시간 초과','TRANSPORT_ERROR':'통신 오류',
+    'NO_KEY':'AI 키 없음','NO_CREDIT':'AI 잔액·한도 부족','AUTH_ERROR':'AI 인증 확인 필요',
+    'TEMPORARY_ERROR':'일시적 연결 오류','RATE_LIMIT':'요청 제한',
+    'FETCHED':'수집 완료','NO_NEW_ARTICLES':'새 기사 없음','IN_PROGRESS':'작업 중',
+    'PROVIDER_RATE_LIMITED':'공급자 요청 제한','PROVIDER_UNAVAILABLE':'공급자 연결 확인 필요',
+    'PROVIDER_HTTP_ERROR':'공급자 요청 실패','DISCOVERED_ONLY':'기사 발견 · 본문 미확인',
+    'POSITIVE':'긍정','NEGATIVE':'부정','NEUTRAL':'중립','MIXED':'긍정·부정 혼재',
+    'CONFIRMED':'확인된 내용','UNCONFIRMED':'확인 필요','RUMOR':'소문','PLANNED':'예정',
+    'HIGH':'높음','MEDIUM':'보통','LOW':'낮음','BULLISH':'상승','BEARISH':'하락',
+    'EARNINGS_BEAT':'실적 호조','EARNINGS_MISS':'실적 부진','GUIDANCE_RAISE':'실적 전망 상향',
+    'GUIDANCE_CUT':'실적 전망 하향','CLINICAL_SUCCESS':'임상 성공','CLINICAL_FAILURE':'임상 실패',
+    'DILUTION':'주식 증가 부담','OFFERING':'주식 발행','BUYBACK':'자사주 매입','DIVIDEND':'배당',
+    'MERGER_ACQUISITION':'인수·합병','REGULATORY_APPROVAL':'규제 승인','LAWSUIT':'소송',
+    'BANKRUPTCY':'파산','OTHER':'기타','EMPLOYMENT':'고용','INFLATION':'물가','INTEREST_RATE':'금리',
+    'pullback':'눌림목','momentum':'상승 추세','gap_breakout':'갭 돌파','vwap':'평균 거래가격 회복',
+    'buy':'매수','sell':'매도','BUY':'매수','SELL':'매도','primary':'기본 분석','escalation':'추가 분석',
+    'submitted':'접수 대기','accepted':'접수됨','filled':'체결 완료','partial':'일부 체결',
+    'cancel_pending':'취소 대기','cancelled':'취소됨','rejected':'거절됨','pending':'처리 대기',
+    'INFO':'안내','WARNING':'주의','ERROR':'오류','info':'안내','warning':'주의','error':'오류',
+    'stale_article':'오래된 기사','duplicate_article':'중복 기사','article_body_missing':'본문 없음',
+    'title_only_article':'제목만 있음','published_at_unknown':'발행 시각 미확인',
+    'invalid_timestamp':'기사 시각 불일치','unverified_article_identity':'기사 출처·종목 미확인',
+    'primary_source_unverified':'공식 출처 미확인','ticker_not_in_article_symbols':'대상 종목 불일치',
+    'source_missing':'출처 없음','publisher_missing':'발행사 없음','llm_budget_limit':'AI 예산·호출 제한',
+    'company_feed_mapping_unverified':'기업 RSS 연결 미확인','company_mapping_missing':'기업 뉴스 설정 없음',
+    'company_refresh_failed':'기업 뉴스 수집 실패','macro_refresh_failed':'경제 뉴스 수집 실패',
+    'history_not_in_daily_operating_watchlist':'과거 분봉 부족으로 오늘 제외',
+    'history_session_missing':'거래일 자료 없음','history_minutes_missing_or_conflicting':'분봉 누락·값 충돌',
+    'history_record_invalid':'저장된 분봉 오류','historical_same_minute_coverage_incomplete':'과거 비교 분봉 부족',
+    'current_session_coverage_incomplete':'오늘 분봉 부족','split_volume_comparability_unknown':'분할 전후 거래량 비교 미확인',
+    'volume_source_or_adjustment_mismatch':'거래량 출처·조정 방식 불일치',
+    'relative_volume_unknown_or_low':'평소 대비 거래량 부족·미확인','minute_history_incomplete_or_stale':'분봉 부족·갱신 지연',
+    'minute_gaps':'분봉 누락','bar_revisions_unresolved':'분봉 값 충돌','minute_data_stale_or_missing':'최근 분봉 부족',
+    'quality_observation_stale':'최근 데이터 검사 필요','new_closed_minute_not_evaluated':'새 분봉 검사 대기',
+    'quote_stale':'시세 갱신 지연','quote_missing':'시세 없음','eligibility_unverified':'거래 조건 미확인',
+    'market_unknown':'시장 방향 미확인','market_bearish':'하락장','market_neutral':'방향성 부족',
+    'outside_market_cap_watchlist':'시총 감시 대상 밖','focus_unknown_or_stale':'집중 분석 대기·만료',
+    'watchlist_unknown':'감시 목록 미확인','watchlist_partial':'감시 자료 부족','watchlist_expired':'감시 목록 만료',
+    'confirmed_news_entry_restriction':'확인된 뉴스 위험','trading_not_started_or_halted':'매매 시작 대기·중지',
+    'preferred_position_target_reached':'권장 보유 수 도달','final_candidate_limit':'최종 후보 수 제한',
+    'stop_loss':'손절','session_exit':'장 마감 전 매도','daily_loss_limit':'하루 손실 한도 도달',
+    'holding_time_exit':'보유 시간 종료','confirmed_adverse_news':'확인된 악재','profit_protection':'수익 보호',
+    'net_profit_target':'목표 수익 도달','paper_fractional_trading_enabled':'모의 소수점 거래 사용',
+    'actual_account_permissions_not_verified':'실제 계좌 권한 미확인','halted_unknown':'거래정지 여부 미확인',
+    'corporate_action_unknown':'기업행동 미확인','TOKEN_BASED_ESTIMATE':'토큰 기준 추정 비용',
+    'UNCONFIRMED_RESERVED_ESTIMATE':'사용량 미확인 · 예상 비용','NO_REQUEST':'요청 없음',
+    'company_cycle':'기업 뉴스','calendar_cycle':'경제 일정','fred_daily':'일별 경제지표',
+    'macro:official':'공식 경제 뉴스','macro:treasury':'미 재무부','macro:gdelt':'세계 뉴스 검색',
+    'macro:alpaca':'시장 보조 뉴스','rss':'기업 RSS','sec':'미국 공시','official':'공식 기관',
+    'gdelt':'세계 뉴스 검색','treasury':'미 재무부','alpaca':'알파카 뉴스',
+    'toss:/api/v1/candles:1m':'토스 1분봉','raw':'수정 전 가격','adjusted':'수정 가격',
+    'FDA_APPROVAL':'미 FDA 승인','FDA_REJECTION':'미 FDA 승인 거절','MAJOR_CONTRACT':'주요 계약',
+    'STRATEGIC_PARTNERSHIP':'전략적 제휴','ACQUISITION_OFFER':'인수 제안','DEBT_REDUCTION':'부채 감소',
+    'EQUITY_OFFERING':'주식 발행','ATM_OFFERING':'시장 내 주식 발행','CONVERTIBLE_DEBT':'전환사채',
+    'DELISTING_NOTICE':'상장폐지 경고','GOING_CONCERN':'기업 존속 우려','DEBT_DEFAULT':'채무 불이행',
+    'TRADING_SUSPENSION':'거래정지','REVERSE_SPLIT':'주식 병합','REGISTRATION':'증권 등록',
+    'MANAGEMENT_CHANGE':'경영진 변경','RIGHTS_UNKNOWN':'이용 권한 미확인',
+    'BODY_EXTRACTED':'본문 확보','ELIGIBLE_FOR_LLM':'AI 분석 가능','FETCH_PENDING':'수집 대기',
+    'FETCH_UNAVAILABLE':'본문 수집 불가','CONTENT_TOO_SHORT':'본문 부족','BOILERPLATE_ONLY':'안내문만 있음',
+    'DATE_CONFLICT':'발행 시각 불일치','PUBLISHED_AT_UNKNOWN':'발행 시각 미확인',
+    'ROBOTS_DISALLOWED':'사이트 수집 제한','ROBOTS_RATE_LIMITED':'사이트 요청 제한',
+    'ROBOTS_UNAVAILABLE':'수집 허용 여부 미확인','RETRY_EXHAUSTED':'재시도 한도 도달',
+    'SOURCE_AND_TIME_VERIFIED':'출처·시각 확인됨','CANCELLED':'취소됨',
+    'paper_listing_evidence_missing':'상장 정보 없음','paper_listing_evidence_stale_or_missing':'상장 정보 부족·만료',
+    'paper_listing_not_active':'현재 거래 중인 상장 종목 아님','exchange_unverified':'거래소 미확인',
+    'paper_known_restriction_tradable':'거래 제한 확인','paper_known_restriction_fractional':'소수점 거래 제한 확인',
+    'paper_known_restriction_halted':'거래정지 확인','paper_known_restriction_corporate_action':'기업행동 제한 확인',
+    'GOOD':'양호','DELAYED':'지연 시세','REALTIME':'실시간','DAILY':'일별 자료',
+    'WITHIN_ESTIMATES':'예상 한도 이내','NO_OBSERVATION':'관측 자료 없음','SHADOW':'참고만 표시',
+}
+
+COLUMNS = {
+    '403':'접근 제한 횟수','429':'요청 제한 횟수',
+    'id':'기록 번호','kind':'구분','status':'상태','code':'사유','timestamp':'시각','observed_at':'확인 시각',
+    'symbol':'종목','ticker':'종목','provider':'공급자','source':'출처','message':'설명','reason':'사유',
+    'reasons':'사유','level':'수준','severity':'수준','error_type':'오류 종류','date':'날짜',
+    'strategy':'전략','equity':'총자산','cash':'현금','realized_pnl':'매매 손익','net_pnl':'순손익',
+    'unrealized_pnl':'평가 손익','total_return':'총수익률','return_pct':'수익률','win_rate':'승률',
+    'trade_count':'거래 수','trades':'거래 수','max_drawdown':'최대 손실폭','profit_factor':'손익비',
+    'received_at':'수신 시각','event_at':'발생 시각','published_at':'발행 시각','valid_until':'유효 시각',
+    'started_at':'시작 시각','finished_at':'완료 시각','checked_at':'검사 시각','updated_at':'갱신 시각',
+    'duration_seconds':'소요 시간(초)','elapsed_seconds':'소요 시간(초)','calls':'요청 수','path':'조회 경로',
+    'category':'분류','priority':'우선순위','success':'성공 여부','count':'건수','error':'오류',
+    'http_status':'응답 번호','operation':'작업','endpoint':'조회 경로','attempt':'시도 수','latency_ms':'지연(ms)',
+    'session_open':'개장 시각','session_close':'폐장 시각','expected_minutes':'필요 분봉 수',
+    'observed_minutes':'수집 분봉 수','missing_minutes':'빠진 분봉 수','missing_rate':'누락 비율',
+    'conflicting_minutes':'값이 다른 분봉 수','five_count':'5분봉 수','fifteen_count':'15분봉 수',
+    'five_coverage':'5분봉 확보율','fifteen_coverage':'15분봉 확보율','five_expected':'필요 5분봉 수',
+    'fifteen_expected':'필요 15분봉 수','last_closed_at':'마지막 확정봉','last_received_at':'마지막 수신',
+    'age_seconds':'자료 경과(초)','latest_receipt_lag_seconds':'수신 지연(초)','price_adjustment':'가격 조정',
+    'missing_examples':'누락 시각 예시','explicit_zero_volume_minutes':'거래량 0인 분봉',
+    'identical_duplicates':'중복 분봉','cursor':'다음 조회 위치','pages':'조회 횟수','complete':'완료 여부',
+    'commission':'수수료','regulatory':'거래 부과금','total':'합계','qty':'수량','price':'가격',
+}
+
+
+def label(value):
+    return LABELS.get(value,value) if isinstance(value,str) else value
+
+
+def display_rows(rows):
+    """미등록 코드도 화면에는 노출하지 않고 별도 원본 보기로 보존한다."""
+    unknown=False; headers={};used=set()
+    def heading(key):
+        nonlocal unknown
+        if key in headers:return headers[key]
+        name=COLUMNS.get(key,key)
+        if not re.search('[가-힣]',str(name)):
+            unknown=True;name='추가 정보'
+        base=name;index=2
+        while name in used:name=f'{base} {index}';index+=1
+        used.add(name);headers[key]=name
+        return name
+    def value(item,key=''):
+        nonlocal unknown
+        if isinstance(item,bool):return '예' if item else '아니요'
+        if isinstance(item,dict):
+            if any(k not in COLUMNS and not re.search('[가-힣]',k) for k in item):unknown=True
+            return ' · '.join(f'{COLUMNS.get(k,k if re.search("[가-힣]",k) else "추가 정보")}: {value(v,k)}' for k,v in item.items())
+        if isinstance(item,(list,tuple)):return ', '.join('—' if v is None else str(value(v,key)) for v in item)
+        if not isinstance(item,str):return item
+        if key in {'제목','원문','원문 근거','분류 이유','분석 근거','title','body','evidence','article_url',
+                   'symbol','ticker','종목','종목·주제','id','모델','계좌 검증 범위'} or 'ID' in key:return item
+        if item in LABELS:return LABELS[item]
+        if item.startswith(('http://','https://')):return item
+        if item.startswith('rss:'):return 'RSS 피드'
+        if item.startswith('sec:'):return '미국 공시 · '+item.split(':',1)[1]
+        if item.startswith('http_'):return {'http_401':'인증 필요','http_403':'접근 제한','http_429':'요청 제한'}.get(item,'공급자 응답 오류')
+        def token(match):
+            nonlocal unknown
+            name=match.group()
+            if name in LABELS:return LABELS[name]
+            if '_' in name:unknown=True;return '상세 확인 필요'
+            return name
+        return re.sub(r'[A-Za-z][A-Za-z0-9_]*',token,item)
+    return [{heading(str(k)):value(v,str(k)) for k,v in row.items()} for row in rows],unknown
+
+
+def market_hours_label(now):
+    from ..session_window import schedule_times
+    try:
+        times=schedule_times(now)
+        if times is None:return '정규장 아님 · 뉴스 확인 가능'
+        if now < times['opens_at'] or now >= times['closes_at']:return '장외 시간 · 뉴스 확인 가능'
+        if now < times['entry_start']:return '개장 후 자료 수집 중 · 매수 시간 대기'
+        if now >= times['entry_end']:return '신규 매수 마감 · 보유 종목 관리'
+        return '정규장 · 매수 조건 확인 시간'
+    except (ValueError,TypeError,RuntimeError):return '시장 시간 확인 필요'

@@ -226,4 +226,4 @@ def test_dashboard_shows_prepared_subset_and_exclusion_reason():
     assert any(m.label=='유효 운영 종목' and m.value=='1 / 50' for m in app.metric)
     assert any('분봉 준비 1개' in c.value and '제외 1개' in c.value for c in app.caption)
     table = app.dataframe[0].value
-    assert 'history_minutes_missing_or_conflicting' in table.loc[1,'분봉 제외 사유']
+    assert '분봉 누락·값 충돌' in table.loc[1,'분봉 제외 사유']

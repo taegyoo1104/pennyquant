@@ -284,7 +284,7 @@ def test_quality_persistence_restoration_coverage_and_dashboard_staleness(tmp_pa
     app.radio(key='dashboard_page').set_value('시장·종목').run()
     assert any(m.label=='RVOL 근거' and m.value=='0 / 1' for m in app.metric)
     assert any('합성 입력의 데이터 품질' in w.value for w in app.warning)
-    assert any('quality_observation_stale' in str(frame.value) for frame in app.dataframe)
+    assert any('최근 데이터 검사 필요' in str(frame.value) for frame in app.dataframe)
 
 
 def test_old_bar_identifiers_and_eligibility_restore_accept_optional_metadata(tmp_path):

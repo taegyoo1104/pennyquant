@@ -84,7 +84,9 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
     assert data.connected
     assert calls[-1] == "closed"
     assert ('fred_reference_observations', 30) in calls
-    assert all(limit == (30 if name == 'fred_reference_observations' else 2000) for name, limit in calls[:-1])
+    expected_limits = {'fred_reference_observations': 30, 'llm_calls': 500}
+    assert ('llm_calls', 500) in calls
+    assert all(limit == expected_limits.get(name, 2000) for name, limit in calls[:-1])
 
 
 def test_dashboard_reads_actual_engine_flat_state_and_context():
@@ -122,7 +124,7 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception and not app.error
-    assert any('LIVE_LOCAL' in row.value for row in app.caption)
+    assert any('실제 계좌' in row.value for row in app.caption)
     assert [metric.value for metric in app.metric][:3] == ['$1,200.50', '$321.45', '—']
     assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
@@ -215,4 +217,5 @@ def test_stage06_dashboard_renders_populated_provider_and_enrichment_details(tmp
     app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert any('뉴스 공급자' in item.label for item in app.expander)
     values = ' '.join(frame.value.to_string() for frame in app.dataframe)
-    assert 'PROVIDER_RATE_LIMITED' in values and 'RIGHTS_UNKNOWN' in values and 'stale_article' in values
+    assert '공급자 요청 제한' in values and '이용 권한 미확인' in values and '오래된 기사' in values
+    assert 'PROVIDER_RATE_LIMITED' not in values and 'stale_article' not in values

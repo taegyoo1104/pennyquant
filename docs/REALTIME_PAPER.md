@@ -61,7 +61,7 @@ python -m sessionquant paper-news-probe --config config/sessionquant.realtime-pa
 python -m sessionquant run --config config/sessionquant.realtime-paper.example.yaml
 ```
 
-브라우저에서 **http://localhost:8501**에 접속하고 상단이 **실데이터 Paper 실험**인지 확인한다. 초기 가상 현금은 $100이다. 실제 계좌 보유/현금은 사용하지 않으며 이 예시에서는 실제 계좌 조회도 꺼져 있다. **매매 시작** 버튼을 눌러야 신규 진입을 판단한다. 기다리는 동안에도 수집은 계속된다.
+브라우저에서 **http://localhost:8501**에 접속하고 상단이 **모의매매**, **실제 시세 사용 · 거래는 모의로 진행합니다.**인지 확인한다. 초기 가상 현금은 $100이다. 실제 계좌 보유/현금은 사용하지 않으며 이 예시에서는 실제 계좌 조회도 꺼져 있다. **매매 시작** 버튼을 눌러야 신규 진입을 판단한다. 기다리는 동안에도 수집은 계속된다.
 
 - 정규장 개장 후 75분부터 신규 진입을 허용한다. 5분/15분 확정봉, 강세장, 유동성·스프레드·RVOL·전략 신호·위험 예산을 모두 통과해야 한다. 신호가 없으면 거래 0건이 정상이다.
 - 최대 50−n개 운영 후보에서 최대 20개를 집중 분석하고, 권장 보유 수는 2개다. 소수점 시장가 체결은 가상의 지연·호가 유동성·슬리피지·수수료를 적용한다.
@@ -78,6 +78,25 @@ python -m sessionquant paper-status --config config/sessionquant.realtime-paper.
 `engine.heartbeat_fresh`는 엔진 연결, `market.quote_fresh_count`는 최근 호가, `strategy_rvol_count`는 현재 전략 전달값, `blocker_counts`는 진입 차단 사유다. `latest_candidates`는 각 평가 시각의 결정이며 현재 유효함을 뜻하지 않는다. `namespace_totals`는 **원장 전체 누계**이며 오늘만의 결과가 아니다. 명령이 보고하는 `order_writes: 0`, `llm_generation_calls: 0`은 상태 조회 자체가 외부 호출/주문을 하지 않았다는 의미다.
 
 대시보드에서는 시장 데이터 표의 **Paper 거래 조건·Paper 가정·전략에 전달한 RVOL·전략 RVOL 근거 상태**를 확인한다. 실제 계좌 자격/RVOL 비교 근거 확보율이 0이어도 Paper 실험 전달값은 별도로 표시한다. 뉴스 분석 화면에서는 기사→분석→호출·오류·토큰/추정 비용을, 거래/전략 화면에서는 후보 차단→신호→주문→가상 체결→청산 사유를 확인한다.
+
+## 주말에 분봉·뉴스 동작 확인
+
+실행 중에도 별도 터미널에서 아래 두 명령을 사용할 수 있다. **실행 프로그램과 같은 설정 파일**을 지정한다. 이미 준비한 원장에는 `prepare-paper`를 다시 실행하지 않는다.
+
+```powershell
+python -m sessionquant history-status --config config/sessionquant.realtime-paper.example.yaml --details --output history-check-01.json
+python -m sessionquant news-status --config config/sessionquant.realtime-paper.example.yaml --output news-check-01.json
+```
+
+출력은 짧은 요약으로 표시하고 상세 내용은 JSON 파일에 저장한다. 파일이 이미 있으면 `02` 등 새 이름을 사용한다. 두 명령은 저장된 자료를 읽으며 토스/뉴스 API 요청, 유료 AI 생성, 주문을 하지 않는다. 과거 분봉 준비 상태와 장중 현재 RVOL은 별개이며 주말에 현재 RVOL이 비어 있어도 과거 자료가 사라졌다는 뜻은 아니다.
+
+- `history_readiness_preview`: 다음 운영일에 사용할 분봉 준비 종목과 제외 사유. `history_quality`: 날짜별 누락·충돌. 복사된 분봉에 과거 수집 진행표가 없으면 현재 저장된 시총 후보와 달력으로 검사 범위를 정한다. 원본 기록은 바꾸지 않는다.
+- `counts.news_receipts`: 최근 기사 수신 횟수(중복 포함). `llm_request_attempts`: 실제 생성 요청 시도. `validated_responses`: 응답 형식·근거 검사 통과. `cache_hits`: 이전 분석 재사용으로 새 유료 요청이 아니다.
+- `providers`: 공급자별 최근 시도/성공/오류. `pre_llm_exclusions`: 오래된 기사·본문 부족 등 분석 전 제외 사유. `latest_calls`: 최근 요청의 분류·이유·원문 근거. 조회 범위는 최근 24시간 중 수신 최대 2,000건/호출 최대 500건이며 전체 누계가 아니다.
+
+대시보드의 **뉴스와 AI 분석**에서 기사 수신 → AI 요청 → 분석 완료를 확인한다. **뉴스 전체 보기**를 누르면 실패·대기·제외 사유와 **분류 이유와 원문 근거**를 볼 수 있다. 자동 새로고침을 켜면 메인과 뉴스 화면을 5초마다 갱신한다. 화면 조회 자체는 뉴스를 수집하거나 AI를 호출하지 않는다.
+
+주말에도 뉴스 작업은 실행되지만 새롭고 분석 가능한 기사가 없으면 AI 요청 0건일 수 있다. **분석 완료는 분류가 정답이라는 뜻이 아니다.** 회사 영향·주주 영향·확인된 내용/소문·원문 인용을 기사와 비교해야 한다. 이 도구는 분류 정답률을 만들어 표시하지 않는다.
 
 ## 4. 장 마감 후 전략 실행 분석
 

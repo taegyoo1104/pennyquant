@@ -74,7 +74,7 @@ def recent_trades(rows,now):
         except (KeyError,ValueError,TypeError):continue
         result.append(row)
     result.sort(key=lambda r:utc(r['timestamp']),reverse=True)
-    return [{'시각':timestamp(r['timestamp']),'종목':r.get('symbol'),'매수/매도':'BUY · 매수' if str(r.get('side')).lower()=='buy' else 'SELL · 매도',
+    return [{'시각':timestamp(r['timestamp']),'종목':r.get('symbol'),'매수/매도':'매수' if str(r.get('side')).lower()=='buy' else '매도',
         '수수료':usd(r.get('fee')),'매도 순실현손익':usd(r.get('realized_pnl')) if str(r.get('side')).lower()=='sell' else '—'} for r in result[:5]]
 
 
@@ -97,7 +97,9 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
     if not data.connected:
         st.button('매매 시작',disabled=True,key='offline-start')
         st.button('일괄 매매 종료·청산',disabled=True,key='offline-stop')
-    if view['lag'] is None or view['lag']>60:st.caption('⚠ 엔진·시세 최신성 미확인 · 표시값은 마지막 기록입니다.')
+    from .labels import market_hours_label
+    st.caption(market_hours_label(now))
+    if view['lag'] is None or view['lag']>60:st.caption('최신 시세 대기 중 · 마지막 저장값을 표시합니다.')
     cols=st.columns(4)
     actual=view['environment']=='LIVE_LOCAL'
     snapshot=data.actual_account or {}
@@ -109,12 +111,12 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
         cols[2].metric('오늘 순실현손익 · 실제 계좌','—')
         if age_seconds(snapshot.get('received_at'),now) is None or age_seconds(snapshot.get('received_at'),now)>60 or data.account_status.get('status')=='error':st.caption('⚠ 실제 계좌 조회 미확인/과거 값 · '+timestamp(snapshot.get('received_at')))
     else:
-        cols[0].metric('USD 총자산 · Paper 장부',usd(account.get('equity')))
+        cols[0].metric('모의 총자산',usd(account.get('equity')))
         from .session_app import decimal_value
         cash=decimal_value(account.get('cash'));reserved=decimal_value(account.get('reserved_cash'))
-        cols[1].metric('USD 가용 현금 · Paper',usd(cash-reserved) if cash is not None and reserved is not None else '—')
+        cols[1].metric('모의 주문 가능 금액',usd(cash-reserved) if cash is not None and reserved is not None else '—')
         # A bounded recent-execution query cannot establish the entire day's P&L.
-        cols[2].metric('오늘 순실현손익','—',help='일별 완전성 확인 자료 없음. 누적 실현손익은 매매 내역에서 확인합니다.')
+        cols[2].metric('오늘 매매 손익','—',help='하루 전체 체결을 확인할 수 없어 비워 둡니다. 누적 손익은 매매 내역에서 확인하세요.')
     from .summary_panels import open_cost_repository
     cost_repo=None
     try:
@@ -123,27 +125,32 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
     except Exception:summary={}
     finally:
         if cost_repo:cost_repo.close()
-    cols[3].metric('LLM 월 사용액 / 예산 잔여 · 추정',usd(summary.get('month'))+' / '+usd(summary.get('program_budget_remaining_usd')))
-    st.caption('총자산은 장부 평가자산, 가용 현금은 현금−예약금입니다. LLM 예산 잔여는 OpenAI 실제 크레딧이 아닙니다.')
-    st.subheader('보유 종목 · 전략 관리 장부')
+    cols[3].metric('이번 달 AI 비용 / 남은 예산',usd(summary.get('month'))+' / '+usd(summary.get('program_budget_remaining_usd')),
+        help='프로그램의 추정 비용과 자체 예산입니다. OpenAI 실제 잔액과 다를 수 있습니다.')
+    st.subheader('보유 종목')
     if actual:st.info('실계좌 관리 포지션 연결은 미확인입니다. 전체 계좌 보유와 자동 합산하지 않습니다.')
-    else:_table([{k:r[k] for k in ('종목','보유 수량','평균 매수가','평가액','평가 손익')} for r in view['positions'][:5]],'현재 보유한 전략 관리 종목 없음')
+    else:_table([{k:r[k] for k in ('종목','보유 수량','평균 매수가','평가액','평가 손익')} for r in view['positions'][:5]],'보유 종목이 없습니다.')
     link('보유 전체 보기','매매 내역')
-    st.subheader('최근 매매 · 완료 체결 최대 5건')
+    st.subheader('최근 거래')
     _table(recent_trades(data.tables['executions'],now))
     link('매매 전체 보기','매매 내역')
-    st.subheader('보유·집중 감시 종목 뉴스 · 최근 24시간')
-    from .watchlist_panel import current_status
-    status,active=current_status(data.watchlist_state,now)
-    if not active or status!='VALID':st.caption('집중 감시 목록 미확인 · 보유 관련 뉴스만 표시')
-    if not data.news_status.get('updated_at') or data.news_status.get('issues'):st.caption('⚠ 뉴스 수집 상태 확인 필요')
+    st.subheader('뉴스와 AI 분석')
+    flow=data.news_flow
+    if flow:
+        counts=flow['counts']
+        st.write(f"기사 수신 **{counts['news_receipts']}건** · AI 요청 **{counts['llm_request_attempts']}건** · 분석 완료 **{counts['validated_responses']}건**")
+        st.caption('최근 24시간 기록 중 최대 300건 기준 · 마지막 수신 '+timestamp(flow['last_news_received_at']))
+        if counts['failed_or_rejected']:st.caption(f"AI 요청·검증 실패 {counts['failed_or_rejected']}건 · 뉴스 전체 보기에서 확인하세요.")
+        if flow['llm_health'].get('code') in {'NO_KEY','NO_CREDIT','AUTH_ERROR'}:
+            from .labels import label
+            st.caption('AI 상태: '+label(flow['llm_health']['code']))
     news=main_news(data,view,now)
     for row in news:
         event=row.get('event',row)
-        st.write(f"[{row['labels']}] [{row.get('sentiment','미확인')}] {event.get('title','')}")
+        from .labels import label
+        st.write(f"[{row['labels']}] [{label(row.get('sentiment','UNKNOWN'))}] {event.get('title','')}")
         st.caption(f"{event.get('source','미확인')} · {timestamp(event.get('published_at'))}")
-    if not news:st.info('현재 보유·집중 감시 종목에 대한 최근 24시간 뉴스가 없습니다. 수집 상태도 함께 확인하세요.')
-    st.caption('조회 범위: 최근 기업 뉴스/체결 각 최대 300건. 전체 기록은 상세에서 확인하세요.')
+    if not news:st.info('보유·집중 종목의 최근 뉴스가 없습니다.')
     link('뉴스 전체 보기','뉴스·LLM')
 
 

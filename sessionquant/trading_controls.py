@@ -101,9 +101,9 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     """실행별 확인 상태를 보존하고 최종 버튼 클릭에서만 기존 큐를 사용한다."""
     import streamlit as st
     now=utc(now or datetime.now(timezone.utc));state=repo.get_control(KEY,{})
-    st.subheader('매매 제어')
+    if not compact:st.subheader('실행 상태')
     if not state:
-        st.caption('OFFLINE · 엔진 연결 미확인')
+        st.caption('프로그램 연결 확인 필요')
         if compact:
             st.button('매매 시작',disabled=True,key='trading-start')
             st.button('일괄 매매 종료·청산',disabled=True,key='trading-stop')
@@ -113,8 +113,8 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     except (KeyError,ValueError,TypeError):active=False
     expected='live' if environment=='LIVE_LOCAL' else 'paper' if environment=='PAPER_LOCAL' else None
     active=bool(active and expected==state.get('mode') and not readonly)
-    st.caption(environment+' · '+(state.get('status','UNKNOWN') if active else 'OFFLINE / 읽기 전용'))
-    if not active:st.caption('엔진·환경·권한 미확인: 제어 요청을 보낼 수 없습니다.')
+    from .dashboard.labels import label
+    st.write('**실행 상태 · '+(label(state.get('status','UNKNOWN')) if active else '연결 확인 필요 · 조회만 가능')+'**')
     run=state['run_id']
     requests=[r for r in repo.recent('order_intents',200) if r.get('kind')=='dashboard_command' and r.get('run_id')==run]
     unresolved=[r for r in requests if r.get('status')=='pending']
@@ -124,7 +124,7 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
             st.rerun()
         except Exception:st.error('요청을 전달하지 못했습니다. 현재 실행·관리 수량·미체결을 확인하세요.')
     with st.expander('매매 시작 확인'):
-        confirm=st.checkbox('표시 환경과 실행을 확인하고 매매 시작을 요청합니다.',key='confirm-start-'+run)
+        confirm=st.checkbox('표시된 계좌와 모드를 확인했습니다.',key='confirm-start-'+run)
         if st.button('매매 시작',disabled=not active or bool(unresolved) or state.get('status')!='WAITING' or not confirm,key='trading-start'):submit('start')
     with st.expander('일괄 매매 종료·청산 확인'):
         st.caption('신규 매수 차단 → 미체결 매수 취소 → 전략 관리 포지션 시장가 청산. 시장 시간·유동성에 따라 부분체결/미체결될 수 있습니다.')
@@ -139,11 +139,11 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
         try:positive=decimal(qty)>0
         except (ValueError,TypeError):positive=False
         with st.expander(f'{symbol} 전량 매도 · 전략 관리 {qty}'):
-            st.caption(environment+' · 시장가 위험/미체결 수량은 엔진에서 다시 확인합니다.')
+            st.caption(label(environment)+' · 시장가 위험/미체결 수량은 엔진에서 다시 확인합니다.')
             confirm=st.checkbox(f'{symbol} 전략 관리 수량 전량 시장가 매도를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
             if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or any(r.get('symbol')==symbol and r.get('status') in {'pending','accepted'} for r in requests)):
                 submit('sell_symbol',symbol)
-    st.caption('요청 접수는 체결 완료가 아닙니다. 부분체결·미확인·잔량은 매매 내역에서 확인하세요.')
+    st.caption('주문 처리와 남은 수량은 매매 내역에서 확인하세요.')
     if not compact:
         for row in requests[-5:]:st.caption(str(row.get('action'))+': '+str(row.get('status')))
 
