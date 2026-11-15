@@ -91,7 +91,7 @@ def age_seconds(value: Any, now: datetime) -> float | None:
         return None
 
 
-def load_database(path: str | Path) -> DashboardData:
+def load_database(path: str | Path, *, page=None) -> DashboardData:
     """최근 기록만 읽고 연결은 즉시 닫는다. MySQL은 로컬 파일 존재 여부와 무관하다."""
     result = DashboardData()
     repository = None
@@ -105,28 +105,30 @@ def load_database(path: str | Path) -> DashboardData:
         if result.backend == "sqlite" and not Path(path).exists():
             return result
         repository = Repository(path)
-        result.state = repository.load_state() or {}
-        result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
-        result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
-        result.portfolio_selection=repository.get_control('portfolio_selection_v1',{}) or {}
-        result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
-        result.fred_references=repository.recent('fred_reference_observations',limit=30)
-        result.news_status=repository.get_control('session_news_status',{}) or {}
-        result.news_status['schedule']=repository.get_control('news_provider_schedule_v1',{}) or {}
-        result.actual_account=repository.get_control("actual_account_snapshot")
-        result.account_status=repository.get_control("account_monitor_status",{}) or {}
-        result.context = repository.get_control("sessionquant_context", {}) or {}
-        broker_status = (repository.get_control("broker_state", {}) or {}) if not result.context else {}
-        if broker_status.get("mode") == "live" and not result.context:
-            result.context={"environment":"LIVE_LOCAL","mode":"live","synthetic":False,
-                "updated_at":broker_status.get("observed_at"),"source_label":"실계좌 주문·체결 기록"}
-        if result.actual_account and not result.context:
-            result.context={"environment":"LIVE_LOCAL","mode":"account_readonly","synthetic":False,
-                "updated_at":result.actual_account.get("received_at"),"source_label":"토스 실제 계좌 조회"}
-        for name in TABLES:
-            if name in KINDS:
-                result.tables[name] = repository.recent(name, limit=2000)
-        result.connected = True
+        from contextlib import nullcontext
+        with repository.transaction() if hasattr(repository,'transaction') else nullcontext():
+            result.state = repository.load_state() or {}
+            result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
+            result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
+            result.portfolio_selection=repository.get_control('portfolio_selection_v1',{}) or {}
+            result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
+            result.fred_references=repository.recent('fred_reference_observations',limit=30)
+            result.news_status=repository.get_control('session_news_status',{}) or {}
+            result.news_status['schedule']=repository.get_control('news_provider_schedule_v1',{}) or {}
+            result.actual_account=repository.get_control("actual_account_snapshot")
+            result.account_status=repository.get_control("account_monitor_status",{}) or {}
+            result.context = repository.get_control("sessionquant_context", {}) or {}
+            broker_status = (repository.get_control("broker_state", {}) or {}) if not result.context else {}
+            if broker_status.get("mode") == "live" and not result.context:
+                result.context={"environment":"LIVE_LOCAL","mode":"live","synthetic":False,
+                    "updated_at":broker_status.get("observed_at"),"source_label":"실계좌 주문·체결 기록"}
+            if result.actual_account and not result.context:
+                result.context={"environment":"LIVE_LOCAL","mode":"account_readonly","synthetic":False,
+                    "updated_at":result.actual_account.get("received_at"),"source_label":"토스 실제 계좌 조회"}
+            for name in TABLES:
+                if name in KINDS:
+                    result.tables[name] = repository.recent(name, limit=2000) if page is None or page!='대시보드' else (repository.recent(name,limit=300) if name in {'executions','news_events','news_analysis','quote_snapshots'} else [])
+            result.connected = True
     except Exception:
         # 드라이버의 원문 오류에는 접속 주소나 인증 정보가 포함될 수 있다.
         result = DashboardData(backend=result.backend, error="DB 기록을 읽을 수 없습니다. 연결 설정과 서버 상태를 확인하세요.")
@@ -187,11 +189,11 @@ def build_view(data: DashboardData, now: datetime | None = None) -> dict:
     for row in positions:
         symbol = row.get("symbol", "")
         qty = decimal_value(row.get("qty"), Decimal(0))
-        avg = decimal_value(row.get("avg_price"), Decimal(0))
+        avg = decimal_value(row.get("avg_price"))
         quote = quotes.get(symbol, {})
-        mark = decimal_value(quote.get("bid"), avg)
-        value = qty * mark
-        weight = value / equity * 100 if equity is not None and equity > 0 else None
+        mark = decimal_value(quote.get("bid")) if age_seconds(quote.get("timestamp"), now) is not None and age_seconds(quote.get("timestamp"),now)<=60 else None
+        value = qty * mark if mark is not None else None
+        weight = value / equity * 100 if value is not None and equity is not None and equity > 0 else None
         stop = decimal_value(row.get("stop_price"))
         position_view.append({
             "종목": symbol, "보유 수량": str(qty), "평균 매수가": usd(avg), "평가액": usd(value),
@@ -199,8 +201,8 @@ def build_view(data: DashboardData, now: datetime | None = None) -> dict:
             "최초 진입 금액": usd(row.get("initial_amount", row.get("initial_notional"))),
             "추가매수 금액": usd(row.get("add_amount", row.get("add_notional"))),
             "추가매수 횟수": row.get("add_count", row.get("adds", row.get("additions", 0))), "손절 기준": usd(stop),
-            "평가 손익": usd((mark - avg) * qty - decimal_value(row.get("entry_fee"), Decimal(0))),
-            "가격 기준": "최근 매수호가" if quote else "매수가 · 시세 미확인",
+            "평가 손익": usd((mark - avg) * qty - decimal_value(row.get("entry_fee"), Decimal(0))) if mark is not None and avg is not None else "—",
+            "가격 기준": "최근 매수호가" if mark is not None else "시세 미확인/만료",
         })
     usage = data.tables.get("llm_usage", [])
     total_cost = sum((decimal_value(row.get("cost_usd", row.get("estimated_cost_usd")), Decimal(0)) for row in usage), Decimal(0))
@@ -242,57 +244,23 @@ def _news_rows(rows: list[dict]) -> list[dict]:
     return result
 
 
-def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=None) -> None:
+def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=None, selected_page=None) -> None:
     import streamlit as st
-
-    data = load_database(path)
-    view = build_view(data)
-    if data.error:
-        st.error(data.error)
-    if not data.connected and not data.error:
-        st.info("저장된 실행 기록이 없습니다. 먼저 합성 데모 또는 모의매매 엔진을 실행하세요.")
-    if data.account_status.get("status")=="error":
-        st.warning(data.account_status.get("message","실계좌 조회 실패: 이전 기록을 확인하세요."))
-    if view["synthetic"]:
-        st.warning("합성 데이터 데모입니다. 실제 시장 수익이나 실제 체결을 나타내지 않습니다.")
-    st.caption(f"환경: {view['environment']} · 저장소: {data.backend.upper()} · 마지막 전략 수신: {view['last_event']}")
-    if data.connected:
-        control_repo=None
-        try:
-            from sessionquant.database.repository import Repository
-            from sessionquant.trading_controls import render_controls
-            control_repo=Repository(path)
-            render_controls(control_repo,positions=data.actual_account['items'] if data.actual_account and data.context.get('environment')=='LIVE_LOCAL' else view['positions'])
-        except Exception:
-            st.caption('거래 제어 연결을 확인할 수 없습니다.')
-        finally:
-            if control_repo: control_repo.close()
-    metrics = st.columns(5)
-    account = view["account"]
-    if data.actual_account:
-        from sessionquant.dashboard.account_app import money
-        actual=data.actual_account
-        market_amount=((actual.get('summary') or {}).get('marketValue') or {}).get('amount') or {}
-        buying_power=actual.get('buying_power') or {}
-        metrics[0].metric('실계좌 미국 주식 평가금액',money(market_amount.get('usd'),'USD'))
-        metrics[1].metric('실계좌 달러 매수 가능 금액',money(buying_power.get('USD'),'USD'))
-        metrics[2].metric('실계좌 국내 주식 평가금액',money(market_amount.get('krw'),'KRW'))
-        metrics[3].metric('실계좌 원화 매수 가능 금액',money(buying_power.get('KRW'),'KRW'))
-    else:
-        metrics[0].metric('전략 평가금액 · 모의/검증 장부',usd(account.get('equity')))
-        metrics[1].metric('전략 현금 · 모의/검증 장부',usd(account.get('cash')))
-        metrics[2].metric('예약 현금',usd(account.get('reserved_cash')))
-        metrics[3].metric('관리 보유 종목',f"{len(view['positions'])} / 5")
-    metrics[4].metric('시장 상태',view['regime_label'])
-    from sessionquant.dashboard.summary_panels import render_actual_account,render_cost_panel
-    if data.actual_account:
-        render_actual_account(data.actual_account,data.account_status,show_metrics=False)
-    if data.connected:
-        render_cost_panel(path,usage_path=usage_path,usage_environment=usage_environment)
-    if view["lag"] is not None and view["lag"] > 60:
-        st.info("저장된 마지막 수신 시각이 60초를 초과했습니다. 재생·종료된 실행에서는 정상일 수 있습니다. 최근 기록만으로 현재 API 연결을 판단하지 않습니다.")
-    market, candidates, portfolio, news, operations = st.tabs(["시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"])
-    with market:
+    from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
+    style()
+    page=selected_page or st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
+    data=load_database(path,page=page)
+    view=build_view(data)
+    account=view['account']
+    st.caption(f"환경: {view['environment']} · {'합성 데모' if view['synthetic'] else '저장된 장부'} · 마지막 수신: {view['last_event']}")
+    if data.error: st.error(data.error)
+    if not data.connected: st.info('저장된 실행 기록이 없습니다. 계좌·연결 상태는 미확인입니다.')
+    if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
+    if page=='대시보드':
+        render_overview(data,view,path,usage_path,usage_environment)
+    elif page=='전략·백테스트': render_strategies(data,view)
+    elif page=='시스템·설정': render_system(data,view)
+    if page == '시장·종목':
         st.subheader("시장 방향과 데이터 상태")
         st.write(f"**{view['regime_label']} · {view['regime']}**")
         reason = view["regime_detail"].get("reason", view["regime_detail"].get("reasons", ""))
@@ -317,7 +285,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             _table(schedule)
         else:
             st.caption("중요 경제 일정: 미확인. 일정이 없다는 뜻은 아닙니다.")
-    with candidates:
+    if page == '시장·종목':
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
             render_quality(data.market_quality)
@@ -337,7 +305,11 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                          "제한 사유": ", ".join(row.get("blockers", [])), "시장": row.get("regime", "UNKNOWN")})
         _table(rows)
         st.caption("뉴스가 없어도 기술적 조건으로 후보가 될 수 있습니다. 거래 가능 여부·소수점 지원·거래정지·기업행동을 확인하지 못하면 신규 주문을 허용하지 않습니다.")
-    with portfolio:
+    if page == '매매 내역':
+        from sessionquant.dashboard.summary_panels import render_actual_account
+        if view['environment']=='LIVE_LOCAL': render_actual_account(data.actual_account,data.account_status)
+        from sessionquant.dashboard.overview import filter_trades
+        filter_trades(data)
         st.subheader("전략 관리 포지션과 위험 예산")
         st.caption("상단의 토스 실제 계좌와 별도로 이 실행의 전략 장부를 표시합니다.")
         _table(view["positions"], "현재 전략 관리 포지션이 없습니다. 조건이 맞지 않으면 현금을 유지합니다.")
@@ -353,9 +325,18 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             _table([{'종목':symbol,'손절 예상 손실':usd(row.get('loss_estimate')),'종목 위험 예산':usd(row.get('risk_budget')),
                      '평가금액':usd(row.get('market_value')),'예상 위험 사유':', '.join(row.get('issues',[]))}
                     for symbol,row in risk.get('positions',{}).items()],'예상 위험 기록이 없습니다. 입력 미확인은 안전 판정이 아닙니다.')
-    with news:
+    if page == '뉴스·LLM':
         from sessionquant.dashboard.news_panel import render_news_diagnostics
         render_news_diagnostics(data)
+        from sessionquant.dashboard.summary_panels import open_cost_repository
+        cost_repo=None
+        try:
+            cost_repo=open_cost_repository(usage_path or path,environment=usage_environment)
+            health=cost_repo.get_control('llm_provider_health',{}) if cost_repo else {}
+            if health.get('code') not in {None,'UNKNOWN','AVAILABLE'}:st.warning(health.get('message','LLM 사용 상태 확인 필요'))
+        except Exception:st.caption('LLM 상태 미확인')
+        finally:
+            if cost_repo:cost_repo.close()
         corporate, macro, usage = st.tabs(["기업 뉴스", "경제·정치·국제정세", "LLM 사용량"])
         with corporate:
             from sessionquant.dashboard.news_panel import current_company_news
@@ -375,7 +356,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                 from sessionquant.dashboard.llm_panel import render_llm_details
                 render_llm_details(path,usage_path=usage_path,usage_environment=usage_environment)
             else:st.info('LLM 호출·사용량 기록이 없습니다. 실제 사용량을 0으로 확정하지 않습니다.')
-    with operations:
+    if page == '매매 내역':
         st.subheader("주문·체결과 당일 청산")
         session = view["session"] if isinstance(view["session"], dict) else {}
         schedule = session.get("schedule", session)
@@ -413,6 +394,11 @@ def main() -> None:
     """로컬 전략·실계좌 통합 화면을 실행한다."""
     import streamlit as st
 
+    # 상세 화면이 렌더링되지 않아도 확인/검색 위젯의 세션 값을 보존한다.
+    for key in list(st.session_state):
+        if key.startswith(('confirm-','trade_','llm-','strategy_')):
+            st.session_state[key]=st.session_state[key]
+
     parser = argparse.ArgumentParser(description="SessionQuant 통합 대시보드")
     parser.add_argument("--usage-db",default=None)
     parser.add_argument("--usage-environment",default=None)
@@ -430,9 +416,12 @@ def main() -> None:
         st.caption("표시 시각: 한국 표준시\n\n거래 시간: 뉴욕 현지시각\n\n통화: 미국 달러")
         st.caption("데이터가 부족하면 관찰 상태를 유지합니다. 저장된 기록은 현재 API 연결을 보증하지 않습니다.")
 
-    @st.fragment(run_every="5s" if refresh else None)
+    from sessionquant.dashboard.overview import PAGES
+    page=st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
+
+    @st.fragment(run_every="5s" if refresh and page=='대시보드' else None)
     def monitor() -> None:
-        render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,usage_environment=args.usage_environment)
+        render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,usage_environment=args.usage_environment,selected_page=page)
 
     monitor()
 

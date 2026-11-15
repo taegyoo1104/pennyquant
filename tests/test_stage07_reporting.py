@@ -127,6 +127,7 @@ async def test_llm_audit_dashboard_is_read_only_and_keeps_legacy_rows(repo,tmp_p
     monkeypatch.setattr(httpx.AsyncClient,'post',lambda *args,**kwargs:pytest.fail('화면 조회에서 LLM 요청'))
     app=AppTest.from_file(str(Path(__file__).resolve().parents[1]/'sessionquant/dashboard/session_app.py'),default_timeout=30).run()
     assert not app.exception and not app.error
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     app.selectbox(key='llm-call-detail').select(result.llm_call_ids[0]).run()
     assert not app.exception
     values=' '.join(frame.value.to_string() for frame in app.dataframe)
