@@ -23,6 +23,14 @@ Ctrl+C, 호출 예산 소진, 오류로 중단해도 저장된 페이지와 다�
 
 `history-status`의 `backfill.status=COMPLETE`는 요청한 종목×거래일의 분봉 확보를 뜻한다. 오래된 실행의 완료 상태는 `started_at`와 `session_dates`를 함께 봐야 한다. 명령 종료 코드 0은 수집 완료, 1은 부분 완료/중단, 2는 설정 오류다. 수집 명령은 주문·계좌·뉴스·LLM API를 호출하지 않는다.
 
+`INCOMPLETE`인데 `error:null`이면 API 예외 없이 실행을 마쳤어도 일부 종목×거래일에서 완전한 분봉을 확보하지 못했다는 뜻이다. 재조회 전에 저장된 데이터를 검사한다.
+
+```sh
+python -m sessionquant history-status --config config/sessionquant.candidates.example.yaml --details --output data/history-quality-report.json
+```
+
+이 검사는 추가 API 요청 없이 마지막 수집 계획의 모든 종목×날짜를 DB에서 읽는다. 날짜별 누락·충돌 분, 최초 문제 분, 누락 구간, 페이지 종료 사유, 종목별 완전한 거래일 수와 5/75/120/240/390분까지의 확보 거래일 수를 출력한다. 분 번호 1은 개장 1분 후 끝나는 봉이다. 파일은 새 경로만 허용하며 원본 분봉·수신 시각·수집 상태는 수정하지 않는다. 완료된 종목×날짜 비율은 분봉 자체의 누락 비율과 다르다. 누락 분을 거래량 0으로 채우거나 비교 거래일을 임의로 건너뛰지 않는다.
+
 ### 시총 일부 누락으로 PARTIAL인 경우
 
 `watchlist_size: 50`과 `status: PARTIAL`이 함께 나오면 확보된 자료로 후보 50개를 만들었지만 전체 상위 50 순위는 미확정이다. `market_cap_missing`은 섹터 자료에서 해당 티커의 유효한 시총을 확보하지 못했다는 뜻이며, 상장폐지·거래 불가 또는 상위 50 밖이라는 뜻이 아니다. 완료된 토스 시총 수집은 하루 동안 캐시되므로 `watchlist-refresh` 반복만으로 누락이 해소되지는 않는다.
