@@ -1,4 +1,4 @@
-"""감시 100·관측 근거를 갖춘 집중 20·보유 위험 관리를 분리한다."""
+"""시총 후보·분봉 준비 운영 목록·집중 분석·보유 위험 관리를 분리한다."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -64,10 +64,12 @@ class FocusSelector:
 
 
 class WatchlistManager:
-    def __init__(self, repo, universe, config, *, provider=None, clock=None, allow_synthetic=False):
+    def __init__(self, repo, universe, config, *, provider=None, clock=None, allow_synthetic=False,
+                 history_selection=None):
         self.repo, self.universe, self.config = repo, universe, config
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.allow_synthetic = allow_synthetic
+        self.history_selection = history_selection
         self.provider_explicit = provider is not None
         self.provider = provider or FileMarketCapProvider(config.market_cap_input)
         self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days)
@@ -115,13 +117,20 @@ class WatchlistManager:
         self.publish(now)
         return self.store.status(now, allow_synthetic=self.allow_synthetic)
 
-    def light_symbols(self, now):
+    def base_symbols(self, now):
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         members = self.universe.members(now)
-        if not status['snapshot'] or status['snapshot']['data_status'] != 'VALID' or status['status'] == 'SYNTHETIC_BLOCKED':
+        if not status['snapshot'] or status['status'] == 'SYNTHETIC_BLOCKED':
             return []
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         return [row['ticker'] for row in status['items'] if row['ticker'] in members and row['ticker'] not in REFERENCE_SYMBOLS][:self.config.watchlist_size]
+
+    def light_symbols(self, now):
+        status = self.store.status(now, allow_synthetic=self.allow_synthetic)
+        if not status['snapshot'] or status['snapshot']['data_status'] != 'VALID':
+            return []
+        symbols = self.base_symbols(now)
+        return self.history_selection.allowed(symbols, now) if self.history_selection else symbols
 
     def observe_prices(self, rows, received_at):
         received_at = utc(received_at)
@@ -216,8 +225,10 @@ class WatchlistManager:
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         if status['status'] != 'VALID':
             return ['watchlist_'+status['status'].lower()]
-        if symbol not in set(self.light_symbols(now)):
+        if symbol not in set(self.base_symbols(now)):
             return ['outside_market_cap_watchlist']
+        if symbol not in set(self.light_symbols(now)):
+            return ['history_not_in_daily_operating_watchlist']
         row = next((r for r in self.state['focus'] if r['ticker'] == symbol), None)
         if not row or self._metric(symbol, now)['data_status'] != 'VERIFIED':
             return ['focus_unknown_or_stale']
@@ -253,12 +264,19 @@ class WatchlistManager:
         self.focus(now)
         contract = self.news_targets(now, priority_symbols)
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
+        base = self.base_symbols(now)
+        history = self.history_selection.ensure(base, now) if self.history_selection and base else {}
+        included = set(history.get('included_symbols', base))
+        operating = set(self.light_symbols(now))
+        history_rows = {r['symbol']:r for r in history.get('items', [])}
         focused = {row['ticker']: row for row in self.state['focus']}
         rows = []
         for row in status['items'][:self.config.watchlist_size]:
             symbol = row['ticker']
             metric = self._metric(symbol, now)
-            rows.append({**row, 'focused': symbol in focused, 'focus_reason': focused.get(symbol, {}).get('selection_reason', metric['reason']),
+            rows.append({**row, 'history_ready':symbol in included,
+                'operating':symbol in operating, 'history_selection':history_rows.get(symbol),
+                'focused': symbol in focused, 'focus_reason': focused.get(symbol, {}).get('selection_reason', metric['reason']),
                 'last_detail_at': self.state.get('last_detail_success', {}).get(symbol),
                 'focus_valid_until':focused.get(symbol,{}).get('valid_until'),
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],
@@ -276,7 +294,8 @@ class WatchlistManager:
                 'known_at':now.isoformat(), 'valid_until':valid_until,
                 'watchlist_id': status['snapshot']['id'] if status['snapshot'] else None,
                 'synthetic': status['snapshot']['synthetic'] if status['snapshot'] else False,
-                'data_status': status['status'], 'items':self.state['focus']})
+                'data_status': status['status'], 'items':self.state['focus'],
+                'history_selection_checked_at':history.get('checked_at')})
             self.state['focus_recorded_at'] = now.isoformat()
             self.state['recorded_focus_symbols'] = identity
             self.state['recorded_focus_evidence'] = evidence_hash
@@ -284,6 +303,7 @@ class WatchlistManager:
         self.repo.set_control(STATE, self.state)
         self.repo.set_control(VIEW, {**status, 'updated_at': now.isoformat(), 'items': rows,
             'watchlist_limit': self.config.watchlist_size, 'focus_limit': self.config.focus_size,
+            'history_selection':history, 'operating_count':len(operating),
             'data_max_age_seconds':self.config.watchlist_data_max_age_seconds, 'max_age_days':self.config.watchlist_refresh_days,
             'focus_count': len(focused), 'source_state': {k: v for k, v in self.state.items() if k not in {'prices', 'rankings'}},
             'news_contract': contract})

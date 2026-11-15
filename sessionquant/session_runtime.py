@@ -152,7 +152,9 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             stack.callback(finish_session,repo,control_state)
             if config.watchlist_enabled:
                 from .watchlist.selection import WatchlistManager
-                watchlist = WatchlistManager(repo, universe, config)
+                from .watchlist.history_selection import DailyHistorySelection
+                watchlist = WatchlistManager(repo, universe, config,
+                    history_selection=DailyHistorySelection(repo) if config.source == 'toss' else None)
             from .market_reference.risk import MacroReferenceRiskMonitor
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),

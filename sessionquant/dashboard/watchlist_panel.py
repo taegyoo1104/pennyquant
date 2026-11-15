@@ -35,16 +35,22 @@ def render_watchlist(state, candidates):
              and utc(row['focus_valid_until']) >= now} if active and status == 'VALID' else set()
     signals = [row for row in candidates if row.get('symbol') in focus and row.get('eligible') and row.get('signal')
                and row.get('timestamp') and 0 <= (now-utc(row['timestamp'])).total_seconds() <= 120]
-    st.subheader(f"시총 감시 {state.get('watchlist_limit',50)} → 집중 분석 최대 {state.get('focus_limit',20)}")
+    st.subheader(f"시총 후보 최대 {state.get('watchlist_limit',50)} → 분봉 준비 종목 운영 → 집중 분석 최대 {state.get('focus_limit',20)}")
     cols = st.columns(5)
     cols[0].metric('S&P 500 전체', str(state.get('universe_count')) if state.get('universe_count') else '—')
-    cols[1].metric('유효 감시 종목', f"{len(items) if status=='VALID' else 0} / {state.get('watchlist_limit',50)}")
+    cols[1].metric('유효 운영 종목', f"{state.get('operating_count',len(items)) if status=='VALID' else 0} / {state.get('watchlist_limit',50)}")
     expired = len(items) if status == 'EXPIRED' else 0
     unknown = state.get('watchlist_limit',50) if status not in {'VALID','EXPIRED'} else 0
     cols[2].metric('만료 / 미확인 상한', f'{expired} / {unknown}')
     st.caption('선정 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
     cols[3].metric('현재 집중 분석', f"{len(focus)} / {state.get('focus_limit',20)}")
     cols[4].metric('현재 진입 신호', str(len(signals)))
+    history = state.get('history_selection') or {}
+    if history:
+        phase = '장중 고정' if history.get('frozen') else '장전 준비 · 개장 시 재검사'
+        st.caption(f"{history['session']} 거래일 · {phase} · 분봉 준비 {history['included_count']}개 / "
+                   f"후보 {history['base_count']}개 · 제외 {history['excluded_count']}개 · 검사 {timestamp(history['checked_at'])}")
+        st.caption('분봉 준비 여부는 매수 허가가 아닙니다. 제외 종목도 보유·미체결이면 위험 관리를 계속하며, 당일 복구된 종목은 다음 거래일에 재검사합니다.')
     if (state.get('snapshot') or {}).get('synthetic'):
         st.warning('합성 감시목록 검증 자료입니다. 실제 시총 순위·시장 성과가 아닙니다.')
     if status != 'VALID':
@@ -71,6 +77,10 @@ def render_watchlist(state, candidates):
         if status != 'VALID': blockers.append('watchlist_'+status.lower())
         if row['ticker'] not in focus: blockers.append('focus_unknown_or_stale')
         rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if status == 'VALID' else None, '검증자료 내 순위':row.get('rank'), '시가총액':(row.get('market_cap_value')+' KRW') if row.get('currency')=='KRW' and row.get('market_cap_value') else usd(row.get('market_cap_usd')),
+            '일일 분봉 준비':row.get('history_ready') if history else None,
+            '운영 대상':bool(row.get('operating')) and status=='VALID' and active,
+            '분봉 제외 사유':'; '.join(p['session']+': '+', '.join(p['reasons']) for p in (row.get('history_selection') or {}).get('problems',[]))
+                or ('당일 고정 목록 밖' if history and not row.get('history_ready') else ''),
             '선정 상태':LABELS.get(status,status),'시총 선택 이유':row.get('selection_reason'),
             '현재 집중':row['ticker'] in focus, '집중 근거':row.get('focus_reason'),
             '시총 기준일/수집 시작':timestamp(row.get('as_of_at')), '시총 수신일':timestamp(row.get('received_at')),

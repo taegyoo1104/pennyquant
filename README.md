@@ -2,7 +2,7 @@
 
 현재 실행 경로는 [SESSIONQUANT_CURRENT.md](docs/SESSIONQUANT_CURRENT.md), 감시 선정 정책은 [단계 01](docs/STAGE01_WATCHLIST.md)을 따릅니다. **`run`은 시총 감시 기본 50(최대 100) → 집중 분석 최대 20의 PAPER_LOCAL 경로입니다.** 토스 섹터 시총을 자동 수집하며, 검증 파일도 선택할 수 있습니다. 구성 종목 전체의 시총이 확인되지 않으면 UNKNOWN/PARTIAL로 표시하고 신규 진입을 차단합니다. S&P 500 전체 편입 원장과 기존 보유·미체결 위험 관리는 유지합니다.
 
-[감시 50종목 과거 분봉·RVOL 연결](docs/WATCHLIST_RVOL.md): `history-backfill`로 과거 비교 이력을 DB에 저장하고 `run`에서 당일 분봉과 연결합니다. 중단 후 이어받기와 `history-status`를 지원합니다. 계산 수치와 매매용 비교 근거 검증은 구분합니다.
+[감시 50종목 과거 분봉·RVOL 연결](docs/WATCHLIST_RVOL.md): `history-backfill`로 과거 비교 이력을 DB에 저장하고 `run`에서 당일 분봉과 연결합니다. 토스 `run`은 원래 후보 중 분봉 준비가 끝난 **50−n개**만 일일 운영 목록으로 사용하며 제외된 보유·미체결 종목의 위험 관리는 유지합니다. `history-status --details`로 준비 목록과 제외 사유를 확인할 수 있습니다. 계산 수치와 매매용 비교 근거 검증은 구분합니다.
 
 [단계 02 시세·자격·RVOL 품질 안내](docs/STAGE02_MARKET_DATA.md): `run`은 근거·만료를 검사하고 위험 자료를 후보 탐색 전에 전달합니다. `market-data-status`로 확보율과 부족 입력을 조회합니다. 실제 토스 계좌 자격·분할 거래량 비교 근거가 없는 항목은 UNKNOWN을 유지합니다.
 
