@@ -51,6 +51,7 @@ class SessionConfig:
     llm: dict = field(default_factory=dict)
     llm_debug_audit: dict = field(default_factory=dict)
     macro_context_llm: dict = field(default_factory=dict)
+    candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.environment != "PAPER_LOCAL":
@@ -118,6 +119,9 @@ class SessionConfig:
             raise ValueError('LLM 감사·거시 맥락 설정은 객체여야 합니다.')
         AuditSettings(**self.llm_debug_audit)
         ContextSettings(**self.macro_context_llm)
+        from .portfolio.selection import CandidateSettings
+        if not isinstance(self.candidate_selection,dict):raise ValueError('후보 선정 설정은 객체여야 합니다.')
+        CandidateSettings(**self.candidate_selection)
         reference_settings(self.market_reference)
         from .market_reference.risk import filter_settings
         filter_settings(self.macro_reference_filter)

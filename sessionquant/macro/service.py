@@ -297,9 +297,11 @@ class NewsPipeline:
                 if (row.get("status") == "CONFIRMED" and row.get("source_verified") is True
                         and row.get("direction") == "NEGATIVE" and row.get("importance") == "HIGH"):
                     reasons.append("공식 거시 위험 발표: " + row.get("reason", ""))
+        from ..news.ranking import company_score
         return {"status": "AVAILABLE" if available or blackout else "UNKNOWN", "block_entries": bool(reasons),
                 "major_adverse": major_adverse, "blackout": bool(blackout), "reasons": reasons,
-                "force_liquidation": False}
+                "force_liquidation": False,'candidate_score_signal':company_score(self._analyses.values(),symbol,now),
+                'macro_score_applied':False}
 
     async def aclose(self):
         for service in (self.company, self.official, self.treasury, self.gdelt, self.fred, self.calendar, self.enricher):

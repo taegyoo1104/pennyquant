@@ -1,0 +1,44 @@
+# 08 후보 선정 PAPER 예시. 기존 장부를 보존하고 별도 실행 공간에서 비교한다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-paper-candidates-v1.db
+universe_path: ../data/sp500-universe.json
+source: toss
+strategy: pullback
+watchlist_enabled: true
+watchlist_size: 100
+focus_size: 20
+market_cap_provider: auto
+company_news_refresh_seconds: 180
+macro_news_refresh_seconds: 900
+candidate_selection:
+  enabled: true
+  use_news_score: true
+  use_sector_score: true
+  final_candidate_limit: 5
+  quote_alignment_seconds: 2
+  # 권장 2종목을 넘기는 실험은 새 실행 공간에서 명시적으로 허용한다.
+  allow_above_preferred: false
+  # 선택적 제약. 미확인 분산 근거를 안전하다고 간주하지 않는다.
+  max_same_sector: null
+  max_high_index_correlation: null
+  index_correlation_threshold: 0.85
+  correlation_minutes: 30
+  fail_closed_diversification: true
+portfolio:
+  initial_cash: '100'
+  preferred_positions: 2
+  max_positions: 5
+  initial_weight: '0.20'
+  add_weight: '0.20'
+  max_symbol_weight: '0.40'
+  max_gross_weight: '0.80'
+  risk_per_symbol: '0.0075'
+  daily_loss_limit: '0.02'
+macro_reference_filter:
+  enabled: false
+  paper_shadow_only: true
+llm_debug_audit:
+  enabled: false
+macro_context_llm:
+  enabled: false

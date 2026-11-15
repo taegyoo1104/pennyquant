@@ -74,6 +74,7 @@ def start(repo, engine, *, source):
         'initial_flat': not engine.broker.positions and not engine.broker.get_open_orders(),
         'settings': serialize(engine.broker.settings), 'strategy': engine.strategy,
         'exit_policy': serialize(engine.exit_policy),
+        'candidate_selection':serialize(engine.candidate_selector.settings),
         'source_reference_filter':serialize(engine.macro_reference_risk.settings) if engine.macro_reference_risk else None,
         'recording_version': 1})
     for name in CONTROLS:
@@ -96,6 +97,7 @@ def frame(engine, events, now, *, manual_halt):
         'published_at':time_or_none(raw['data'].get('published_at')),
         'received_at':event_time(raw),'available_at':now,'source':raw['data'].get('source','UNKNOWN')}} for raw in events]
     append(engine.repo, 'engine_batch', {'decision_at': now, 'events': normalized,
+        'candidate_scope_symbols':engine._batch_candidate_scope,'portfolio_selection':engine.selection_frame,
         'news_contexts': engine._batch_news_contexts, 'scope_blockers': engine._batch_scope_blockers,
         'decisions': engine._batch_decisions,
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars')}

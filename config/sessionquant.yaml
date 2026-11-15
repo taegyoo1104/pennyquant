@@ -32,3 +32,7 @@ llm_debug_audit:
   enabled: false
 macro_context_llm:
   enabled: false
+# 08: 집중 목록의 같은 시점 후보 비교. 검증되지 않은 뉴스·업종은 가점 없음.
+candidate_selection:
+  enabled: true
+  allow_above_preferred: false

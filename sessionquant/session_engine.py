@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from dataclasses import replace
+from dataclasses import replace,asdict
 from hashlib import sha256
 import json
 
@@ -35,7 +35,13 @@ class SessionEngine:
     def __init__(self, repository: Repository, universe: UniverseStore, *, strategy: str = "pullback",
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
-                 strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False):
+                 strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
+                 candidate_settings=None):
+        from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
+        self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
+        self.selection_frame=None
+        self.selection_source_id=None
+        self._batch_candidate_scope=[]
         self.record_inputs = record_inputs
         self._batch_decisions = []
         self._batch_news_contexts = {}
@@ -76,6 +82,8 @@ class SessionEngine:
                     or stored.get("use_market_filter", True) != use_market_filter):
                 raise ValueError("저장된 실행 환경·전략·자료 유형이 다릅니다. 기존 기록을 덮어쓰지 않습니다.")
             self.broker = PaperBroker.from_state(stored["broker"], settings)
+            if stored.get('candidate_selection') is not None and stored['candidate_selection']!=asdict(self.candidate_selector.settings):
+                raise ValueError('후보 선정 정책이 저장된 실행과 다릅니다. 별도 DB를 사용하세요.')
             self.last_time = utc(stored["last_time"]) if stored.get("last_time") else None
             self.cursor = stored.get("cursor", 0)
             self.consumed_signals = set(stored.get("consumed_signals", []))
@@ -202,6 +210,7 @@ class SessionEngine:
         self.dirty_symbols.clear()
         broker_state = self.broker.to_state()
         state = {"schema_version": 2, "environment": "PAPER_LOCAL", "strategy": self.strategy,
+                 'candidate_selection':asdict(self.candidate_selector.settings),
                  'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_provider_cache':self.risk_provider_cache,
                  "strict_market_data":self.market.strict_data,
                  "synthetic": self.synthetic, "use_news": self.use_news, "use_market_filter": self.use_market_filter, "broker": broker_state,
@@ -234,6 +243,7 @@ class SessionEngine:
                    "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else 'DEGRADED' if self._risk_lookup_errors else "ENABLED",
                    'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_snapshot':risk_snapshot,
                    'macro_reference_risk':self.reference_risk_status,
+                   'candidate_selection':asdict(self.candidate_selector.settings),
                    "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         self.repo.set_control("sessionquant_context", context)
@@ -256,6 +266,8 @@ class SessionEngine:
             previous = available
         self._batch_decisions = []
         self._batch_news_contexts = {}
+        self._batch_candidate_scope=[]
+        self.selection_frame=None
         self._batch_scope_blockers = {} if self.watchlist_policy is not None else None
         try:
             with self.repo.transaction():
@@ -313,7 +325,17 @@ class SessionEngine:
                     self.manager.check_exits(quote,now,symbol=symbol,bearish_signal=self._bearish(symbol,now),
                                              confirmed_adverse=risk.get('major_adverse') is True)
                 decisions = []
-                for symbol in {q.symbol for q in quotes} - {"SPY", "QQQ"}:
+                from .market_reference.contracts import REFERENCE_SYMBOLS
+                symbols={q.symbol for q in quotes}-REFERENCE_SYMBOLS
+                selection_enabled=self.candidate_selector.settings.enabled
+                # 위험 시계만의 tick은 계속 가볍게 처리한다. 새 후보 호가가 오면 전체 집중 범위를 같은 now로 평가한다.
+                if selection_enabled and symbols:
+                    scope=self.watchlist_policy
+                    if scope is not None and hasattr(scope,'candidate_symbols'):symbols=set(scope.candidate_symbols(now))|symbols
+                    elif scope is None:symbols=set(self.universe.members(now))|symbols
+                self._batch_candidate_scope=sorted(symbols-REFERENCE_SYMBOLS)
+                scope_expiries={}
+                for symbol in self._batch_candidate_scope:
                     risk = self.risk_context(now, symbol)
                     decision = self.market.evaluate(symbol, now, news_blocked=bool(risk.get("block_entries") or risk.get("blackout")))
                     if reference_blocked:
@@ -324,17 +346,38 @@ class SessionEngine:
                             blockers=tuple(dict.fromkeys([*decision.blockers, 'macro_reference_risk_restriction'])))
                     if self.watchlist_policy is not None:
                         scope_blockers = self.watchlist_policy.entry_blockers(symbol, now)
-                        self._batch_scope_blockers[symbol] = list(scope_blockers)
+                        if selection_enabled and hasattr(self.watchlist_policy,'candidate_expiry'):
+                            try:
+                                expiry=self.watchlist_policy.candidate_expiry(symbol,now)
+                                if expiry:
+                                    scope_expiries[symbol]=utc(expiry).isoformat()
+                                    if utc(expiry)<=now:scope_blockers=[*scope_blockers,'focus_time_expired']
+                            except (ValueError,TypeError,KeyError,AttributeError):scope_blockers=[*scope_blockers,'focus_time_unverified']
+                        self._batch_scope_blockers[symbol]=list(scope_blockers)
                         if scope_blockers:
                             decision = replace(decision, eligible=False, signal=None,
                                 blockers=tuple(dict.fromkeys([*decision.blockers, *scope_blockers])))
                     decisions.append((decision, risk))
-                    self._batch_decisions.append(decision.to_dict())
                     if self.market.strict_data:
                         self.market.quality_rows[symbol]['blockers'] = list(decision.blockers)
-                    self.repo.record("candidates", {"id": symbol, "timestamp": now, **decision.to_dict(), "news_risk": risk})
+                ranked=None;frame=None;strength=None
+                if selection_enabled and decisions:
+                    ranked,frame,strength=self.candidate_selector.rank(decisions,self.market,self.broker,now,
+                        synthetic=self.synthetic,manual_halt=manual_halt,consumed=self.consumed_signals,scope_expiries=scope_expiries)
+                    decisions=[(decision,risk) for decision,risk,_ in ranked]
+                records={row['symbol']:row for _,_,row in (ranked or [])}
+                for decision,risk in decisions:
+                    self._batch_decisions.append(decision.to_dict())
+                    self.repo.record('candidates',{'id':decision.symbol,'timestamp':now,**decision.to_dict(),'news_risk':risk,
+                        **({'selection_id':frame['id'],'selection':records[decision.symbol]} if frame else {})})
                 for decision, risk in sorted(decisions, key=lambda item: (-item[0].score, item[0].symbol)):
                     signal = decision.signal
+                    selected=records.get(decision.symbol)
+                    if selected is not None:
+                        blockers=[*selected['blockers'],*self.candidate_selector.admission_blockers(selected,self.broker,strength)]
+                        if blockers:
+                            selected.update(portfolio_status='BLOCKED',blockers=list(dict.fromkeys(blockers)))
+                            continue
                     if signal is None or signal.id in self.consumed_signals or manual_halt:
                         continue
                     self.repo.record("signals", signal.to_dict())
@@ -342,12 +385,20 @@ class SessionEngine:
                     evidence = self.market.eligibility[decision.symbol]
                     add = decision.symbol in self.broker.positions
                     if add and not signal.allow_add:
+                        if selected is not None:selected.update(portfolio_status='BLOCKED',allocation_reason='add_conditions_not_met')
                         continue
                     stop = self.exit_policy.stop_price(quote.ask,signal.stop_price,decision.indicators.get('atr14'))
                     if stop is None:
+                        if selected is not None:selected.update(portfolio_status='BLOCKED',allocation_reason='exit_stop_unverified')
                         self.repo.record('pipeline_status',{'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
                             'timestamp':now,'approved':False,'reason':'exit_stop_unverified','exit_policy':serialize(self.exit_policy)})
                         continue
+                    if selected is not None:
+                        if frame['final_candidate_count']>=self.candidate_selector.settings.final_candidate_limit:
+                            selected.update(portfolio_status='BLOCKED',blockers=[*selected['blockers'],'final_candidate_limit'])
+                            continue
+                        selected.update(final_candidate=True,portfolio_status='FINAL_CANDIDATE')
+                        frame['final_candidate_count']+=1
                     allocation = self.manager.plan_entry(decision.symbol, quote.ask, stop, now,bid=quote.bid,
                         market_state=decision.regime if self.use_market_filter else "BULLISH", tradable=evidence.tradable is True,
                         fractional_supported=evidence.fractional is True, trend_confirmed=True,
@@ -355,11 +406,33 @@ class SessionEngine:
                         major_bad_news=risk.get("major_adverse") is True, add=add, signal_id=signal.id,
                         session_allowed=self.exit_manager.permits_entry(now), strategy=self.strategy)
                     self.repo.record('pipeline_status',{'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
-                        'timestamp':now,'approved':allocation.approved,'reason':allocation.reason,'audit':allocation.audit,'exit_policy':serialize(self.exit_policy)})
+                        'timestamp':now,'approved':allocation.approved,'reason':allocation.reason,'audit':allocation.audit,'exit_policy':serialize(self.exit_policy),
+                        **({'selection_id':frame['id'],'candidate_rank':selected['rank'],'candidate_score':decision.score} if frame else {})})
+                    if selected is not None:
+                        selected.update(portfolio_status='APPROVED' if allocation.approved else 'ALLOCATION_REJECTED',
+                            allocation_reason=allocation.reason,approved=allocation.approved,allocation_audit=allocation.audit,
+                            order_intent_id=allocation.intent.client_id if allocation.approved else None)
                     if allocation.approved:
-                        self.repo.record("order_intents", serialize(allocation.intent)|{'signal_id':signal.id,'risk_audit':allocation.audit,'risk_policy_version':2})
+                        self.repo.record("order_intents", serialize(allocation.intent)|{'signal_id':signal.id,'risk_audit':allocation.audit,'risk_policy_version':2,
+                            **({'selection_id':frame['id'],'candidate_rank':selected['rank'],'candidate_score':decision.score,
+                                'selection_policy_version':frame['policy_version']} if frame else {})})
                         self.broker.submit_order(allocation.intent)
                         self.consumed_signals.add(signal.id)
+                        if frame:
+                            frame['approved_count']+=1
+                            frame['approved_add_count' if add else 'approved_new_count']+=1
+                if frame:
+                    from .portfolio.selection import VIEW
+                    if self.selection_source_id:frame['source_selection_id']=self.selection_source_id
+                    frame['macro_reference_risk']=self.reference_risk_status
+                    frame['exposed_symbols']=sorted(set(self.broker.positions)|{order.intent.symbol for order in self.broker.get_open_orders() if order.intent.side=='buy'})
+                    for decision,risk,row in ranked:
+                        row['exposure_overlap']=self.candidate_selector.exposure_overlap(row,self.broker,strength)
+                        self.repo.record('candidates',{'id':decision.symbol,'timestamp':now,**decision.to_dict(),
+                            'news_risk':risk,'selection_id':frame['id'],'selection':row})
+                    self.repo.record('pipeline_status',frame)
+                    self.repo.set_control(VIEW,frame)
+                    self.selection_frame=frame
                 session_status = self.exit_manager.snapshot(now,orders=session_status['orders'])
                 if self.control_state is not None:
                     from .trading_controls import heartbeat

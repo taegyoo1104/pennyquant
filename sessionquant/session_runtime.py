@@ -157,7 +157,8 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
-                                   strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled)
+                                   strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
+                                   candidate_settings=config.candidate_selection)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)

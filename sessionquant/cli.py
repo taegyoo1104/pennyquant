@@ -129,6 +129,9 @@ def parser():
     evaluation.add_argument("--execute", action="store_true", help="실제 API 호출과 토큰 과금 허용")
     evaluation.add_argument('--offset',type=int,default=0)
     evaluation.add_argument('--limit',type=int,default=20,help='한 평가 batch 최대 200건, 기본 20건')
+    candidate_evaluation=sub.add_parser('evaluate-candidates',help='동일 기록의 뉴스·업종 후보 가점 비교; 주문·LLM 네트워크 없음')
+    candidate_evaluation.add_argument('--bundle',required=True,type=Path)
+    candidate_evaluation.add_argument('--report',required=True,type=Path)
     audit_prune=sub.add_parser('llm-audit-prune',help='만료된 감사 암호문 정리; 기본은 조회만')
     audit_prune.add_argument('--db',type=Path,default=Path('data/sessionquant-paper-local.db'))
     audit_prune.add_argument('--backend',choices=('sqlite','mysql'),default='mysql')
@@ -245,6 +248,9 @@ def main(argv=None):
             with closing(Repository(args.db,backend=args.backend)) as repo:
                 print(json.dumps({'dry_run':not args.apply,'expired_bodies':repo.expire_llm_bodies(datetime.now(timezone.utc),dry_run=not args.apply),
                     'llm_generation_calls':0,'live_orders_enabled':False},ensure_ascii=False))
+        elif args.command == 'evaluate-candidates':
+            from .research.candidate_evaluation import evaluate_candidates
+            print(json.dumps(evaluate_candidates(args.bundle,args.report),ensure_ascii=False,indent=2))
         elif args.command == "calendar-import":
             from .macro.models import EconomicEvent
             from .macro.sources import official_url

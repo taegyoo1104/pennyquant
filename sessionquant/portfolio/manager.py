@@ -30,6 +30,8 @@ class PortfolioManager:
         audit = {'checked_at':now.isoformat(),'estimate_only':True,'bid_verified_by_caller':bid is not None,
                  'requested_stop':str(stop),'market_state':market_state,'is_add':add}
         reject = lambda reason: AllocationDecision(False,reason,audit=serialize(audit))
+        from ..market_reference.contracts import REFERENCE_SYMBOLS
+        if symbol in REFERENCE_SYMBOLS:return reject('market_reference_not_trading_candidate')
         flags = (tradable,fractional_supported,trend_confirmed,support_confirmed,rebound_confirmed,major_bad_news,add,session_allowed)
         if any(type(value) is not bool for value in flags) or mark > ask:
             return reject('invalid_evidence')
