@@ -236,6 +236,8 @@ class WatchlistManager:
             return ['watchlist_'+status['status'].lower()]
         if symbol not in set(self.base_symbols(now)):
             return ['outside_market_cap_watchlist']
+        if self.history_selection and self.history_selection.startup_pending:
+            return ['startup_data_not_ready']
         if symbol not in set(self.light_symbols(now)):
             return ['history_not_in_daily_operating_watchlist']
         row = next((r for r in self.state['focus'] if r['ticker'] == symbol), None)

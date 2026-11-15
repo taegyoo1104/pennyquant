@@ -301,6 +301,8 @@ class SessionEngine:
                             self.control_state.update(running=False,draining=True)
                             stopped_this_cycle=True
                         elif action=='start':
+                            if self.control_state.get('data_ready') is False:
+                                acknowledge(self.repo,request,ok=False,message='분봉 자료를 준비 중입니다. 완료 후 시작하세요.'); continue
                             if stopped_this_cycle or (self.control_state['draining'] and (self.broker.positions or self.broker.get_open_orders())):
                                 acknowledge(self.repo,request,ok=False,message='종료·청산 중에는 시작할 수 없습니다.'); continue
                             self.control_state.update(running=True,draining=False)
@@ -316,7 +318,8 @@ class SessionEngine:
                             self.broker.exit_intents.setdefault(symbol,{'reason':'operator_stop_all',
                                 'opened_at':position.opened_at.isoformat(),'requested_at':now.isoformat(),'attempt':0})
                 manual_halt = (self.repo.get_control("manual_halt", False) is True or
-                    (self.control_state is not None and not self.control_state['running']))
+                    (self.control_state is not None and (not self.control_state['running']
+                                                        or self.control_state.get('data_ready') is False)))
                 if self.macro_reference_risk is not None:
                     self.reference_risk_status = self.macro_reference_risk.evaluate(now)
                 reference_blocked = self.reference_risk_status.get('block_entries') is True

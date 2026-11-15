@@ -1,5 +1,7 @@
 # SessionQuant
 
+**장중 실행·중간 종료 후 재실행:** 토스 감시목록 `run`은 시작 시 과거 비교 분봉과 당일 개장 이후 분봉을 자동 확인·보충합니다. 예열 중에는 새 매수 주문을 막고 보유 종목의 위험 관리를 우선합니다. 대시보드의 **자료 준비 중**이 끝난 뒤 **매매 시작**을 누릅니다. 확보하지 못한 자료는 준비 완료로 간주하지 않으며, 시작 시 준비 목록을 다시 정하고 이후 해당 실행의 장중 목록을 유지합니다. [예열과 실행 안내](docs/REALTIME_PAPER.md)
+
 **주말에도 분봉·뉴스 확인:** 실행 중인 설정으로 `history-status --details --output <새파일.json>`과 `news-status --output <새파일.json>`을 사용합니다. 저장 기록만 조회하며 외부 API·유료 AI·주문을 호출하지 않습니다. 메인은 쉬운 한글로 요약하고, **뉴스 전체 보기**에서 기사 수신·AI 요청·분류 결과와 원문 근거를 구분합니다. [확인 방법](docs/REALTIME_PAPER.md)
 
 **실제 시세·뉴스 + 매매만 모의로 운영하기:** [실데이터 Paper 실행 안내](docs/REALTIME_PAPER.md). 별도 [설정 예시](config/sessionquant.realtime-paper.example.yaml)에서 실제 계좌 권한과 가상 거래 조건을 분리하고, 비교 근거가 미확인인 계산 RVOL을 Paper 가정으로 기록합니다. `prepare-paper`로 기존 분봉을 재사용하고, `paper-news-probe`로 실제 뉴스→LLM→전략 맥락을 최대 1회 생성 요청으로 진단하며, `paper-status`로 현재 차단 사유와 원장 누계를 확인합니다. 기본 strict 정책과 실거래 경로는 유지합니다.

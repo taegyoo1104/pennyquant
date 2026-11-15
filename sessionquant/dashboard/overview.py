@@ -99,6 +99,18 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
         st.button('일괄 매매 종료·청산',disabled=True,key='offline-stop')
     from .labels import market_hours_label
     st.caption(market_hours_label(now))
+    warmup=data.warmup
+    if warmup:
+        if warmup.get('status') in {'READY','PARTIAL'}:
+            st.caption(f"자료 검사 완료 · 과거 분봉 준비 {warmup.get('history_ready_count',0)}종목 · 제외 {warmup.get('history_excluded_count',0)}종목"+
+                       (' · 일부 누락은 상세 확인' if warmup.get('status')=='PARTIAL' else ''))
+        else:
+            stage='당일 분봉' if warmup.get('phase')=='CURRENT_SESSION' else '과거 분봉'
+            st.info(f"자료 준비 중 · {stage} 확인 · {warmup.get('completed_tasks',0)}/{warmup.get('required_tasks',0)}개 구간 확인 · 신규 매수 대기")
+        with st.expander('자료 준비 자세히'):
+            st.caption(warmup.get('message','')+' · 마지막 확인 '+timestamp(warmup.get('updated_at')))
+            st.caption('검사 기준 '+timestamp(warmup.get('cutoff_at'))+' · '+str(warmup.get('current_symbol',''))+' '+str(warmup.get('current_session','')))
+            _table(warmup.get('issues',[]),'보충 후에도 남은 누락 기록이 없습니다.')
     if view['lag'] is None or view['lag']>60:st.caption('최신 시세 대기 중 · 마지막 저장값을 표시합니다.')
     cols=st.columns(4)
     actual=view['environment']=='LIVE_LOCAL'

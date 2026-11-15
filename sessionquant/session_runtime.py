@@ -153,8 +153,9 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             if config.watchlist_enabled:
                 from .watchlist.selection import WatchlistManager
                 from .watchlist.history_selection import DailyHistorySelection
+                if config.source == 'toss':control_state['data_ready'] = False
                 watchlist = WatchlistManager(repo, universe, config,
-                    history_selection=DailyHistorySelection(repo) if config.source == 'toss' else None)
+                    history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' else None)
             from .market_reference.risk import MacroReferenceRiskMonitor
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
@@ -170,7 +171,10 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
             if config.source == "toss":
                 from .market.history import HistoryStore
                 history_store = HistoryStore(repo) if watchlist is not None else None
+                warmup = None
                 if history_store is not None:
+                    from .market.warmup import StartupWarmup
+                    warmup = StartupWarmup(repo,history_store,watchlist.history_selection,control_state)
                     engine.market.history_provider = lambda symbol,stamp: history_store.load(symbol,stamp,record=config.recording_enabled)
                 def receive_priority(batch):
                     # 위험 자료는 후보 탐색 완료를 기다리지 않고 단일 작성자 엔진에 전달한다.
@@ -187,7 +191,7 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
                     history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference,
-                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle)
+                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup)
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:

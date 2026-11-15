@@ -58,6 +58,7 @@ def heartbeat(repo,state,*,now,flat=False):
         state['status']='STOPPED' if flat else 'LIQUIDATING'
     elif state.get('pending_manual_sells'): state['status']='LIQUIDATING'
     elif state.get('completed'): state['status']='STOPPED'
+    elif state.get('data_ready') is False: state['status']='WARMING'
     elif state['running']: state['status']='RUNNING'
     else: state['status']='WAITING'
     state['heartbeat']=utc(now).isoformat()
@@ -75,7 +76,7 @@ def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
             raise ValueError('화면과 엔진 실행 환경이 다릅니다.')
         if not state.get('armed') or not 0<=(now-utc(state['heartbeat'])).total_seconds()<=60:
             raise ValueError('엔진 연결이 만료됐습니다.')
-        if action=='start' and (state.get('status')!='WAITING' or state.get('draining') or state.get('completed')):
+        if action=='start' and (state.get('status')!='WAITING' or state.get('data_ready') is False or state.get('draining') or state.get('completed')):
             raise ValueError('현재 엔진 상태에서 시작할 수 없습니다.')
         for row in repo.recent('order_intents',10000):
             if (row.get('kind')=='dashboard_command' and row.get('run_id')==run_id
@@ -125,7 +126,7 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
         except Exception:st.error('요청을 전달하지 못했습니다. 현재 실행·관리 수량·미체결을 확인하세요.')
     with st.expander('매매 시작 확인'):
         confirm=st.checkbox('표시된 계좌와 모드를 확인했습니다.',key='confirm-start-'+run)
-        if st.button('매매 시작',disabled=not active or bool(unresolved) or state.get('status')!='WAITING' or not confirm,key='trading-start'):submit('start')
+        if st.button('매매 시작',disabled=not active or bool(unresolved) or state.get('status')!='WAITING' or state.get('data_ready') is False or not confirm,key='trading-start'):submit('start')
     with st.expander('일괄 매매 종료·청산 확인'):
         st.caption('신규 매수 차단 → 미체결 매수 취소 → 전략 관리 포지션 시장가 청산. 시장 시간·유동성에 따라 부분체결/미체결될 수 있습니다.')
         st.caption('대상: '+(', '.join(str(r.get('symbol'))+' '+str(r.get('qty')) for r in positions) or '관리 포지션 없음/미확인'))
