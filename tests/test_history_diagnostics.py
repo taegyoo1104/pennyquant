@@ -62,8 +62,12 @@ def test_missing_record_and_invalid_record_are_distinct(tmp_path):
     finally:repo.close()
 
 
-async def test_cli_output_is_new_file_with_details_and_no_secret_or_api(tmp_path):
-    config=SessionConfig(database_backend='sqlite',db_path=tmp_path/'data.db',company_rss_catalog=False)
+async def test_cli_output_is_new_file_with_details_and_no_secret_or_api(tmp_path,monkeypatch):
+    # CLI sets process-wide runtime settings; isolate them from subsequent MySQL tests.
+    monkeypatch.setenv('SQ_ENVIRONMENT','PAPER_LOCAL')
+    monkeypatch.setenv('SQ_DB_BACKEND','sqlite')
+    config=SessionConfig(database_backend='sqlite',db_path=tmp_path/'data.db',company_rss_catalog=False,
+                         universe_path=tmp_path/'universe.json')
     repo=Repository(config.db_path,backend='sqlite')
     plan,_=data(repo)
     repo.close()

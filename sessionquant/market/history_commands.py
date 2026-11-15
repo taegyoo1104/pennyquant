@@ -130,11 +130,17 @@ async def command(config, action, *, max_requests=5000, refresh=False, allow_par
         repo = Repository(config.db_path,backend=config.database_backend)
         try:
             from .history import current_view
+            from ..watchlist.history_selection import CONTROL, inspect_history
             report = {'backfill':repo.get_control(PROGRESS,{}),'rvol':current_view(repo.get_control(VIEW,{})),
+                    'daily_watchlist':repo.get_control(CONTROL,{}),
                     'order_writes':0,'llm_generation_calls':0}
             if details or output is not None:
                 from .history_diagnostics import diagnose_history
                 report['history_quality']=diagnose_history(repo,report['backfill'])
+                manager = WatchlistManager(repo,UniverseStore(config.universe_path),config)
+                now = datetime.now(timezone.utc)
+                report['history_readiness_preview'] = inspect_history(HistoryStore(repo),manager.base_symbols(now),now)
+                report['history_readiness_preview']['watchlist_status'] = manager.store.status(now)['status']
             if output is not None:
                 import json
                 from pathlib import Path
@@ -142,7 +148,10 @@ async def command(config, action, *, max_requests=5000, refresh=False, allow_par
                 target.parent.mkdir(parents=True,exist_ok=True)
                 with target.open('x',encoding='utf-8') as handle:
                     json.dump(report,handle,ensure_ascii=False,indent=2)
+                preview = report['history_readiness_preview']
                 return {'output':str(target),'history_quality':report['history_quality']['summary'],
+                        'history_ready_symbols':preview['included_symbols'],
+                        'history_excluded_count':preview['excluded_count'],
                         'provider_calls':0,'order_writes':0,'llm_generation_calls':0}
             return report
         finally:
