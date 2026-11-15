@@ -2,6 +2,12 @@
 
 작성일: 2026-11-15 (한국시간). 저장소: `taegyoo1104/pennyquant`. Python 3.12 이상.
 
+## 토스 과거 분봉 로컬 검사 추가
+
+`python -m sessionquant.candle_probe --symbol AAPL --sessions 20`으로 기존 로컬 환경변수를 사용해 최근 완료 20거래일의 분봉 확보율을 직접 검사할 수 있다. [실행 안내와 한계](docs/TOSS_HISTORY_PROBE.md)를 참고한다. 인증 외에는 시세 조회만 하며 DB·주문·LLM은 사용하지 않는다. 클라우드에는 토스 키가 없으므로 실제 20일 조회 결과는 아직 미확인이다. 누락/중복/충돌/조회 한도를 보고하고, 데이터가 확보되어도 RVOL 비교 가능성이나 계좌 적격성을 VERIFIED로 변경하지 않는다.
+
+검증: `tests/test_candle_probe.py tests/test_collectors.py` 42 passed (달력 라이브러리 경고 12건), Ruff 및 diff 검사 통과. 실제 토스 조회는 사용자 로컬 실행 결과를 기다린다.
+
 ## 2026-11-15 08A 통합 대시보드 — 최신 상태
 
 사용자가 08A 수행을 승인했다. 시작 HEAD `bd7ce6e`, 첨부 기획서 기준이다. [08A 구현·한계·09 인계](docs/STAGE08A_DASHBOARD.md)를 따른다. 기존 단계의 승인 대기 문구는 당시 이력이다.
