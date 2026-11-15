@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from ..models import symbol_valid
 from .capitalization import utc
 from ..portfolio.models import decimal, serialize
-from .capitalization import WatchlistSnapshot, symbols_digest
+from .capitalization import WatchlistSnapshot, symbols_digest, cap_selection_metadata, EXCLUDABLE_CAP_ISSUES
 
 STATE = 'toss_market_cap_collection_v1'
 SOURCE = 'toss:/api/v1/sectors/{sectorId}/stocks:v1.2.28'
@@ -81,7 +81,7 @@ class TossMarketCapProvider:
             'root_sectors':self.state['roots'],'pages':self.state['pages'],'membership_hash':self.state['membership_hash'],'synthetic':False}
 
 
-def select_toss(batch, universe, now, *, size=100, allow_synthetic=False):
+def select_toss(batch, universe, now, *, size=100, allow_synthetic=False, missing_cap_policy='block'):
     """달러·발행사 총액을 추정하지 않고 공급자 보고 종목 시총을 정렬한다."""
     now = utc(now);members=universe.members(now)
     if (batch.get('contract')!=CONTRACT or batch.get('source')!=SOURCE or batch.get('currency')!='KRW'
@@ -110,6 +110,8 @@ def select_toss(batch, universe, now, *, size=100, allow_synthetic=False):
             seen.add(symbol)
             try:
                 if row.get('currency')!='KRW':raise ValueError('시총 통화가 다릅니다.')
+                if row.get('marketCapitalization') is None or row.get('marketCapitalization') == '':
+                    issues.append({'ticker':symbol,'code':'market_cap_value_missing'});continue
                 amount=decimal(row.get('marketCapitalization'),positive=True)
             except (ValueError,TypeError):
                 issues.append({'ticker':symbol,'code':'reported_cap_unknown'});continue
@@ -124,6 +126,9 @@ def select_toss(batch, universe, now, *, size=100, allow_synthetic=False):
     from ..market_reference.contracts import REFERENCE_SYMBOLS
     for symbol in set(observations)&REFERENCE_SYMBOLS:
         observations.pop(symbol);issues.append({'ticker':symbol,'code':'reference_etf_not_a_trading_member'})
+    if missing_cap_policy=='exclude':
+        for symbol in {r['ticker'] for r in issues if r['code'] in EXCLUDABLE_CAP_ISSUES}:
+            observations.pop(symbol,None)
     selected=sorted(observations.values(),key=lambda r:(-Decimal(r['market_cap_value']),r['ticker']))[:size]
     for rank,row in enumerate(selected,1):
         row.update(rank=rank,source=SOURCE,as_of_at=begin.isoformat(),received_at=end.isoformat(),known_at=now.isoformat(),
@@ -137,6 +142,10 @@ def select_toss(batch, universe, now, *, size=100, allow_synthetic=False):
         'membership_count':len(members),'membership_known_at':universe.snapshot(now)['known_at'],'items':selected,
         'issues':issues,'valid_observations':len(observations),'size_limit':size,
         'raw_payload_hash':sha256(json.dumps(batch['pages'],sort_keys=True,ensure_ascii=False).encode()).hexdigest()}
+    payload.update(cap_selection_metadata(issues,selected,missing_cap_policy))
+    for row in selected:
+        row['data_status'] = 'VERIFIED' if payload['data_status']=='VALID' else 'PARTIAL'
+        row['rank_scope'] = payload['ranking_scope']
     payload=serialize(payload);payload['id']=sha256(json.dumps(payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     return WatchlistSnapshot(payload)
 

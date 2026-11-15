@@ -8,6 +8,7 @@ source: toss
 strategy: pullback
 watchlist_enabled: true
 watchlist_size: 50
+watchlist_missing_cap_policy: exclude  # 시총 누락 종목 제외; 확인된 시총 범위에서 선정
 watchlist_candles_per_cycle: 4
 focus_size: 20
 selection_method: market_cap_top

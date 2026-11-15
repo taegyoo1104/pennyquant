@@ -9,6 +9,7 @@ strategy: pullback
 recording_enabled: true
 watchlist_enabled: true
 watchlist_size: 50
+watchlist_missing_cap_policy: exclude  # 시총 누락 종목 제외; 확인된 시총 범위에서 선정
 focus_size: 20
 market_cap_provider: auto  # 기존 파일 우선; 없으면 토스 섹터 시총
 market_cap_input: ../data/market-cap-input.json

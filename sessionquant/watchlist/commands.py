@@ -45,6 +45,10 @@ async def command(config, action, *, output=None):
             now=datetime.now(timezone.utc)
             manager.publish(now)
             return {'status':result['status'], 'watchlist_size':len(result['items']), 'refresh':result['refresh'],
+                    'ranking_verified':result.get('ranking_verified',False),
+                    'ranking_scope':result.get('ranking_scope'),
+                    'market_cap_coverage':result.get('market_cap_coverage'),
+                    'excluded_market_cap_symbols':result.get('excluded_market_cap_symbols',[]),
                     'live_orders_enabled':False}
     repo = Repository(config.db_path, backend=config.database_backend)
     try:
