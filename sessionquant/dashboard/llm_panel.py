@@ -36,6 +36,7 @@ def read_saved_body(repo,call_id,now=None):
 
 def render_llm_details(path,*,usage_path=None,usage_environment=None):
     import streamlit as st
+    from .labels import label
     from .session_app import usd,timestamp,_table
     from .summary_panels import open_cost_repository,cost_summary
     from ..llm.costs import set_manual_credit
@@ -70,8 +71,8 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
         st.caption('최근 최대 500개 감사 기록 기준입니다. 전체 집계는 진단 SQL을 사용하세요.')
         columns=st.columns(3)
         model=columns[0].multiselect('모델',[value for value in sorted({r.get('model','') for r in rows if r.get('model')})],key='llm-filter-model')
-        stage=columns[1].multiselect('단계',sorted({r.get('stage','') for r in rows if r.get('stage')}),key='llm-filter-stage')
-        status=columns[2].multiselect('감사 상태',sorted({r.get('status','UNKNOWN') for r in rows}),key='llm-filter-status')
+        stage=columns[1].multiselect('분석 단계',sorted({r.get('stage','') for r in rows if r.get('stage')}),format_func=label,key='llm-filter-stage')
+        status=columns[2].multiselect('처리 결과',sorted({r.get('status','UNKNOWN') for r in rows}),format_func=label,key='llm-filter-status')
         day=st.date_input('호출일 UTC',value=None,key='llm-filter-date')
         query=st.text_input('종목·주제·기사 ID 검색',key='llm-filter-query')
         visible=filter_calls(rows,day=day,model=model,stage=stage,status=status,query=query)
@@ -81,8 +82,8 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
             '비용 구분':r.get('cost_status'),'오류':r.get('validation_error_code') or r.get('skipped_precheck_reason'),
             '소요 ms':r.get('latency_ms')} for r in visible])
         by_id={row['id']:row for row in visible}
-        selected=st.selectbox('감사 기록 상세',[None,*reversed(list(by_id))],format_func=lambda key:'선택하세요' if key is None else
-            key[:12]+' · '+by_id[key].get('status','UNKNOWN'),key='llm-call-detail')
+        selected=st.selectbox('분석 기록 자세히',[None,*reversed(list(by_id))],format_func=lambda key:'선택하세요' if key is None else
+            key[:12]+' · '+label(by_id[key].get('status','UNKNOWN')),key='llm-call-detail')
         if selected:
             row=by_id[selected]
             st.json(redact(row))

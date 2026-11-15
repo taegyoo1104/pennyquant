@@ -131,6 +131,7 @@ async def test_llm_audit_dashboard_is_read_only_and_keeps_legacy_rows(repo,tmp_p
     app.selectbox(key='llm-call-detail').select(result.llm_call_ids[0]).run()
     assert not app.exception
     values=' '.join(frame.value.to_string() for frame in app.dataframe)
-    assert 'SUCCEEDED' in values and 'LEGACY_UNMAPPED' in values
+    assert '분석 완료' in values and '이전 기록 · 요청 연결 미확인' in values
+    assert 'SUCCEEDED' not in values and 'LEGACY_UNMAPPED' not in values
     assert any('원본' in item.value for item in app.caption)
     assert len(repo.all('llm_calls'))==calls_before and repo.all('orders')==[]

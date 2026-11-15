@@ -139,11 +139,17 @@ async def command(config, action, *, max_requests=5000, refresh=False, allow_par
                     'order_writes':0,'llm_generation_calls':0}
             if details or output is not None:
                 from .history_diagnostics import diagnose_history
-                report['history_quality']=diagnose_history(repo,report['backfill'])
                 manager = WatchlistManager(repo,UniverseStore(config.universe_path),config)
                 now = datetime.now(timezone.utc)
                 report['history_readiness_preview'] = inspect_history(HistoryStore(repo),manager.base_symbols(now),now)
                 report['history_readiness_preview']['watchlist_status'] = manager.store.status(now)['status']
+                plan=report['backfill']
+                inferred=not plan.get('symbols') or not plan.get('session_dates')
+                if inferred:
+                    preview=report['history_readiness_preview']
+                    plan={'symbols':preview['base_symbols'],'session_dates':preview['session_dates']}
+                report['history_quality']=diagnose_history(repo,plan)
+                if inferred:report['history_quality']['scope']='next_operating_session_from_stored_selection'
             if output is not None:
                 import json
                 from pathlib import Path

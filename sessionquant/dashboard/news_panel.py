@@ -84,10 +84,38 @@ def render_news_diagnostics(data):
     import streamlit as st
     from .session_app import _table, timestamp
     now = datetime.now(timezone.utc)
+    report=data.news_flow
+    if report:
+        st.subheader('뉴스 처리 진행 상황')
+        st.info(report['message'])
+        counts=report['counts']
+        columns=st.columns(4)
+        for column,key,label in zip(columns,
+                ('news_receipts','llm_request_attempts','validated_responses','failed_or_rejected'),
+                ('기사 수신','LLM 요청 시도','응답 검증 통과','요청 실패·검증 거부')):
+            column.metric(label,str(counts[key]))
+        st.caption('최근 24시간 · 수신 최대 2,000건/감사 최대 500건 내 집계. 중복 수신과 생성 요청은 서로 다른 수치입니다.')
+        st.caption('최근 기사 수신 '+timestamp(report['last_news_received_at'])+' · 최근 LLM 요청 '+timestamp(report['last_llm_request_at'])+
+            f" · 캐시 재사용 {counts['cache_hits']}건 · 처리 중/결과 미확인 {counts['pending_or_unconfirmed']}건")
+        if report['scope']['may_be_truncated']:st.caption('조회 상한에 도달했습니다. 위 수치는 전체 누계가 아닙니다.')
+        st.caption('응답 검증 통과는 형식·근거 검사를 통과했다는 의미입니다. 분류의 정답률이나 매매 승인을 뜻하지 않습니다.')
+        _table([{'시각':timestamp(r['requested_at']),'종목·주제':r['ticker_or_topic'],'처리 결과':r['status'],
+            '분류':r['direction'],'사건 유형':r['event_types'],'추가 확인 필요':r['requires_verification']}
+            for r in report['latest_calls']],'조회 범위에 LLM 생성 요청이 없습니다. 아래 공급자/제외 사유를 확인하세요.')
+        if report['latest_calls']:
+            with st.expander('분류 이유와 원문 근거'):
+                _table([{'종목·주제':r['ticker_or_topic'],'회사 영향':r['company_impacts'],
+                    '주주 영향':r['shareholder_impacts'],'내용 확인':r['event_statuses'],
+                    '분류 이유':r['reason'],'원문 근거':' / '.join(str(x) for x in r['evidence']),
+                    '오류':r['error']} for r in report['latest_calls']])
     with st.expander('뉴스 공급자·신선도·원문 검증 상세'):
         st.caption('저장된 최근 최대 2,000건 기준입니다. 수집·분석·새 기사가 없음·장애를 구분합니다.')
         st.caption('마지막 뉴스 작업: '+timestamp(data.news_status.get('updated_at')))
-        _table(provider_rows(data.news_status), '공급자 요청 기록이 없습니다.')
+        providers=provider_rows(data.news_status)
+        current_states={r['provider']:r['state'] for r in report.get('providers',[])}
+        for row in providers:
+            row['상태']=current_states.get(row['공급자·작업'],row['상태'])
+        _table(providers, '공급자 요청 기록이 없습니다.')
         counts = statistics(data.tables['news_ingestions'], now)
         _table([{'나이 구간': name, '수신 건수': count} for name, count in counts['age_buckets'].items()])
         _table([{'유료 분석 전 제외 사유': name, '수신 건수': count}

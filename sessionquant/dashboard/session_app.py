@@ -51,6 +51,7 @@ class DashboardData:
     fred_references: list = field(default_factory=list)
     news_status: dict = field(default_factory=dict)
     portfolio_selection: dict = field(default_factory=dict)
+    news_flow: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -131,8 +132,15 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
                     "updated_at":result.actual_account.get("received_at"),"source_label":"토스 실제 계좌 조회"}
             for name in TABLES:
                 if name in KINDS:
-                    result.tables[name] = repository.recent(name, limit=2000) if page is None or page!='대시보드' else (repository.recent(name,limit=300) if name in {'executions','news_events','news_analysis','quote_snapshots'} else [])
+                    result.tables[name] = repository.recent(name, limit=2000) if page is None or page!='대시보드' else (repository.recent(name,limit=300) if name in {'executions','news_events','news_analysis','quote_snapshots','news_ingestions'} else [])
             result.connected = True
+            if page is None or page in {'뉴스·LLM','대시보드'}:
+                from sessionquant.news.diagnostics import summarize_news
+                limit=300 if page=='대시보드' else 500
+                result.news_flow=summarize_news(result.tables['news_ingestions'],repository.recent('llm_calls',limit=limit),
+                    schedule=result.news_status.get('schedule',{}),health=repository.get_control('llm_provider_health',{}),
+                    engine=repository.get_control('trade_control_state',{}),
+                    ingestion_limit=300 if page=='대시보드' else 2000,audit_limit=limit)
     except Exception:
         # 드라이버의 원문 오류에는 접속 주소나 인증 정보가 포함될 수 있다.
         result = DashboardData(backend=result.backend, error="DB 기록을 읽을 수 없습니다. 연결 설정과 서버 상태를 확인하세요.")
@@ -225,7 +233,12 @@ def _table(rows: list[dict], message: str = "아직 저장된 기록이 없습�
     import streamlit as st
 
     if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        from sessionquant.dashboard.labels import display_rows
+        visible,unknown=display_rows(rows)
+        st.dataframe(pd.DataFrame(visible), hide_index=True, width="stretch")
+        if unknown:
+            with st.popover('원본 기록 보기'):
+                st.json(rows)
     else:
         st.info(message)
 
@@ -256,19 +269,22 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     data=load_database(path,page=page)
     view=build_view(data)
     account=view['account']
-    st.caption(f"환경: {view['environment']} · {'합성 데모' if view['synthetic'] else '저장된 장부'} · 마지막 수신: {view['last_event']}")
+    from sessionquant.dashboard.labels import label
+    st.caption(f"{label(view['environment'])} · 마지막 시세 {view['last_event']}")
     if data.error: st.error(data.error)
     if not data.connected: st.info('저장된 실행 기록이 없습니다. 계좌·연결 상태는 미확인입니다.')
     if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
     if data.context.get('paper_data_policy')=='observed_paper_v1':
-        st.info('실데이터 Paper 실험 · 실제 계좌 권한은 검증하지 않고 소수점 거래를 모의 지원합니다. 거래정지·기업행동 미확인 및 분할 비교 근거 없는 계산 RVOL을 가정으로 기록합니다. 실제 주문은 비활성화되어 있습니다.')
+        st.info('합성 자료 사용 · 거래는 모의로 진행합니다.' if view['synthetic'] else '실제 시세 사용 · 거래는 모의로 진행합니다.')
+        if page=='시스템·설정':
+            st.caption('실제 계좌 권한은 확인하지 않습니다. 소수점 거래와 미확인 거래정지·기업행동, 거래량 비교 조건은 모의 가정으로 기록합니다.')
     if page=='대시보드':
         render_overview(data,view,path,usage_path,usage_environment)
     elif page=='전략·백테스트': render_strategies(data,view)
     elif page=='시스템·설정': render_system(data,view)
     if page == '시장·종목':
         st.subheader("시장 방향과 데이터 상태")
-        st.write(f"**{view['regime_label']} · {view['regime']}**")
+        st.write(f"**{view['regime_label']}**")
         reason = view["regime_detail"].get("reason", view["regime_detail"].get("reasons", ""))
         if reason:
             st.caption(str(reason))
@@ -312,7 +328,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                          "전략": row.get("strategy", ""), "진입 근거": row.get("reason", row.get("signal", {}).get("reason", "") if isinstance(row.get("signal"), dict) else ""),
                          "제한 사유": ", ".join(row.get("blockers", [])), "시장": row.get("regime", "UNKNOWN")})
         _table(rows)
-        st.caption("뉴스가 없어도 기술적 조건으로 후보가 될 수 있습니다. 거래 가능 여부·소수점 지원·거래정지·기업행동을 확인하지 못하면 신규 주문을 허용하지 않습니다.")
+        st.caption('뉴스가 없어도 차트 조건으로 후보가 될 수 있습니다. 선택한 거래 조건과 위험 한도를 통과해야 매수합니다.')
     if page == '매매 내역':
         from sessionquant.dashboard.summary_panels import render_actual_account
         if view['environment']=='LIVE_LOCAL': render_actual_account(data.actual_account,data.account_status)
@@ -414,20 +430,18 @@ def main() -> None:
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
     st.title("SessionQuant")
-    st.caption("S&P 500 · 시장·뉴스·전략 · 실제 계좌 연동과 위험 관리")
+    st.caption("미국 주식 · 시세와 뉴스 분석")
     with st.sidebar:
-        st.subheader("로컬 거래 기록 조회")
-        st.info("모의·실계좌 구분 표시 · 주문은 연결된 엔진에서 처리")
-        refresh = st.toggle("자동 갱신 · 5초", value=True)
+        st.subheader("화면 설정")
+        refresh = st.toggle("자동 갱신 · 5초", value=True,help='메인과 뉴스 화면을 자동으로 갱신합니다.')
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
         st.caption("표시 시각: 한국 표준시\n\n거래 시간: 뉴욕 현지시각\n\n통화: 미국 달러")
-        st.caption("데이터가 부족하면 관찰 상태를 유지합니다. 저장된 기록은 현재 API 연결을 보증하지 않습니다.")
 
     from sessionquant.dashboard.overview import PAGES
     page=st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
 
-    @st.fragment(run_every="5s" if refresh and page=='대시보드' else None)
+    @st.fragment(run_every="5s" if refresh and page in {'대시보드','뉴스·LLM'} else None)
     def monitor() -> None:
         render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,usage_environment=args.usage_environment,selected_page=page)
 

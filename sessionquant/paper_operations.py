@@ -167,11 +167,16 @@ async def command(config, operation, *, source=None, symbol='AAPL', output=None)
         with stack, redirect_stdout(sys.stderr):result = await probe_news(repo,config,symbol)
     else:
         repo = Repository(config.db_path,backend=config.database_backend)
-        try:result = paper_report(repo,config)
+        try:
+            if operation=='news-status':
+                from .news.diagnostics import read_news_status
+                result=read_news_status(repo)
+            else:result = paper_report(repo,config)
         finally:repo.close()
     if output is not None:
         with Path(output).open('x',encoding='utf-8') as stream:
             json.dump(result,stream,ensure_ascii=False,indent=2)
         return {'status':'SAVED','output':str(output),'order_writes':0,
-                'llm_generation_calls':result.get('llm_generation_calls',0)}
+                'llm_generation_calls':result.get('llm_generation_calls',0),
+                **({'message':result['message'],'counts':result['counts']} if operation=='news-status' else {})}
     return result
