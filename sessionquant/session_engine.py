@@ -60,6 +60,7 @@ class SessionEngine:
         self.failed = False
         self.risk_provider = risk_provider
         self.last_time = None
+        self.last_decision_at = None
         self.cursor = 0
         self.risk_records: dict[str, dict] = {}
         self.risk_provider_cache = {}
@@ -85,6 +86,9 @@ class SessionEngine:
             if stored.get('candidate_selection') is not None and stored['candidate_selection']!=asdict(self.candidate_selector.settings):
                 raise ValueError('후보 선정 정책이 저장된 실행과 다릅니다. 별도 DB를 사용하세요.')
             self.last_time = utc(stored["last_time"]) if stored.get("last_time") else None
+            clocks=[value for value in (self.last_time,self.broker.last_event_at,
+                utc(stored['last_decision_at']) if stored.get('last_decision_at') else None) if value is not None]
+            self.last_decision_at=max(clocks) if clocks else None
             self.cursor = stored.get("cursor", 0)
             self.consumed_signals = set(stored.get("consumed_signals", []))
             self.risk_records = stored.get("risk_records", {})
@@ -215,6 +219,7 @@ class SessionEngine:
                  "strict_market_data":self.market.strict_data,
                  "synthetic": self.synthetic, "use_news": self.use_news, "use_market_filter": self.use_market_filter, "broker": broker_state,
                  "cursor": self.cursor, "last_time": self.last_time.isoformat() if self.last_time else None,
+                 'last_decision_at':self.last_decision_at.isoformat() if self.last_decision_at else None,
                  "market_symbols": sorted(self.market_symbols), "consumed_signals": sorted(self.consumed_signals),
                  "risk_records": self.risk_records}
         self.repo.save_state(state)
@@ -258,6 +263,8 @@ class SessionEngine:
         if self.failed:
             raise RuntimeError("저장 또는 처리 실패 후에는 재시작과 장부 확인이 필요합니다.")
         now = utc(now)
+        if self.last_decision_at is not None and now<self.last_decision_at:
+            raise ValueError('전략 처리 시각이 이전 처리 시각보다 과거입니다. 장부는 변경하지 않습니다.')
         previous = self.last_time
         for raw in events:
             available = event_time(raw)
@@ -271,6 +278,7 @@ class SessionEngine:
         self._batch_scope_blockers = {} if self.watchlist_policy is not None else None
         try:
             with self.repo.transaction():
+                self.last_decision_at=now
                 for raw in events:
                     self._ingest(raw)
                 self.last_time = previous

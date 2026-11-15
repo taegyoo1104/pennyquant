@@ -1,0 +1,102 @@
+name: SessionQuant 회귀 검사
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_mysql:
+        description: 격리 MySQL 통합 검사도 실행
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sessionquant-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SQ_TEST_OFFLINE: '1'
+  SQ_DB_BACKEND: sqlite
+  TZ: UTC
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: 소스 확인
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: 해시 잠금 의존성·패키지 설치
+        run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-deps -e .
+          python -m pip check
+      - name: import·CLI·주문 비활성 확인
+        run: |
+          python -c "import sessionquant, pennyquant"
+          python -m sessionquant --help
+          python -m sessionquant doctor
+      - name: Ruff
+        run: python -m ruff check sessionquant tests
+      - name: 외부 네트워크 없는 회귀 검사
+        env:
+          PQ_TEST_MYSQL: '0'
+        run: python -m pytest -q
+
+  mysql:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_mysql
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # 이 job의 폐기 가능한 서비스 전용 더미 값이다. 저장소/운영 secrets를 사용하지 않는다.
+          MYSQL_ROOT_PASSWORD: ci-only-root
+          MYSQL_DATABASE: sessionquant_ci
+          MYSQL_USER: sessionquant_ci
+          MYSQL_PASSWORD: ci-only-fixture
+        ports:
+          - 3306/tcp
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-only-root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - name: 소스 확인
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: 해시 잠금 의존성·패키지 설치
+        run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-deps -e .
+      - name: 폐기 가능한 MySQL의 임의 namespace 검사
+        env:
+          PQ_TEST_MYSQL: '1'
+          PQ_MYSQL_HOST: 127.0.0.1
+          PQ_MYSQL_PORT: ${{ job.services.mysql.ports[3306] }}
+          PQ_MYSQL_DATABASE: sessionquant_ci
+          PQ_MYSQL_USER: sessionquant_ci
+          PQ_MYSQL_PASSWORD: ci-only-fixture
+        run: python -m pytest -q tests/test_mysql_integration.py

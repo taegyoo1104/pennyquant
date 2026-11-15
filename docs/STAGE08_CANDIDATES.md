@@ -2,6 +2,8 @@
 
 기준: 2026-11-15, 사용자 첨부 `08_종목순위_뉴스_포트폴리오.txt`. 작업 시작 HEAD `329ea7a`, WIP 브랜치 `wip/stage06-handoff-20261115`. [프로젝트 방향](PROJECT_DIRECTION.md)에 따라 08만 수행한다. 08A 전체 UI 개편·09/10 실거래 연결·GCP 배포·KIS는 이번 범위에 포함하지 않는다.
 
+08 완료 커밋은 `8a328e7`이다. 사용자가 이후 승인한 시계·비용·CI 등 후속 보완은 [00~08 종합 검토](REVIEW_00_08.md)를 따른다.
+
 ## 실제 연결 경로
 
 `run → SessionConfig.candidate_selection → SessionEngine → WatchlistManager.candidate_symbols → 같은 now의 MarketEngine 평가 → PortfolioCandidateSelector → PortfolioManager의 기존 위험·비중 검사 → Paper 주문 의도 → 다음 유효 호가 체결` 순서다.

@@ -2,7 +2,25 @@
 
 작성일: 2026-11-15 (한국시간). 저장소: `taegyoo1104/pennyquant`. Python 3.12 이상.
 
-## 2026-11-15 08단계 — 최신 상태
+## 2026-11-15 00~08 종합 검토 — 최신 상태
+
+사용자가 08 종료 후 기존 작업 전체의 문제점·보완점 검토와 수정 가능한 사항의 보완을 승인했다. 08 구현 커밋은 `8a328e7`이며 아래의 08 결과를 유지하고 후속 검토를 분리했다. [00~08 종합 검토](docs/REVIEW_00_08.md)에 단계별 코드·회귀 근거, 재현한 결함과 남은 실사용 확인을 정리했다.
+
+- **P1 시계/일일 손실:** 과거 거래일로 전환한 뒤 오늘로 복귀하면 손실 중지가 초기화되는 것을 재현했다. `PaperBroker.roll_session`은 과거 거래일을 거절한다. `SessionEngine`은 수신 커서와 별도 `last_decision_at`을 저장·복구해 빈 tick의 과거 처리도 변경 전에 차단한다. 원래의 오래된 수신 자료는 현재 처리 시각으로 안전하게 평가할 수 있다.
+- **P2 LLM 비용:** 05 보고서가 단가 확인+측정 토큰을 공식 청구처럼 합산할 수 있었다. `research/costs.py`에서 프로그램 추정과 명시적 청구 대사를 구분하고 호출 ID별 개정 중복 합산을 막았다. 기존 검증 청구 키는 유지하되 실제 증거가 없으면 null, 추정 합계는 새 키로 제공한다. 원래 사용량을 삭제하거나 의미를 소급 변경하지 않는다.
+- **P2 CI:** 누락된 `.github/workflows/ci.yml`을 추가했다. Python3.12, 해시 잠금 설치/import/CLI/doctor/Ruff/pytest, 선택적 임시 MySQL이다. contents:read·checkout 인증 유지 OFF·공식 action SHA 고정·운영 secrets 미사용·테스트 외부 연결 차단을 적용했다. `requirements-dev.lock` 66개는 기존 운영 잠금 59개 버전을 유지한다.
+- **문서:** 기존 STRATEGIES/SYSTEM_RUN의 PennyQuant 레거시 표식과 현재 실행 링크를 보완했다. 거래량·호가 bool 검사는 기존 코드에서 정상 거절을 확인해 변경하지 않았다.
+- 시계 가드가 드러낸 기존 위험 테스트의 과거 이동 fixture는 진입 시간까지의 테이프로 분리했다. UNKNOWN 차단·대기 매수 취소·청산 검증은 유지한다.
+
+최종 로컬 검증(새 CI 잠금 가상환경, Python3.12.14):
+
+- `SQ_TEST_OFFLINE=1 PQ_TEST_MYSQL=1 ... python -m pytest -q` → **1,170 passed, 0 failed, 0 skipped, 8 warnings (190.66초)**. 전용 MySQL8.4 21건 포함. 기존 pandas 시간대 경고 8건을 기능 실패와 구분한다.
+- 앞선 보완 집중 80 passed, 외부 연결 차단 집중 78 passed, 새 잠금 시계·위험 집중 39 passed. `requirements-dev.lock`의 해시 설치·editable 설치·pip check·doctor, CI YAML/권한/선택 job/SHA 정적 확인, Ruff·CLI·문서 링크·diff 검사 통과.
+- 원격 CI는 이 후속 커밋의 Actions 체크에서 확인한다. 기본 job의 MySQL skip은 통과 수에 포함하지 않으며 선택 job은 폐기 가능한 서비스만 사용한다.
+
+**실주문·유료 LLM·사용자 DB 접근 0건.** 실제 토스 권한·분할/RVOL 근거·섹터 전체 커버리지·지연/성능·발행사 조건·장기 실제 기록/외표본·실비/모델 품질은 미검증이다. 실제 기록이 없어 08 실데이터 가점 비교는 미실행이며 합성 결과로 수익성을 주장하지 않는다. 다음 08A·09/10·GCP와 유료 평가·실거래 활성화는 별도 승인 대기, KIS 제외 상태다.
+
+## 2026-11-15 08단계 — 구현 완료 기준
 
 사용자가 첨부한 `08_종목순위_뉴스_포트폴리오.txt`의 수행을 승인했다. 시작 HEAD `329ea7a`에서 이어서 구현했다. 세부 작업 기준은 단계 첨부이며 일반 공유 대화는 배경 참고다. 운영 순서는 초기 로컬 PC/MySQL → 이후 별도 GCP 이전, KIS 취소를 유지한다. 최신 절은 [08 운영 안내](docs/STAGE08_CANDIDATES.md), [설정 예시](config/sessionquant.candidates.example.yaml), [SELECT 전용 진단](sql/portfolio_candidate_diagnostics.sql)을 따른다.
 
@@ -109,7 +127,7 @@ main 안정 기준은 `b3010e6`(토스 시총 선정), 그 이전 05단계 기�
 
 | 단계 | 상태 및 근거 |
 |---|---|
-| 00 기준선·문서·CI | 기존 구현 유지. 실제 CI 설정 존재 여부는 현 트리에서 재확인 필요 |
+| 00 기준선·문서·CI | 종합 검토에서 CI 구성·잠금 설치·로컬 동등 회귀 및 레거시 표식 보완 |
 | 01 시총100/집중20 | 구현 및 토스 보완 완료. `docs/STAGE01_WATCHLIST.md` |
 | 02 시장데이터·적격성·RVOL | 기존 구현/개정 보완 유지. `docs/STAGE02_MARKET_DATA.md` |
 | 03 Paper 시장가 체결 현실화 | 기존 구현 유지. `docs/STAGE03_PAPER_FILLS.md` |
