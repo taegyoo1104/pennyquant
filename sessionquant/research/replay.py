@@ -47,14 +47,18 @@ class RecordedNews:
 
 
 class RecordedScope:
-    def __init__(self): self.blockers = None
+    def __init__(self): self.blockers = None;self.symbols=[];self.expiries={}
+
+    def candidate_symbols(self,now):return self.symbols
+
+    def candidate_expiry(self,symbol,now):return self.expiries.get(symbol)
 
     def entry_blockers(self,symbol,now):
         return self.blockers.get(symbol,['scope_not_observed']) if self.blockers is not None else []
 
 
 def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_news=True, use_market_filter=True,
-                     allow_adds=None, resume=False, entry_start=None, entry_end=None, research_settings=None):
+                     allow_adds=None, resume=False, entry_start=None, entry_end=None, research_settings=None,candidate_settings=None):
     """매매 적용은 임시/신규 SQLite Paper에만 허용한다. 운영 설정을 활성화하지 않는다."""
     from dataclasses import replace
     bundle, db_path = Path(bundle), Path(db_path)
@@ -64,6 +68,8 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
     if not starts or not starts[0]['data']['initial_flat']:
         raise ValueError('초기 포지션·주문이 없는 시점부터 기록한 묶음이 필요합니다.')
     first = starts[0]['data']
+    from ..portfolio.selection import CandidateSettings
+    candidate_options=CandidateSettings(**(candidate_settings if candidate_settings is not None else first.get('candidate_selection',{'enabled':False})))
     if len({identity(row['data']['settings']) for row in starts}) != 1:
         raise ValueError('비용·위험 설정이 바뀐 기록은 분리해서 평가해야 합니다.')
     settings = PortfolioSettings(**first['settings'])
@@ -77,6 +83,7 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
     binding = identity({'policy_contract_version':'recorded_policy_v1','bundle':manifest['bundle_id'],'strategy':selected,'policy':policy,'use_news':use_news,
         'use_market_filter':use_market_filter,'settings':serialize(settings),'risk_options':risk_options,
         'entry_start':entry_start,'entry_end':entry_end})
+    if candidate_options.enabled:binding=identity([binding,serialize(candidate_options)])
     stack, repo = _open(db_path,'sqlite')
     with stack:
         if repo.namespace_has_data() and not resume:raise ValueError('재생 장부가 이미 있습니다. 새 DB 또는 --resume을 지정하세요.')
@@ -87,7 +94,7 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
         engine = SessionEngine(repo,universe,strategy=selected,settings=settings,restore=resume,
             synthetic=manifest['synthetic'],strict_market_data=first['strict_market_data'],
             use_news=use_news,use_market_filter=use_market_filter,risk_provider=news,watchlist_policy=scope,
-            exit_policy=ExitPolicy(**first['exit_policy']),macro_reference_risk=monitor,research_replay=True)
+            exit_policy=ExitPolicy(**first['exit_policy']),macro_reference_risk=monitor,research_replay=True,candidate_settings=candidate_options)
         news.last_verified = repo.get_control('recorded_news_verified_contexts',{})
         news.missing = repo.get_control('recorded_news_missing_count',0)
         cursor = repo.get_control('recording_cursor',0)
@@ -107,6 +114,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                     if not universe.members(stamp):raise ValueError('처리 당시 확인 가능한 유니버스 이력이 없습니다.')
                     news.contexts = data.get('news_contexts') or {}
                     scope.blockers = data.get('scope_blockers')
+                    scope.symbols=data.get('candidate_scope_symbols') or []
+                    scope.expiries={row['symbol']:row.get('scope_valid_until') for row in (data.get('portfolio_selection') or {}).get('rows',[])}
+                    engine.selection_source_id=(data.get('portfolio_selection') or {}).get('id')
                     in_window = (entry_start is None or stamp >= utc(entry_start)) and (entry_end is None or stamp < utc(entry_end))
                     repo.set_control('manual_halt',data.get('manual_halt') is True or not in_window)
                     control = data.get('control_state') or {}
@@ -144,6 +154,8 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
             'risk_decisions':[r for r in repo.all('pipeline_status') if r.get('kind')=='risk_decision'],
             'reference_blocks':[r for r in repo.all('pipeline_status') if r.get('kind')=='reference_entry_block'],
             'entry_intents':repo.all('order_intents'),'risk_state_counts':dict(counts),'decision_counts':dict(decisions),
+            'portfolio_selections':[row for row in repo.all('pipeline_status') if row.get('kind')=='portfolio_selection'],
+            'candidate_settings':serialize(candidate_options),
             'reference_state_decisions':dict(reference_state_counts),'missing_news_contexts':news.missing,
             'bundle_id':manifest['bundle_id'],'policy':policy,'policy_contract_version':'recorded_policy_v1',
             'risk_settings':serialize(risk_options),'frames_this_execution':frames,'llm_api_calls':0,

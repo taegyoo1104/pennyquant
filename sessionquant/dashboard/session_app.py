@@ -48,6 +48,7 @@ class DashboardData:
     market_reference: dict = field(default_factory=dict)
     fred_references: list = field(default_factory=list)
     news_status: dict = field(default_factory=dict)
+    portfolio_selection: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -107,6 +108,7 @@ def load_database(path: str | Path) -> DashboardData:
         result.state = repository.load_state() or {}
         result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
         result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
+        result.portfolio_selection=repository.get_control('portfolio_selection_v1',{}) or {}
         result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
         result.fred_references=repository.recent('fred_reference_observations',limit=30)
         result.news_status=repository.get_control('session_news_status',{}) or {}
@@ -322,6 +324,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
             render_watchlist(data.watchlist_state, data.tables['candidates'])
+            from sessionquant.dashboard.selection_panel import render_selection
+            render_selection(data.portfolio_selection)
         else:
             st.caption('시총 감시 100·집중 20 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
         st.subheader("기술 분석 이력과 진입 근거")

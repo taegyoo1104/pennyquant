@@ -521,3 +521,30 @@ async def test_real_mysql_stage07_encrypted_expiry_does_not_cross_namespace(mysq
     assert repo.all('llm_audit_bodies')==[] and other.all('llm_audit_bodies')
     assert repo.get_record('llm_calls',result.llm_call_ids[0])['status']=='SUCCEEDED'
     assert len(repo.all('llm_usage'))==1
+
+
+def test_real_mysql_stage08_selection_intent_sql_and_namespace(mysql_repositories):
+    from pathlib import Path
+    from test_stage08_selection import market_fixture,batch_for,NOW
+    from sessionquant.session_engine import SessionEngine
+    from sessionquant.portfolio.selection import VIEW
+    repo,other=mysql_repositories(),mysql_repositories()
+    repo.record('orders',{'id':'prior-order-stage07','qty':'0.123456'})
+    market=market_fixture()
+    engine=SessionEngine(repo,market.universe,synthetic=True,candidate_settings={})
+    engine.apply_batch(batch_for(market),NOW)
+    frame=repo.get_control(VIEW)
+    assert frame['approved_new_count']==2 and other.get_control(VIEW) is None
+    assert other.all('order_intents')==[]
+    assert any(row.get('id')=='prior-order-stage07' for row in repo.all('orders'))
+    sql=(Path(__file__).parents[1]/'sql/portfolio_candidate_diagnostics.sql').read_text()
+    sql='\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    results=[]
+    with repo.db.cursor() as cursor:
+        for statement in sql.replace('REPLACE_WITH_PAPER_NAMESPACE',repo.namespace).split(';'):
+            if not statement.strip():continue
+            assert statement.lstrip().startswith('SELECT')
+            cursor.execute(statement);results.append(cursor.fetchall())
+    assert results[0][0][0]==frame['id']
+    assert len(results[1])==4 and sum(row[12] is not None for row in results[1])==2
+    assert results[2]==results[3]==()

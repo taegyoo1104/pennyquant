@@ -223,6 +223,19 @@ class WatchlistManager:
             return ['market_provider_backoff']
         return []
 
+    def candidate_symbols(self,now):
+        """동시에 비교할 집중 목록을 반환한다. 각 종목의 진입 적격성은 별도 검사한다."""
+        return self.focus(utc(now))
+
+    def candidate_expiry(self,symbol,now):
+        row=next((item for item in self.state['focus'] if item['ticker']==symbol),None)
+        status=self.store.status(utc(now),allow_synthetic=self.allow_synthetic)
+        snapshot=status.get('snapshot') or {}
+        if not row or not snapshot:return None
+        expires=[utc(row['valid_until']),utc(snapshot['as_of_at'])+timedelta(days=self.config.watchlist_refresh_days)]
+        if snapshot.get('valid_until'):expires.append(utc(snapshot['valid_until']))
+        return min(expires).isoformat()
+
     def news_targets(self, now, priority_symbols=()):
         """단계 06용 계약: 기업 후보 상한과 위험 우선대상, 거시 수집의 독립성을 제공한다."""
         now = utc(now)
