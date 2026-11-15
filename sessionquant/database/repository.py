@@ -146,6 +146,25 @@ class Repository:
                 return True
         return False
 
+    def record_fingerprints(self, kind, record_ids, *, include_payload=False):
+        """Hash stored bytes in the DB; normal reads return no large JSON payloads."""
+        from hashlib import sha256
+        if kind not in KINDS:
+            raise ValueError('지원하지 않는 기록 종류입니다')
+        ids = list(dict.fromkeys(record_ids))
+        if any(not isinstance(item,str) for item in ids):
+            raise ValueError('기록 식별자는 문자열이어야 합니다')
+        self.db.create_function('sq_payload_sha256',1,lambda value:sha256(value.encode('utf-8')).hexdigest(),deterministic=True)
+        found = {}
+        for start in range(0,len(ids),200):
+            batch = ids[start:start+200]
+            placeholders = ','.join('?' for _ in batch)
+            extra = ',payload' if include_payload else ''
+            rows = self.db.execute(f'SELECT record_id,sq_payload_sha256(payload){extra} FROM {kind} WHERE record_id IN ({placeholders})',batch)
+            for row in rows:
+                found[row[0]] = {'fingerprint':row[1],**({'payload':json.loads(row[2])} if include_payload else {})}
+        return found
+
     def storage_stats(self) -> dict:
         counts, sizes = {}, {}
         for name in (*KINDS, "engine_state", "controls"):

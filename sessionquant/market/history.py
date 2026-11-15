@@ -61,6 +61,14 @@ def session_quality(bars, opened, closed):
             'complete': not missing and not conflicts}
 
 
+def decode_history(symbol, row):
+    bars = [parse_event({'kind':'bar','data':b}).data for b in row['bars']] if row else []
+    if any(b.symbol != symbol or b.source != SOURCE or b.price_adjustment != 'raw'
+           or b.received_at < b.timestamp for b in bars):
+        raise ValueError('저장된 과거 분봉의 종목·출처·수신 시각이 다릅니다.')
+    return bars
+
+
 class HistoryStore:
     def __init__(self, repo):
         self.repo = repo
@@ -71,10 +79,7 @@ class HistoryStore:
         key = record_id(symbol, day)
         if key not in self.cache:
             row = self.repo.get_record(KIND, key)
-            bars = [parse_event({'kind':'bar','data':b}).data for b in row['bars']] if row else []
-            if any(b.symbol != symbol or b.source != SOURCE or b.price_adjustment != 'raw'
-                   or b.received_at < b.timestamp for b in bars):
-                raise ValueError('저장된 과거 분봉의 종목·출처·수신 시각이 다릅니다.')
+            bars = decode_history(symbol,row)
             self.cache[key] = (row, bars)
         self.cache.move_to_end(key)
         while len(self.cache) > 512:

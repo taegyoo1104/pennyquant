@@ -23,17 +23,26 @@ def operating_session(now):
     return next(row for row in _sessions(now.astimezone(NEW_YORK).date()) if now < row[2])
 
 
-def inspect_history(store, symbols, now):
-    """Read only. Recompute coverage from observations available at inspection time."""
+def inspect_history(store, symbols, now, *, inspections=None):
+    """Read-only by default; runtime can supply persistent, content-bound checks."""
     now = utc(now)
     day, opened, _ = operating_session(now)
     plan = history_plan(opened)
+    if inspections is not None:
+        inspections.refresh(symbols,plan)
     items = []
     for symbol in dict.fromkeys(symbols):
         problems = []
         complete = 0
         for date, start, end in plan:
             try:
+                if inspections is not None:
+                    quality,reason = inspections.inspect(store,symbol,date,start,end,now)
+                    if reason is None and quality['complete']:
+                        complete += 1
+                    else:
+                        problems.append({'session':date,'reasons':[reason],**quality})
+                    continue
                 row, bars = store.get(symbol, date)
                 visible = [b for b in bars if b.received_at <= now]
                 quality = session_quality(visible, start, end)
@@ -52,6 +61,8 @@ def inspect_history(store, symbols, now):
                       'complete_sessions':complete, 'required_sessions':len(plan),
                       'problems':problems})
     included = [r['symbol'] for r in items if r['included']]
+    if inspections is not None:
+        inspections.flush(now)
     return {'session':day, 'session_open':opened.isoformat(), 'checked_at':now.isoformat(), 'known_at':now.isoformat(),
             'required_full_sessions':20, 'session_dates':[r[0] for r in plan],
             'base_symbols':list(dict.fromkeys(symbols)), 'included_symbols':included,
@@ -64,6 +75,7 @@ class DailyHistorySelection:
     def __init__(self, repo, *, startup_pending=False):
         self.repo = repo
         self.startup_pending = startup_pending
+        self.inspections = None
         saved = repo.get_control(CONTROL, {}) or {}
         # A new process rechecks pre-open preparation; an active session remains frozen.
         self.frame = saved if saved.get('frozen') else {}
@@ -82,7 +94,7 @@ class DailyHistorySelection:
                 or (frozen and not frame.get('frozen'))
                 or (not frame.get('frozen') and frame.get('base_symbols') != list(symbols))):
             # A fresh reader also sees backfills committed since the collector started.
-            frame = inspect_history(HistoryStore(self.repo), symbols, now)
+            frame = inspect_history(HistoryStore(self.repo), symbols, now,inspections=self.inspections)
             frame['frozen'] = frozen
             self.frame = frame
             with self.repo.transaction():
