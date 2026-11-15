@@ -135,6 +135,8 @@ class MySQLRepository:
                       ("뉴스 수신·원문 검증 이력과 거시 맥락 스냅샷 추가",))
         self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(6,%s)",
                       ("LLM 호출 감사·제한된 암호화 본문·이벤트 맥락 분석 추가",))
+        self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(7,%s)",
+                      ("감시 종목의 거래일별 1분봉·RVOL 비교 이력 저장",))
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

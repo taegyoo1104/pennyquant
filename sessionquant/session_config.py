@@ -27,7 +27,7 @@ class SessionConfig:
     news_enrichment: dict = field(default_factory=dict)
     symbols_per_cycle: int = 2
     watchlist_enabled: bool = True
-    watchlist_size: int = 100
+    watchlist_size: int = 50
     focus_size: int = 20
     selection_method: str = 'market_cap_top'
     market_cap_input: Path = Path('data/market-cap-input.json')
@@ -40,6 +40,7 @@ class SessionConfig:
     ranking_refresh_seconds: int = 60
     max_cycle_seconds: int = 15
     history_pages_per_cycle: int = 1
+    watchlist_candles_per_cycle: int = 4
     market_reference: dict = field(default_factory=dict)
     macro_reference_filter: dict = field(default_factory=dict)
     recording_enabled: bool = True
@@ -69,7 +70,7 @@ class SessionConfig:
         for name, low, high in [('watchlist_size',1,100),('focus_size',1,20),('watchlist_refresh_days',1,7),
                                ('watchlist_data_max_age_seconds',10,300),('focus_min_hold_seconds',0,3600),
                                ('max_api_calls_per_cycle',8,100),('light_refresh_seconds',10,300),('ranking_refresh_seconds',30,600),
-                               ('max_cycle_seconds',5,30),('history_pages_per_cycle',0,3)]:
+                               ('max_cycle_seconds',5,30),('history_pages_per_cycle',0,3),('watchlist_candles_per_cycle',0,10)]:
             value=getattr(self,name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f'{name} 값은 {low}~{high} 정수여야 합니다.')

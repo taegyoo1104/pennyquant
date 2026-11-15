@@ -7,7 +7,7 @@ universe_path: ../data/sp500-universe.json
 source: toss
 strategy: pullback
 watchlist_enabled: true
-watchlist_size: 100
+watchlist_size: 50
 focus_size: 20
 market_cap_provider: auto  # 기존 파일 우선; 없으면 토스 섹터 시총
 market_cap_input: ../data/market-cap-input.json

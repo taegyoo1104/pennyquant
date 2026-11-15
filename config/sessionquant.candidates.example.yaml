@@ -6,7 +6,8 @@ universe_path: ../data/sp500-universe.json
 source: toss
 strategy: pullback
 watchlist_enabled: true
-watchlist_size: 100
+watchlist_size: 50
+watchlist_candles_per_cycle: 4
 focus_size: 20
 market_cap_provider: auto
 company_news_refresh_seconds: 180

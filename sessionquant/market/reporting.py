@@ -19,7 +19,7 @@ def current_report(report, now=None):
         if stale:
             row.update(eligibility_verified=False,quote_fresh=False)
             row['bars'] = {**row['bars'],'status':'STALE','five_coverage':None,'fifteen_coverage':None}
-            row['rvol'] = {**row['rvol'],'value':None,'status':'UNKNOWN'}
+            row['rvol'] = {**row['rvol'],'value':None,'calculated_value':None,'status':'UNKNOWN','calculation_status':'UNKNOWN'}
             row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'quality_observation_stale']))
         else:
             bars = row['bars']
@@ -55,7 +55,8 @@ def current_report(report, now=None):
 
 def persist_quality(engine, now):
     manager = engine.watchlist_policy
-    focus = manager.focus(now) if manager and hasattr(manager,'focus') else []
+    focus = (manager.focus(now) if manager and hasattr(manager,'focus') else
+             manager.candidate_symbols(now) if manager and hasattr(manager,'candidate_symbols') else [])
     priority = list(dict.fromkeys([*engine.broker.positions,*engine.broker.exit_intents,
         *(order.intent.symbol for order in engine.broker.get_open_orders())]))
     targets = list(dict.fromkeys([*priority,*focus])) if manager else list(engine.market.quality_rows)
@@ -68,7 +69,7 @@ def persist_quality(engine, now):
                 'rvol':{'status':'UNKNOWN','value':None,'reasons':['symbol_not_yet_evaluated']},
                 'blockers':['symbol_not_yet_evaluated','eligibility_unverified','relative_volume_unknown_or_low','quote_missing']}
         rows.append(row)
-    report = quality_summary(rows,now,source_state=manager.state if manager else {},synthetic=engine.synthetic)
+    report = quality_summary(rows,now,source_state=getattr(manager,'state',{}),synthetic=engine.synthetic)
     # 가격 이력·집중 근거 전체를 중복 저장하지 않고 수집 계측만 연결한다.
     report['source_state'] = {k:v for k,v in report['source_state'].items() if k in {
         'last_cycle_calls','cycle_call_budget','last_cycle_duration_seconds','backoff_until',

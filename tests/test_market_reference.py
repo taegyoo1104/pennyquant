@@ -174,8 +174,8 @@ def test_schema_upgrade_preserves_existing_order_ids(tmp_path):
     db.execute('PRAGMA user_version=2'); db.commit(); db.close()
     repo = Repository(path, backend='sqlite')
     try:
-        assert repo.db.execute('PRAGMA user_version').fetchone()[0] == 6
-        for kind in ('news_ingestions', 'news_enrichments', 'macro_context_snapshots','llm_calls','llm_audit_bodies','macro_context_analysis'):
+        assert repo.db.execute('PRAGMA user_version').fetchone()[0] == 7
+        for kind in ('news_ingestions', 'news_enrichments', 'macro_context_snapshots','llm_calls','llm_audit_bodies','macro_context_analysis','market_history_sessions'):
             assert repo.all(kind) == []
         assert repo.all('research_events') == []
         assert repo.db.execute('SELECT seq, record_id FROM orders').fetchone() == (7, 'unchanged')

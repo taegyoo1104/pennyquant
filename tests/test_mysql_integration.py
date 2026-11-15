@@ -16,6 +16,22 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+def test_real_mysql_rvol_history_restart_namespace_and_schema7(mysql_repositories):
+    from sessionquant.market.history import HistoryStore, KIND
+    from test_watchlist_history import seeded, NOW
+    repo,other = mysql_repositories(),mysql_repositories()
+    repo.record('orders',{'id':'existing-order','qty':'0.123456'})
+    seeded(repo)
+    reopened = mysql_repositories(repo.namespace)
+    report = HistoryStore(reopened).report('AAPL',NOW)
+    assert report['calculated_value']==2 and report['value'] is None
+    assert report['complete_sessions']==20 and len(reopened.all(KIND))==21
+    assert other.all(KIND)==[] and repo.all('orders')[0]['qty']=='0.123456'
+    with repo.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=7')
+        assert cursor.fetchone()[0]==7
+
+
 @pytest.fixture
 def mysql_repositories():
     from sessionquant.database.config import MySQLConfig
@@ -198,7 +214,7 @@ async def test_real_mysql_watchlist_snapshot_focus_and_fair_order_survive_reconn
     universe = UniverseStore(tmp_path / 'members.json')
     universe.refresh([f'T{i:03}' for i in range(500)], source='SYNTHETIC_FIXTURE',
                      observed_at=NOW-timedelta(days=1))
-    config = SessionConfig(database_backend='mysql', market_cap_input=tmp_path / 'unused.json')
+    config = SessionConfig(database_backend='mysql', market_cap_input=tmp_path / 'unused.json', watchlist_size=100)
     manager = WatchlistManager(repo, universe, config, provider=Provider(cap_batch()), allow_synthetic=True)
     await manager.refresh(NOW)
     now = observe(manager)

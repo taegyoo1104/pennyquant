@@ -96,6 +96,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
             use_news=use_news,use_market_filter=use_market_filter,risk_provider=news,watchlist_policy=scope,
             exit_policy=ExitPolicy(**first['exit_policy']),macro_reference_risk=monitor,research_replay=True,candidate_settings=candidate_options)
         news.last_verified = repo.get_control('recorded_news_verified_contexts',{})
+        from ..market.history import HistoryStore, KIND as HISTORY_KIND
+        history_store = HistoryStore(repo)
+        engine.market.history_provider = history_store.load
         news.missing = repo.get_control('recorded_news_missing_count',0)
         cursor = repo.get_control('recording_cursor',0)
         seen, counts = set(), Counter(repo.get_control('recording_risk_counts',{}))
@@ -109,6 +112,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
             stamp = utc(row['available_at']); data = row['data']
             if entry_end is not None and stamp >= utc(entry_end):break
             with repo.transaction():
+                if row['kind'] == HISTORY_KIND:
+                    repo.record(HISTORY_KIND,data)
+                    history_store.cache.pop(data['id'],None)
                 if row['kind'] == 'market_reference_view_v1':repo.set_control(VIEW,data)
                 if row['kind'] == 'engine_batch':
                     if not universe.members(stamp):raise ValueError('처리 당시 확인 가능한 유니버스 이력이 없습니다.')

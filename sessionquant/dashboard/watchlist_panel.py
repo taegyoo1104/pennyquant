@@ -35,12 +35,12 @@ def render_watchlist(state, candidates):
              and utc(row['focus_valid_until']) >= now} if active and status == 'VALID' else set()
     signals = [row for row in candidates if row.get('symbol') in focus and row.get('eligible') and row.get('signal')
                and row.get('timestamp') and 0 <= (now-utc(row['timestamp'])).total_seconds() <= 120]
-    st.subheader('시총 감시 100 → 집중 분석 최대 20')
+    st.subheader(f"시총 감시 {state.get('watchlist_limit',50)} → 집중 분석 최대 {state.get('focus_limit',20)}")
     cols = st.columns(5)
     cols[0].metric('S&P 500 전체', str(state.get('universe_count')) if state.get('universe_count') else '—')
-    cols[1].metric('유효 감시 종목', f"{len(items) if status=='VALID' else 0} / {state.get('watchlist_limit',100)}")
+    cols[1].metric('유효 감시 종목', f"{len(items) if status=='VALID' else 0} / {state.get('watchlist_limit',50)}")
     expired = len(items) if status == 'EXPIRED' else 0
-    unknown = state.get('watchlist_limit',100) if status not in {'VALID','EXPIRED'} else 0
+    unknown = state.get('watchlist_limit',50) if status not in {'VALID','EXPIRED'} else 0
     cols[2].metric('만료 / 미확인 상한', f'{expired} / {unknown}')
     st.caption('선정 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
     cols[3].metric('현재 집중 분석', f"{len(focus)} / {state.get('focus_limit',20)}")
