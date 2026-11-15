@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .toss_capitalization import STATE
+from .capitalization import EXCLUDABLE_CAP_ISSUES
 
 
 async def diagnose(repo,manager,*,client=None,now=None):
@@ -13,9 +14,12 @@ async def diagnose(repo,manager,*,client=None,now=None):
     snapshot=status.get('snapshot') or {}
     collection=repo.get_control(STATE,{}) or {}
     pages=collection.get('pages',{})
-    missing=sorted({r['ticker'] for r in snapshot.get('issues',[]) if r.get('code')=='market_cap_missing'})
+    missing=sorted({r['ticker'] for r in snapshot.get('issues',[]) if r.get('code') in EXCLUDABLE_CAP_ISSUES})
     result={'status':status['status'],'candidate_count':len(status['items']),
         'universe_count':status['universe_count'],'missing_market_cap_symbols':missing,
+        'ranking_verified':status.get('ranking_verified',False),
+        'ranking_scope':status.get('ranking_scope'),
+        'excluded_market_cap_symbols':snapshot.get('excluded_market_cap_symbols',[]),
         'collection_complete':collection.get('complete',False),
         'sector_pages_received':len(pages),'sector_pages_required':len(collection.get('roots') or []),
         'collection_started_at':collection.get('started_at'),'collection_completed_at':collection.get('completed_at'),

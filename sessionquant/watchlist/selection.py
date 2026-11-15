@@ -72,8 +72,10 @@ class WatchlistManager:
         self.history_selection = history_selection
         self.provider_explicit = provider is not None
         self.provider = provider or FileMarketCapProvider(config.market_cap_input)
-        self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days)
-        self.store = WatchlistStore(repo, universe, max_age_days=config.watchlist_refresh_days)
+        self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days,
+                                          missing_cap_policy=config.watchlist_missing_cap_policy)
+        self.store = WatchlistStore(repo, universe, max_age_days=config.watchlist_refresh_days,
+                                   missing_cap_policy=config.watchlist_missing_cap_policy)
         self.state = repo.get_control(STATE, {})
         self.state.setdefault('prices', {})
         self.state.setdefault('rankings', {})
@@ -86,8 +88,10 @@ class WatchlistManager:
         now = utc(now or self.clock())
         attempt = self.repo.get_control(ATTEMPT, {})
         snapshot = self.store.at(now)
-        size_changed = bool(snapshot and len(snapshot.get('items',[])) != self.config.watchlist_size)
-        if not force and not size_changed and attempt.get('next_attempt_at') and now < utc(attempt['next_attempt_at']):
+        size_changed = bool(snapshot and snapshot.get('size_limit',len(snapshot.get('items',[]))) != self.config.watchlist_size)
+        policy_changed = bool(snapshot and snapshot.get('missing_cap_policy','block') != self.config.watchlist_missing_cap_policy
+                              and attempt.get('requested_missing_cap_policy') != self.config.watchlist_missing_cap_policy)
+        if not force and not size_changed and not policy_changed and attempt.get('next_attempt_at') and now < utc(attempt['next_attempt_at']):
             return self.store.status(now, allow_synthetic=self.allow_synthetic)
         try:
             batch = await asyncio.wait_for(self.provider.fetch(), timeout=5)
@@ -100,7 +104,11 @@ class WatchlistManager:
             report = {'status': 'ok' if valid else 'partial', 'attempted_at': now.isoformat(),
                 'next_attempt_at': (min(now+timedelta(days=self.config.watchlist_refresh_days), utc(snapshot.payload.get('valid_until', (utc(snapshot.payload['as_of_at'])+timedelta(days=self.config.watchlist_refresh_days)).isoformat()))) if valid
                                     else now+timedelta(seconds=60)).isoformat(),
-                'issues': snapshot.payload['issues'], 'message': '시총 감시목록 갱신' if valid else '시총 자료 일부 미확인: 신규 진입 보류'}
+                'issues': snapshot.payload['issues'],
+                'excluded_market_cap_symbols':snapshot.payload.get('excluded_market_cap_symbols',[]),
+                'ranking_verified':snapshot.payload.get('ranking_verified',valid),
+                'message': ('시총 미확인 종목 제외: 확인된 시총 범위에서 후보 선정' if snapshot.payload.get('excluded_market_cap_symbols')
+                            else '시총 감시목록 갱신') if valid else '시총 자료 검증 미완료: 신규 진입 보류'}
         except (OSError, ValueError, TypeError, KeyError, httpx.HTTPError, RuntimeError) as exc:
             report = {'status': 'error', 'attempted_at': now.isoformat(),
                 'next_attempt_at': (now+timedelta(seconds=60)).isoformat(), 'error_type': type(exc).__name__,
@@ -113,6 +121,7 @@ class WatchlistManager:
                 if exc.response.status_code == 429:
                     from .budget import provider_retry_until
                     report['next_attempt_at'] = provider_retry_until(exc.response.headers.get('Retry-After'),now).isoformat()
+        report['requested_missing_cap_policy'] = self.config.watchlist_missing_cap_policy
         self.repo.set_control(ATTEMPT, report)
         self.publish(now)
         return self.store.status(now, allow_synthetic=self.allow_synthetic)

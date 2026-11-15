@@ -31,7 +31,8 @@ def context(tmp_path,count=500,size=100):
     universe=UniverseStore(tmp_path/'members.json')
     universe.refresh([f'T{i:03}' for i in range(count)],source='SYNTHETIC_FIXTURE',observed_at=NOW-timedelta(days=1))
     config=SessionConfig(database_backend='sqlite',db_path=repo.path,universe_path=tmp_path/'members.json',
-        company_rss_catalog=False,market_cap_input=tmp_path/'caps.json',watchlist_size=size,focus_size=min(size,20))
+        company_rss_catalog=False,market_cap_input=tmp_path/'caps.json',watchlist_size=size,focus_size=min(size,20),
+        watchlist_missing_cap_policy='block')  # Original strict-policy regression fixtures.
     provider=Provider(cap_batch(count))
     manager=WatchlistManager(repo,universe,config,provider=provider,clock=lambda:NOW,allow_synthetic=True)
     return repo,universe,config,provider,manager

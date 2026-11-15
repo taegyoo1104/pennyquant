@@ -42,7 +42,7 @@ def render_watchlist(state, candidates):
     expired = len(items) if status == 'EXPIRED' else 0
     unknown = state.get('watchlist_limit',50) if status not in {'VALID','EXPIRED'} else 0
     cols[2].metric('만료 / 미확인 상한', f'{expired} / {unknown}')
-    st.caption('선정 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
+    st.caption('선정 정책 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
     cols[3].metric('현재 집중 분석', f"{len(focus)} / {state.get('focus_limit',20)}")
     cols[4].metric('현재 진입 신호', str(len(signals)))
     history = state.get('history_selection') or {}
@@ -67,6 +67,10 @@ def render_watchlist(state, candidates):
     if source.get('backoff_until'):
         st.caption('공급자 요청 제한 대기 시각: '+timestamp(source['backoff_until']))
     snapshot=state.get('snapshot') or {}
+    excluded_caps = snapshot.get('excluded_market_cap_symbols',[])
+    full_ranking = status=='VALID' and snapshot.get('ranking_verified',True)
+    if excluded_caps:
+        st.info(f"시총 확인 종목 중 상위 후보입니다. 전체 S&P 500 상위 순위는 미확정이며 시총 미확인 {len(excluded_caps)}개를 제외했습니다: "+', '.join(excluded_caps))
     if snapshot.get('currency')=='KRW':
         st.caption('토스 보고 종목 시총(원화 환산·일별 갱신). 주식 클래스별 집계이며 발행사 합산이 아닙니다. 공급자의 정확한 평가 시각은 미제공입니다.')
     rows = []
@@ -76,7 +80,7 @@ def render_watchlist(state, candidates):
         blockers = list(row.get('entry_blockers',[]))
         if status != 'VALID': blockers.append('watchlist_'+status.lower())
         if row['ticker'] not in focus: blockers.append('focus_unknown_or_stale')
-        rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if status == 'VALID' else None, '검증자료 내 순위':row.get('rank'), '시가총액':(row.get('market_cap_value')+' KRW') if row.get('currency')=='KRW' and row.get('market_cap_value') else usd(row.get('market_cap_usd')),
+        rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if full_ranking else None, '검증자료 내 순위':row.get('rank'), '시가총액':(row.get('market_cap_value')+' KRW') if row.get('currency')=='KRW' and row.get('market_cap_value') else usd(row.get('market_cap_usd')),
             '일일 분봉 준비':row.get('history_ready') if history else None,
             '운영 대상':bool(row.get('operating')) and status=='VALID' and active,
             '분봉 제외 사유':'; '.join(p['session']+': '+', '.join(p['reasons']) for p in (row.get('history_selection') or {}).get('problems',[]))

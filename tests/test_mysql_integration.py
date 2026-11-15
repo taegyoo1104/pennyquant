@@ -574,3 +574,29 @@ def test_dashboard_ui_commands_are_idempotent_across_mysql_connections(mysql_rep
     a=request_command(first,'start',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
     b=request_command(second,'start',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
     assert a['id']==b['id'] and len(first.all('order_intents'))==1 and first.all('orders')==[]
+
+
+async def test_missing_cap_subset_metadata_and_policy_survive_mysql_restart(mysql_repositories):
+    from sessionquant.market.universe import UniverseStore
+    from sessionquant.session_config import SessionConfig
+    from sessionquant.watchlist.selection import WatchlistManager
+    from watchlist_fixtures import NOW, cap_batch, Provider
+    repo=mysql_repositories()
+    universe=UniverseStore()
+    universe.refresh([f'T{i:03}' for i in range(8)],source='SYNTHETIC_FIXTURE',observed_at=NOW-timedelta(days=1))
+    batch=cap_batch(8)
+    batch['observations']=batch['observations'][4:]
+    provider=Provider(batch)
+    config=SessionConfig(company_rss_catalog=False,watchlist_size=5,focus_size=5)
+    manager=WatchlistManager(repo,universe,config,provider=provider,allow_synthetic=True)
+    result=await manager.refresh(NOW)
+    assert result['status']=='VALID' and not result['ranking_verified']
+    reopened=mysql_repositories(repo.namespace)
+    restored=WatchlistManager(reopened,universe,config,provider=provider,allow_synthetic=True)
+    status=restored.store.status(NOW,allow_synthetic=True)
+    assert status['snapshot']==result['snapshot']
+    assert status['excluded_market_cap_symbols']==['T000','T001','T002','T003']
+    assert restored.light_symbols(NOW)==['T007','T006','T005','T004']
+    strict=WatchlistManager(reopened,universe,replace(config,watchlist_missing_cap_policy='block'),
+                            provider=provider,allow_synthetic=True)
+    assert strict.entry_blockers('T007',NOW)==['watchlist_partial']

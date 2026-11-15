@@ -1,6 +1,6 @@
 # SessionQuant
 
-현재 실행 경로는 [SESSIONQUANT_CURRENT.md](docs/SESSIONQUANT_CURRENT.md), 감시 선정 정책은 [단계 01](docs/STAGE01_WATCHLIST.md)을 따릅니다. **`run`은 시총 감시 기본 50(최대 100) → 집중 분석 최대 20의 PAPER_LOCAL 경로입니다.** 토스 섹터 시총을 자동 수집하며, 검증 파일도 선택할 수 있습니다. 구성 종목 전체의 시총이 확인되지 않으면 UNKNOWN/PARTIAL로 표시하고 신규 진입을 차단합니다. S&P 500 전체 편입 원장과 기존 보유·미체결 위험 관리는 유지합니다.
+현재 실행 경로는 [SESSIONQUANT_CURRENT.md](docs/SESSIONQUANT_CURRENT.md), 감시 선정 정책의 기반은 [단계 01](docs/STAGE01_WATCHLIST.md), 최신 제외 정책은 [분봉·시총 운영 안내](docs/WATCHLIST_RVOL.md)를 따릅니다. **`run`은 시총 확인 종목 중 후보 최대 50(설정 상한 100) → 분봉 준비 종목 → 집중 분석 최대 20의 PAPER_LOCAL 경로입니다.** 기본 `watchlist_missing_cap_policy: exclude`는 시총 누락 종목을 제외하고 확인된 범위에서 선정하며, 전체 상위 순위는 미확정으로 기록합니다. 시총 충돌·통화/출처 오류·만료 등은 계속 신규 진입을 차단합니다. S&P 500 전체 편입 원장과 기존 보유·미체결 위험 관리는 유지합니다.
 
 [감시 50종목 과거 분봉·RVOL 연결](docs/WATCHLIST_RVOL.md): `history-backfill`로 과거 비교 이력을 DB에 저장하고 `run`에서 당일 분봉과 연결합니다. 토스 `run`은 원래 후보 중 분봉 준비가 끝난 **50−n개**만 일일 운영 목록으로 사용하며 제외된 보유·미체결 종목의 위험 관리는 유지합니다. `history-status --details`로 준비 목록과 제외 사유를 확인할 수 있습니다. 계산 수치와 매매용 비교 근거 검증은 구분합니다.
 

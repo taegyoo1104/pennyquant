@@ -94,6 +94,7 @@ def collection_selection(manager, now, *, allow_partial=False):
     from ..market_reference.contracts import REFERENCE_SYMBOLS
     from ..models import symbol_valid
     from ..watchlist.toss_capitalization import CONTRACT
+    from ..watchlist.capitalization import EXCLUDABLE_CAP_ISSUES
     status = manager.store.status(now)
     snapshot = status.get('snapshot') or {}
     issues = snapshot.get('issues',[])
@@ -101,7 +102,7 @@ def collection_selection(manager, now, *, allow_partial=False):
                and snapshot.get('synthetic') is False and issues
                and all(row.get('code')=='market_cap_missing' for row in issues))
     if status['status']=='VALID':
-        symbols=manager.light_symbols(now)
+        symbols=manager.base_symbols(now)
     elif partial:
         members=manager.universe.members(now)
         symbols=[row['ticker'] for row in status['items'][:manager.config.watchlist_size]
@@ -111,12 +112,14 @@ def collection_selection(manager, now, *, allow_partial=False):
             raise ValueError('시총 미확인 종목이 사전 수집 후보에 포함되어 있습니다.')
     else:
         raise ValueError('유효한 감시목록이 없습니다. watchlist-diagnose로 확인하세요. 시총 누락만 있는 PARTIAL은 --allow-partial-watchlist로 분봉 사전 수집만 허용할 수 있습니다.')
-    if len(symbols)!=manager.config.watchlist_size or len(set(symbols))!=len(symbols):
-        raise ValueError('설정한 수만큼의 서로 다른 수집 후보를 확보하지 못했습니다.')
+    if not 1<=len(symbols)<=manager.config.watchlist_size or len(set(symbols))!=len(symbols) or (partial and len(symbols)!=manager.config.watchlist_size):
+        raise ValueError('설정한 상한 이내의 서로 다른 수집 후보가 필요합니다. PARTIAL 사전 수집은 설정한 수만큼 필요합니다.')
     for symbol in symbols:symbol_valid(symbol)
-    return symbols,{'status':status['status'],'ranking_verified':status['status']=='VALID',
+    return symbols,{'status':status['status'],'ranking_verified':status['status']=='VALID' and snapshot.get('ranking_verified',True),
         'snapshot_id':snapshot.get('id'),'collection_only':bool(partial),
-        'missing_market_cap_symbols':sorted({row['ticker'] for row in issues if row.get('code')=='market_cap_missing'})}
+        'ranking_scope':snapshot.get('ranking_scope','full_universe'),
+        'excluded_market_cap_symbols':snapshot.get('excluded_market_cap_symbols',[]),
+        'missing_market_cap_symbols':sorted({row['ticker'] for row in issues if row.get('code') in EXCLUDABLE_CAP_ISSUES})}
 
 
 async def command(config, action, *, max_requests=5000, refresh=False, allow_partial=False, details=False, output=None):
