@@ -15,10 +15,15 @@ def reference_rows(view, now=None):
         try:
             if quality == 'GOOD' and now > utc(item['valid_until']): quality = 'STALE'
         except (ValueError, KeyError, TypeError, AttributeError): quality = 'UNKNOWN'
+        valid=quality=='GOOD'
+        latest=(item.get('latest_observations') or {}).get('price') or (item.get('latest_observations') or {}).get('candle') or {}
         rows.append({'종목': symbol, '의미': label, '용도': '시장 참고 전용',
-            '가격': usd(item.get('current_price')), '지연 구분': item.get('latency_class', 'UNKNOWN'),
-            '품질': quality, '15분 ETF 등락률(%)': (windows.get('15') or {}).get('pct_change'),
-            '30분 ETF 등락률(%)': (windows.get('30') or {}).get('pct_change'),
+            '가격': usd(item.get('current_price')) if valid else '—', '지연 구분': 'STALE' if quality=='STALE' else item.get('latency_class','UNKNOWN_LATENCY'),
+            '공급원':latest.get('source','미확인'),'수집 시각':timestamp(latest.get('received_at')),
+            '전일 대비(%)':item.get('day_return_pct') if valid and item.get('cross_day_comparability')=='VERIFIED' else None,
+            '5분 ETF 등락률(%)':(windows.get('5') or {}).get('pct_change') if valid and (windows.get('5') or {}).get('quality_status')=='GOOD' else None,
+            '품질': quality, '15분 ETF 등락률(%)': (windows.get('15') or {}).get('pct_change') if valid and (windows.get('15') or {}).get('quality_status')=='GOOD' else None,
+            '30분 ETF 등락률(%)': (windows.get('30') or {}).get('pct_change') if valid and (windows.get('30') or {}).get('quality_status')=='GOOD' else None,
             '원본 시각': timestamp(item.get('event_at')), '확인 가능 시각': timestamp(item.get('available_at')),
             '유효 시각': timestamp(item.get('valid_until')), '근거': str(item.get('quality_reasons') or [])})
     return rows

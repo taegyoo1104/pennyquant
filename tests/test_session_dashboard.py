@@ -18,8 +18,8 @@ def test_empty_dashboard_does_not_invent_account(tmp_path, monkeypatch):
     assert not app.exception
     assert app.title[0].value == "SessionQuant"
     assert app.metric[0].value == "—"
-    assert app.metric[4].value == "확인 필요"
-    assert {"시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"}.issubset({item.label for item in app.tabs})
+    assert len(app.metric)==4
+    assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     assert not any("실거래 활성화" == button.label for button in app.button)
     assert not (tmp_path / "absent.db").exists()
 
@@ -29,8 +29,8 @@ def test_dashboard_decimal_positions_and_unknown_timestamps():
                                                    "positions": {"AAPL": {"qty": "0.1", "avg_price": "200", "entry_fee": "0.01", "stop_price": "196"}}}})
     view = build_view(data, datetime(2026, 11, 13, 17, tzinfo=timezone.utc))
     assert view["positions"][0]["보유 수량"] == "0.1"
-    assert view["positions"][0]["비중"] == "20.0%"
-    assert view["positions"][0]["평가 손익"] == "$-0.01"
+    assert view["positions"][0]["비중"] == "—"
+    assert view["positions"][0]["평가 손익"] == "—"
     assert view["lag"] is None
     assert view["regime"] == "UNKNOWN"
     assert decimal_value("NaN") is None
@@ -123,12 +123,15 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception and not app.error
     assert any('LIVE_LOCAL' in row.value for row in app.caption)
-    assert [metric.value for metric in app.metric][:4] == ['$1,200.50', '$321.45', '₩350,000', '—']
-    assert {"시장 현황", "종목 현황", "포트폴리오", "뉴스 분석", "주문 및 운영"}.issubset({item.label for item in app.tabs})
+    assert [metric.value for metric in app.metric][:3] == ['$1,200.50', '$321.45', '—']
+    assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert any(metric.label == '프로그램 누적 비용 · 추정' and metric.value == '$0.20' for metric in app.metric)
     assert any(metric.label == 'OpenAI 충전 누계 · 직접 기록' and metric.value == '$10.00' for metric in app.metric)
     assert any('잔액 부족' in row.value for row in app.warning)
+    app.radio(key='dashboard_page').set_value('매매 내역').run()
     assert any('0.123456' in str(frame.value) for frame in app.dataframe)
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     app.text_input(key='openai-deposit').set_value('0')
     app.button(key='save-openai-deposit').click().run()
     assert not app.exception
@@ -155,6 +158,7 @@ def test_main_screen_with_closed_market_null_schedule(tmp_path, monkeypatch):
     monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception
+    app.radio(key='dashboard_page').set_value('매매 내역').run()
     assert any('청산 시작: — · 미청산 경고: —' in row.value for row in app.caption)
 
 
@@ -207,7 +211,8 @@ def test_stage06_dashboard_renders_populated_provider_and_enrichment_details(tmp
     monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception and not app.error
-    assert len([tab for tab in app.tabs if tab.label in {'시장 현황', '종목 현황', '포트폴리오', '뉴스 분석', '주문 및 운영'}]) == 5
+    assert len(app.radio(key='dashboard_page').options)==6
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert any('뉴스 공급자' in item.label for item in app.expander)
     values = ' '.join(frame.value.to_string() for frame in app.dataframe)
     assert 'PROVIDER_RATE_LIMITED' in values and 'RIGHTS_UNKNOWN' in values and 'stale_article' in values

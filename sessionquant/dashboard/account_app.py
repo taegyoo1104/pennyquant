@@ -62,7 +62,7 @@ def render(path):
         from sessionquant.database.repository import Repository
         from sessionquant.trading_controls import render_controls
         control_repo=Repository(path)
-        render_controls(control_repo,positions=snapshot['items'])
+        render_controls(control_repo,positions=[],environment='LIVE_LOCAL',readonly=True)
     except Exception:
         st.caption('거래 제어 상태를 확인할 수 없습니다.')
     finally:

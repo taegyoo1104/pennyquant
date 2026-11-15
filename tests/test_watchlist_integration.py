@@ -76,6 +76,7 @@ async def test_dashboard_marks_past_focus_as_history_and_labels_fixture(tmp_path
     monkeypatch.setattr('sys.argv',['session_app.py','--db',str(tmp_path/'watch.db')])
     app=AppTest.from_file(str(Path(__file__).parents[1]/'sessionquant/dashboard/session_app.py'),default_timeout=30).run()
     assert not app.exception
+    app.radio(key='dashboard_page').set_value('시장·종목').run()
     assert any('합성 감시목록' in w.value for w in app.warning)
     assert any(m.label=='현재 집중 분석' and m.value=='0 / 20' for m in app.metric)
     assert any('과거 분석' in c.value for c in app.caption)

@@ -173,7 +173,8 @@ def test_stale_ranking_is_history_and_five_existing_tabs_are_preserved(tmp_path,
     monkeypatch.setattr('sys.argv',['session_app.py','--db',str(tmp_path/'dashboard.db')])
     app=AppTest.from_file(str(Path(__file__).parents[1]/'sessionquant/dashboard/session_app.py'),default_timeout=30).run()
     assert not app.exception and not app.error
-    assert {'시장 현황','종목 현황','포트폴리오','뉴스 분석','주문 및 운영'}.issubset({tab.label for tab in app.tabs})
+    assert len(app.radio(key='dashboard_page').options)==6
+    app.radio(key='dashboard_page').set_value('시장·종목').run()
     assert any(metric.label=='현재 최종 후보' and metric.value=='—' for metric in app.metric)
     assert any('마지막 저장된 선정 이력' in caption.value for caption in app.caption)
     repo=Repository(tmp_path/'dashboard.db',backend='sqlite');assert repo.load_state()==before;repo.close()

@@ -548,3 +548,13 @@ def test_real_mysql_stage08_selection_intent_sql_and_namespace(mysql_repositorie
     assert results[0][0][0]==frame['id']
     assert len(results[1])==4 and sum(row[12] is not None for row in results[1])==2
     assert results[2]==results[3]==()
+
+
+def test_dashboard_ui_commands_are_idempotent_across_mysql_connections(mysql_repositories):
+    from sessionquant.trading_controls import begin_session,request_command
+    now=datetime.now(timezone.utc)
+    first=mysql_repositories();second=mysql_repositories(first.namespace)
+    state=begin_session(first,mode='paper',now=now)
+    a=request_command(first,'start',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
+    b=request_command(second,'start',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
+    assert a['id']==b['id'] and len(first.all('order_intents'))==1 and first.all('orders')==[]
