@@ -108,7 +108,9 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
             stage='당일 분봉' if warmup.get('phase')=='CURRENT_SESSION' else '과거 분봉'
             st.info(f"자료 준비 중 · {stage} 확인 · {warmup.get('completed_tasks',0)}/{warmup.get('required_tasks',0)}개 구간 확인 · 신규 매수 대기")
         if warmup.get('reused_history_tasks'):
-            st.caption(f"이전 검사 재사용 {warmup['reused_history_tasks']}개 구간 · 변경·누락 자료만 다시 확인")
+            st.caption(f"완료된 과거 검사 재사용 {warmup['reused_history_tasks']}개 구간")
+        if warmup.get('deferred_history_tasks'):
+            st.caption(f"최근 조회한 누락 구간 {warmup['deferred_history_tasks']}개 재조회 생략 · 해당 종목은 계속 제외 · 마지막 검사 후 6시간 대기")
         with st.expander('자료 준비 자세히'):
             st.caption(warmup.get('message','')+' · 마지막 확인 '+timestamp(warmup.get('updated_at')))
             st.caption('검사 기준 '+timestamp(warmup.get('cutoff_at'))+' · '+str(warmup.get('current_symbol',''))+' '+str(warmup.get('current_session','')))

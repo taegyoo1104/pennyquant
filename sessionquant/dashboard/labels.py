@@ -93,6 +93,7 @@ LABELS = {
 }
 
 COLUMNS = {
+    'retry_deferred':'재조회 대기','retry_after':'다음 조회 가능 시각',
     'session':'거래일','current_session':'당일 자료','engine_minutes_missing':'전략에 전달할 분봉 수',
     'received_minutes':'확보한 분봉 수',
     '403':'접근 제한 횟수','429':'요청 제한 횟수',

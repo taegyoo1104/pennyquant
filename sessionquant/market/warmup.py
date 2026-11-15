@@ -36,6 +36,7 @@ class StartupWarmup:
         self.report = {'status':'WAITING_WATCHLIST','started_at':utc(self.clock()).isoformat(),
             'completed_tasks':0,'complete_tasks':0,'required_tasks':0,'received_pages':0,
             'reused_history_tasks':0,'history_total_tasks':0,
+            'deferred_history_tasks':0,
             'issues':[], 'message':'감시 목록을 확인하고 있습니다.'}
         self.publish()
 
@@ -59,6 +60,15 @@ class StartupWarmup:
             for symbol in symbols:
                 if self.inspections.reusable(symbol,date,start,end,now) is not None:
                     self.report['reused_history_tasks'] += 1
+                    continue
+                deferred = self.inspections.deferred(symbol,date,start,end,now)
+                if deferred is not None:
+                    self.report['deferred_history_tasks'] += 1
+                    self.history_failed.add(symbol)
+                    self.report['issues'].append({'symbol':symbol,'session':date,'current_session':False,
+                        'reason':deferred['reason'],**deferred['quality'],
+                        'retry_deferred':True,'checked_at':deferred['checked_at'],
+                        'retry_after':deferred['retry_after']})
                     continue
                 self.jobs.append({'symbol':symbol,'day':date,'opened':start,'end':end,
                                   'cursor':end,'pages':0,'current':False})
@@ -101,7 +111,7 @@ class StartupWarmup:
             quality['complete'] &= quality['engine_minutes_missing'] == 0
         return quality
 
-    def _finish_job(self, job, quality, reason=None):
+    def _finish_job(self, job, quality, reason=None, *, defer_retry=False):
         self.jobs.popleft()
         self.report['completed_tasks'] += 1
         if quality.get('complete'):
@@ -109,6 +119,8 @@ class StartupWarmup:
         else:
             if not job['current']:
                 self.history_failed.add(job['symbol'])
+                if defer_retry:
+                    self.inspections.defer_retry(job['symbol'],job['day'])
             self.report['issues'].append({'symbol':job['symbol'],'session':job['day'],
                 'current_session':job['current'],'reason':reason or 'history_minutes_missing_or_conflicting',
                 **quality})
@@ -155,7 +167,7 @@ class StartupWarmup:
                 if not pending:
                     # Already queried holes and conflicting versions cannot be repaired
                     # by repeatedly downloading the same pages. Keep the quality failure.
-                    self._finish_job(job,quality)
+                    self._finish_job(job,quality,defer_retry=True)
                     continue
                 job['cursor'] = max(pending)
                 response = await fetch(job['symbol'],job['cursor'])
@@ -177,7 +189,9 @@ class StartupWarmup:
                 stalled = bool(following and utc(following) >= job['cursor'])
                 reached = bool(fetched and min(b.timestamp for b in fetched) <= job['opened'])
                 if quality['complete'] or not fetched or not following or stalled or reached or job['pages'] >= 10:
-                    self._finish_job(job,quality,'cursor_stalled' if stalled else None)
+                    exhausted = not fetched or not following or reached
+                    self._finish_job(job,quality,'cursor_stalled' if stalled else None,
+                                     defer_retry=exhausted and not stalled)
                 else:
                     job['cursor'] = utc(following)
                 self.report.update(status='COLLECTING',message='누락된 분봉을 보충하고 있습니다.')
