@@ -186,11 +186,20 @@ def render_system(data,view):
     from .session_app import _table,timestamp
     st.subheader('시스템·설정 · 읽기 전용')
     st.caption('엔진 마지막 수신: '+view['last_event']+' · API 연결 정상 여부는 저장 기록만으로 확정하지 않습니다.')
+    st.subheader('알림')
     _table(data.tables['alerts'])
-    _table([{k:r.get(k) for k in ('kind','status','observed_at','timestamp','code')} for r in data.tables['pipeline_status']])
+    from .system_panel import pipeline_rows
+    st.subheader('처리 기록')
+    st.caption('종목 선정과 매수 검사 당시의 기록입니다. 시각은 한국시간이며 현재 연결 상태를 뜻하지 않습니다.')
+    _table(pipeline_rows(data.tables['pipeline_status']))
+    if data.tables['pipeline_status']:
+        with st.expander('처리 기록 원본 보기'):
+            st.json(data.tables['pipeline_status'])
     from .reference_panel import reference_rows
+    st.subheader('시장 참고 지표')
     _table(reference_rows(data.market_reference))
     from .news_panel import provider_rows
+    st.subheader('뉴스 수집 상태')
     _table(provider_rows(data.news_status))
     st.caption('reference/event-LLM 설정은 실행 설정에서 확인합니다. 이 화면에서 위험 한도나 실주문 권한을 변경하지 않습니다.')
     st.caption('뉴스 마지막 작업: '+timestamp(data.news_status.get('updated_at')))
