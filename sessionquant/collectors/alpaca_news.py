@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import timedelta
 import json
 import logging
 import os
@@ -61,7 +62,7 @@ def parse_news(item: dict, received_at, *, real_time: bool = False) -> NewsEvent
             raise DataQualityError(f"Alpaca news requires text or null (field: {field})")
     return NewsEvent(id="alpaca:" + str(item["id"]), symbols=symbols,
         title=item["headline"], published_at=published_at, received_at=utc(received_at),
-        source=item.get("source", "alpaca") or "", url=item.get("url") or "",
+        source=item.get("source") or "", url=item.get("url") or "",
         body=item.get("content") or item.get("summary") or "", verified=True, real_time=real_time)
 
 
@@ -75,6 +76,7 @@ class AlpacaNewsClient:
         self._owns_client = client is None
         self.limiter = RateLimiter(2)
         self._seen = OrderedDict()
+        self.intake_errors=[]
 
     def _headers(self):
         if not self._key or not self._secret:
@@ -97,13 +99,18 @@ class AlpacaNewsClient:
             self._seen.popitem(last=False)
         return True
 
-    async def fetch(self, symbols: list[str], *, start=None, end=None,
-                    max_pages: int = 10) -> list[NewsEvent]:
+    async def fetch(self, symbols: list[str] | None, *, start=None, end=None,
+                    max_pages: int = 10, skip_invalid=False) -> list[NewsEvent]:
         headers = self._headers()  # Validate credentials before opening a request.
         if not 1 <= max_pages <= 100:
             raise ValueError("max_pages must be 1..100")
-        params = {"symbols": symbols_parameter(symbols), "limit": 50,
-                  "include_content": "true", "sort": "asc"}
+        captured=now_utc()
+        if end is None:end=captured-timedelta(minutes=0 if self.realtime_verified else 15)
+        if start is None:start=captured-timedelta(hours=24)
+        if utc(start)>utc(end):raise ValueError('Alpaca 조회 시작·종료 시각을 확인하세요.')
+        params = {"limit": 50,"include_content": "true", "sort": "desc"}
+        if symbols is not None:params['symbols']=symbols_parameter(symbols)
+        self.intake_errors=[]
         if start is not None:
             params["start"] = utc(start).isoformat()
         if end is not None:
@@ -112,7 +119,8 @@ class AlpacaNewsClient:
         tokens = set()
         for _ in range(max_pages):
             response = await get_readonly(self.client, REST_URL, limiter=self.limiter,
-                                          headers=headers, params=params)
+                                          headers=headers, params=params, attempts=1)
+            if len(response.content)>4_000_000:raise DataQualityError('Alpaca 응답 크기 초과')
             try:
                 data = response.json()
             except ValueError:
@@ -124,7 +132,12 @@ class AlpacaNewsClient:
                 raise DataQualityError("Alpaca response requires a text page token (field: next_page_token)")
             received = now_utc()
             for item in data["news"]:
-                article = parse_news(item, received, real_time=False)
+                try:article = parse_news(item, received, real_time=False)
+                except (ValueError,TypeError,KeyError):
+                    if not skip_invalid:raise
+                    self.intake_errors.append({'raw':{key:item.get(key) for key in ('id','headline','created_at','symbols','source','url')} if isinstance(item,dict) else {},
+                        'received_at':received.isoformat(),'skip_reason':'invalid_timestamp_or_article'})
+                    continue
                 # Commit deduplication only when the whole fetch can be returned.
                 # A later bad item/page must not consume earlier unwritten articles.
                 result.append((item, article))

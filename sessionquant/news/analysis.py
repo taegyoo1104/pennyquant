@@ -178,10 +178,9 @@ class NewsAnalyzer:
         now = utc(now or datetime.now(timezone.utc))
         baseline = NewsAnalysis(ticker, event, source_kind=source_kind, model=self.model, analyzed_at=now,
                                 input_digest=event_digest(event, ticker))
-        if ticker not in event.symbols or not event.verified or not event.source.strip():
-            return replace(baseline, error="unverified_source_or_ticker", reason="기업·종목·출처 확인 필요")
-        if not self._fresh(event, now):
-            return replace(baseline, error="stale_or_inconsistent_time", reason="뉴스 시각 또는 수신 지연 확인 필요")
+        from .intake import company_reason
+        reason=company_reason(event,ticker,source_kind,primary_verified,now,self.max_age_hours)
+        if reason:return replace(baseline,error=reason,reason='뉴스의 출처·종목·시각·본문 확인이 필요합니다.')
         is_primary = primary_verified is True and source_kind in {"sec", "rss"}
         if source_kind == "sec":
             is_primary = is_primary and event.id.startswith("sec:") and urlsplit(event.url).hostname == "www.sec.gov"

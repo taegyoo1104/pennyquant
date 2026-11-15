@@ -134,7 +134,16 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                 from .macro.models import LLMSettings
                 from .macro.service import NewsPipeline
                 news = NewsPipeline(repo, companies=config.companies, settings=LLMSettings.from_dict(config.llm),
-                                    include_alpaca=config.include_alpaca)
+                                    include_alpaca=config.include_alpaca,
+                                    macro_refresh_seconds=config.macro_news_refresh_seconds,
+                                    company_refresh_seconds=config.company_news_refresh_seconds,
+                                    calendar_refresh_seconds=config.economic_calendar_refresh_seconds,
+                                    company_max_age_hours=config.company_new_analysis_max_age_hours,
+                                    macro_max_age_hours=config.macro_new_analysis_max_age_hours,
+                                    calendar_enabled=True,enrichment_policies=config.news_enrichment.get('publishers',{}),
+                                    weekend_slowdown=config.news_weekend_slowdown,
+                                    enrichment_min_chars=config.news_enrichment.get('min_chars',300),
+                                    enrichment_min_sentences=config.news_enrichment.get('min_sentences',3))
             from .trading_controls import begin_session
             control_state=begin_session(repo,mode="paper")
             from .trading_controls import finish_session
@@ -208,8 +217,8 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                     else:
                         symbols = list(dict.fromkeys([*priority, *engine.market.quotes]))
                     symbols = [s for s in symbols if s not in {"SPY", "QQQ"}][:20]
-                    news_task = asyncio.create_task(news.refresh(symbols, held_symbols=tuple(engine.broker.positions)))
-                    next_news = monotonic + config.news_refresh_seconds
+                    news_task = asyncio.create_task(news.refresh(symbols, held_symbols=tuple(engine.broker.positions),allowlist=contract['company_allowlist'] if watchlist else ()))
+                    next_news = monotonic + min(config.company_news_refresh_seconds,config.macro_news_refresh_seconds,config.economic_calendar_refresh_seconds)
                 if news_task and news_task.done():
                     try:
                         news_task.result()

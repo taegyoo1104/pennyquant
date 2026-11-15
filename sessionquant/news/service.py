@@ -45,9 +45,12 @@ class NewsService:
     def __init__(self, companies: Mapping[str, CompanySource | dict], *, analyzer: NewsAnalyzer | None = None,
                  sec_client=None, document_client=None, rss_collector=None, alpaca_client=None,
                  include_alpaca: bool = True, max_filings_per_symbol: int = 3,
-                 clock: Callable[[], datetime] | None = None, company_resolver=None):
+                 clock: Callable[[], datetime] | None = None, company_resolver=None, repository=None):
         if type(max_filings_per_symbol) is not int or not 1 <= max_filings_per_symbol <= 10:
             raise ValueError("invalid per-company filing limit")
+        self.repo=repository
+        from .schedule import NewsSchedule
+        self.schedule=NewsSchedule(repository,clock=clock)
         self.companies = {}
         for symbol, value in companies.items():
             symbol_valid(symbol)
@@ -66,7 +69,7 @@ class NewsService:
         self.analyzer = analyzer or NewsAnalyzer()
         self.sec_client = sec_client or SecEdgarClient()
         self.document_client = document_client or SecDocumentClient()
-        self.rss_collector = rss_collector or RSSCollector()
+        self.rss_collector = rss_collector or RSSCollector(repository=repository,schedule=self.schedule)
         self.alpaca_client = alpaca_client or AlpacaNewsClient()
         self.company_resolver = company_resolver or SecCompanyResolver()
         self.include_alpaca, self.max_filings_per_symbol = include_alpaca, max_filings_per_symbol
@@ -90,10 +93,25 @@ class NewsService:
         if original is not None and event_digest(original, symbol) == event_digest(event, symbol):
             event = original
         self._events[event.id] = event
+        from .intake import company_reason,archive
+        reason=company_reason(event,symbol,kind,primary,now,getattr(self.analyzer,'max_age_hours',24))
+        if self.repo:
+            from ..models import jsonable
+            archive(self.repo,jsonable(event),provider=kind,reason=reason,ticker=symbol)
         result = await self.analyzer.analyze(event, symbol, source_kind=kind, primary_verified=primary,
                                              now=max(now, utc(self.clock())))
         self.analyses[f"{event.id}:{symbol}"] = result
         return result
+
+    async def _request(self,name,call):
+        if not self.schedule.due(name,0):return []
+        self.schedule.begin(name)
+        try:
+            result=await call()
+            self.schedule.success(name,len(result) if hasattr(result,'__len__') else int(result is not None))
+            return result
+        except (httpx.HTTPError,RuntimeError,ValueError,TypeError,KeyError) as exc:
+            self.schedule.failure(name,exc);raise
 
     async def refresh(self, symbols: list[str], now: datetime | None = None) -> list[NewsAnalysis]:
         now = utc(now or self.clock())
@@ -108,8 +126,8 @@ class NewsService:
             source = self.companies.get(symbol)
             if source is None or not source.cik:
                 try:
-                    company = await self.company_resolver.resolve(symbol)
-                    if company is not None:
+                    company = await self._request('sec_company',lambda:self.company_resolver.resolve(symbol))
+                    if company:
                         source = CompanySource(symbol, company.cik, company.company_name,
                                                source.rss_urls if source else (),
                                                source.rss_verified if source else False)
@@ -121,7 +139,7 @@ class NewsService:
                 continue
             if source.cik:
                 try:
-                    filings = await self.sec_client.submissions(source.cik)
+                    filings = await self._request('sec:'+symbol,lambda:self.sec_client.submissions(source.cik))
                     # This symbol association comes from SEC's submissions response,
                     # never from the candidate/query or model's interpretation.
                     matching = [filing for filing in filings if symbol in filing.symbols
@@ -154,7 +172,16 @@ class NewsService:
                     self._issue("rss", symbol, exc)
         if self.include_alpaca and symbols:
             try:
-                events = await self.alpaca_client.fetch(symbols)
+                from datetime import timedelta
+                import inspect
+                options={'start':now-timedelta(hours=24),'end':now-timedelta(minutes=15),'max_pages':2,'skip_invalid':True}
+                parameters=inspect.signature(self.alpaca_client.fetch).parameters
+                options={key:value for key,value in options.items() if key in parameters or any(p.kind==p.VAR_KEYWORD for p in parameters.values())}
+                events = await self._request('alpaca',lambda:self.alpaca_client.fetch(symbols,**options))
+                if self.repo:
+                    from .intake import archive
+                    for item in getattr(self.alpaca_client,'intake_errors',[]):
+                        archive(self.repo,{'id':str(item['raw'].get('id','unknown')),'received_at':item['received_at'],**item['raw']},provider='alpaca',reason=item['skip_reason'])
                 for event in events[:50]:
                     self._events[event.id] = event
                     for symbol in symbols:

@@ -72,7 +72,10 @@ async def test_auxiliary_or_unconfirmed_primary_cannot_authorize_entry(kind, pri
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response()))) as client:
         result = await NewsAnalyzer(api_key="key", client=client).analyze(
             event, "TEST", source_kind=kind, primary_verified=primary, now=NOW)
-    assert result.sentiment == "POSITIVE" and not result.entry_eligible
+    if kind in {'sec','rss'}:
+        assert result.sentiment=='UNKNOWN' and result.error=='primary_source_unverified'
+    else:assert result.sentiment == "POSITIVE"
+    assert not result.entry_eligible
 
 
 @pytest.mark.parametrize("change", [

@@ -1,0 +1,134 @@
+# SessionQuant 개발 인수인계
+
+작성일: 2026-11-15 (한국시간). 저장소: `taegyoo1104/pennyquant`. Python 3.12 이상.
+
+## 가장 먼저 읽을 사항
+
+현재 안정 기준은 `b3010e6`(토스 시총 선정), 그 이전 05단계 기준은 `9f9b1be`다. 이 문서와 함께 저장된 **06단계 변경은 개발 중인 체크포인트이며 운영 완료본이 아니다.** 이 상태에서 실거래를 활성화하지 말 것. 먼저 아래 테스트 실패를 해결하고 회귀 검증해야 한다. 기존 AGENTS.md를 발견하면 먼저 읽고 보존한다. 이번 작업에서는 AGENTS.md를 추가·수정하지 않았다. 이전 대화의 첨부 문서는 새 계정에 자동 전달되지 않으므로 필요하면 사용자가 다시 제공해야 한다.
+
+사용자는 00~05 구현 후 토스 시총 100종목 연결 및 단계 작업 계속을 승인했다. 현재 작업 범위를 06까지로 알렸으며 **07 이후는 별도 승인 대기**다. KIS는 적합성 검토만 진행했고 사용자가 토스로 충분하면 KIS를 쓰지 않겠다고 하여 보류했다. KIS 주문·데이터 연결을 임의로 추가하지 않는다.
+
+## 최초 기획 의도와 발전 과정
+
+최초 PennyQuant는 미국 페니스탁 뉴스 호재 기반 초단기 매매였다. SessionQuant 2.0은 S&P 500 장중 추세 매매로 전환한다. 기업 뉴스 없이도 기술적 조건으로 후보가 될 수 있다. LLM은 사실·위험 분석을 보조하고 주문을 직접 결정하지 않는다. 시장이 불리하거나 데이터가 불확실하면 현금 유지가 정상 동작이다.
+
+5분·15분 확정봉, Pullback 기본 전략과 momentum/gap_breakout/vwap, SPY·QQQ 시장 국면, Decimal 소수점 주문 모의, 최초 비중 20%, 추가매수 1회, 종목 최대 40%, 전체 80%, 최대 보유 5개(초기 권장 2개), 종목 위험 0.75%, 일일 손실 2%가 기본 가설이다. 목표 익절 10%를 반드시 기다리는 구조가 아니며 악재·추세 하락·손절·시간 청산이 먼저 작동할 수 있다. 당일 청산과 마감 직전 불필요한 신규 매수 방지가 중요하다.
+
+개발은 로컬 MySQL 8 + Paper, 이후 명시적 승인에 따른 토스 소액 실거래, 마지막 GCP 이전 순서다. 토스는 주문·계좌·체결·청산 경로를 유지한다. 실거래 기능 존재와 실제 주문 권한 검증·운영 승인은 별개다.
+
+## 구조와 실제 연결 경로
+
+- `sessionquant/cli.py`, `__main__.py`: CLI. `python -m sessionquant --help`로 실제 옵션을 확인한다.
+- `session_config.py`, `session_runtime.py`, `session_engine.py`: PAPER 설정, 독립 비동기 수집 작업, 전략·위험 평가 및 재시작 복구.
+- `market/`, `market_reference/`: 봉·거래 적격성·RVOL·ETF 원본/지표·위험 필터. ETF를 금리 bp 또는 원유 현물로 환산하지 않는다.
+- `watchlist/`: 시총 최대 100 → 집중 최대 20, 시점별 선정 이력·공정 조회·호출 예산.
+- `collectors/`: 토스 REST/WS, Alpaca 보조 뉴스, SEC/공식 RSS 등.
+- `news/`, `macro/`: 기업/거시 분석, 예산 원장, 수집·검증·경제 일정. 06 신규 파일은 아래 참조.
+- `portfolio/`, `brokers/` 등 주문 관련 모듈: Paper 체결·비중·위험·청산 및 실거래 안전 경로. 정확한 폴더는 현재 트리를 기준으로 탐색한다.
+- `research/`: 실제 수신/처리 시점의 불변 기록, 데이터 동결·재생·정책 비교·백테스트. 미래 정보 유입 금지.
+- `database/`: SQLite 호환과 MySQL 8 JSON 원장/DECIMAL 투영/namespace/트랜잭션/잠금.
+- `dashboard/session_app.py`: Streamlit 기존 5개 탭과 실제 계좌·거래 제어. 자동 기동과 매매 시작을 구분한다.
+- `config/`, `examples/`, `docs/`, `tests/`: 실행 예시·운영 문서·격리 테스트. `pennyquant/`는 과거 호환 경로다.
+
+## 단계별 현황
+
+| 단계 | 상태 및 근거 |
+|---|---|
+| 00 기준선·문서·CI | 기존 구현 유지. 실제 CI 설정 존재 여부는 현 트리에서 재확인 필요 |
+| 01 시총100/집중20 | 구현 및 토스 보완 완료. `docs/STAGE01_WATCHLIST.md` |
+| 02 시장데이터·적격성·RVOL | 기존 구현/개정 보완 유지. `docs/STAGE02_MARKET_DATA.md` |
+| 03 Paper 시장가 체결 현실화 | 기존 구현 유지. `docs/STAGE03_PAPER_FILLS.md` |
+| 04 전략·위험·청산 | 기존 개정 보완 유지. `docs/STAGE04_STRATEGY_RISK_EXIT.md` |
+| 05 실데이터 기록·백테스트 | `9f9b1be` 완료 기준. `docs/STAGE05_RECORDING_BACKTEST.md` |
+| 06 뉴스 신선도·BLS403·GDELT429·경제 일정 | **개발 중 / 테스트 실패 있음 / 운영 미승인** |
+| 07 LLM 분류·비용·크레딧 | 미승인. 기존 LLM 기능 존재가 07 완료를 뜻하지 않음 |
+| 08 종목순위·뉴스·포트폴리오 / 08A UI·제어 | 신규 기획 구현 미승인 |
+| 09 공통주문·실거래 연결 / 10 로컬 검증·운영승인 | 신규 기획 구현 미승인. 과거 Phase5 기능과 단계 번호를 혼동하지 말 것 |
+
+전체 방향은 `docs/SESSIONQUANT_CURRENT.md`, `SESSIONQUANT.md`, `PHASES.md`, `REVISION_00_04_AUDIT.md`도 참조한다. 이전 기획서 본문·단계 06~10 상세 첨부는 저장소 문서만으로 완전히 대체되지 않는다. 사용자에게 원본 첨부 재제공을 요청할 수 있다.
+
+## 토스 시총 결정 — 완료 커밋 b3010e6
+
+공식 OpenAPI 1.2.28의 `GET /api/v1/sectors`, `GET /api/v1/sectors/{sectorId}/stocks?marketCountry=US`를 사용한다. 대분류 응답은 하위 섹터 종목을 포함한다. 미국 시총도 KRW 환산·일별 갱신이다. 같은 통화로 순위를 계산하며 USD·환율·발행사 총액·정확한 평가 시각을 추측하지 않는다. GOOG/GOOGL은 별도 티커다. 100종목이 100개 발행사라는 뜻은 아니다.
+
+편입 원장 전체 커버리지, 양의 Decimal, 중복·충돌·통화·동일 뉴욕 날짜·15분 이내 수집을 검사한다. 유효기간 24시간. `provider_as_of_at=null`, `as_of_at`은 수집 시작이라는 의미를 명시한다. 부분 자료는 PARTIAL로 신규 진입을 차단한다. 이전 정상 목록을 부실한 새 목록으로 덮어쓰지 않는다.
+
+`market_cap_provider: auto`는 기존 파일이 있으면 파일, 없고 source=toss면 토스다. 명시적 `toss`/`file` 선택 가능. 기존 USD issuer_total 파일 계약은 보존했다. 런타임은 위험 호가 전달 뒤 공유 클라이언트·읽기 예산으로 주기당 섹터 요청 하나를 진행하고 중간 상태를 DB에 저장한다. 별도 인증 클라이언트를 만들지 않는다. `watchlist-refresh` 단독 실행은 엔진·계좌 조회기를 종료한 뒤 사용한다. 실제 계정의 커버리지·응답 지연·쿼터는 미검증이다.
+
+검증: 전체 943 passed / 14 skipped / 기존 pandas 경고 8건. 별도 격리 MySQL 14 passed. Ruff·doctor 통과. 이 커밋은 원격 main에 업로드됐다.
+
+## 진행 중인 06 변경
+
+- `news/intake.py`: 기업 24h/거시72h 시간 검사, 출처·티커·본문 오류 구분, 수신/콘텐츠 버전별 감사 기록.
+- `news/schedule.py`: 공급자별 주기·실패·Retry-After·재시작 상태. 여러 인스턴스가 공유 제어 원장을 덮어쓰지 않도록 병합한다.
+- `news/enrichment.py`: 허용 발행사 정책, robots, URL/DNS/공개 IP 검사, IP 직접 연결 + Host/TLS SNI, 리디렉션 재검사, 크기/압축 상한, trafilatura 2.3.1 본문 추출, 명시적 게시시각·제목·canonical·언어·본문 품질 확인. 기본 발행사 목록은 비어 있어 임의 원문 방문·LLM 전송을 하지 않는다. 본문은 기본적으로 메모리만 사용하고 메타데이터/해시를 저장한다.
+- `macro/calendar.py`: 공식 BLS/BEA ICS, UTC/뉴욕/DST, 수정·취소·원본 UID 이력. FOMC/EIA/Treasury 자동 확정 일정은 미구현이며 기존 calendar-import 수동 경로를 유지한다.
+- `macro/context.py`: FRED 일별 자료와 ETF 지표 분리, 미래·시간창 불일치 제외. FRED 게시 시각 미확인은 장중 tick/확정 원인으로 사용하지 않는다.
+- Alpaca: desc 및 명시적 조회 범위, 무료 최근15분 제외 요청, 반복 페이지 토큰 제한, 잘못된 기사 메타데이터 보존 경로. 실제 응답의 created_at 최신성은 별도로 검사한다.
+- RSS: 조건부 요청/304, 공급자 대기·상태, 잘못된 날짜 기록.
+- `macro/service.py`: 기업180/거시900/일정3600/FRED86400초 독립 주기, 우선20 + 배경2 순환, 수집/분석 경계. 24~72h는 배경이며 장중 위험 신호로 재사용하지 않는다.
+- DB 스키마 버전5 추가: `news_ingestions`, `news_enrichments`, `macro_context_snapshots`. 사용자 DB에서 실행하지 않았다. 기존 ID·주문 기록 초기화 없음.
+- `requirements.txt`, `requirements.lock`, `pyproject.toml`: trafilatura>=2.3,<3 추가. 공식 문서 기준 Apache2.0.
+
+## 발견된 문제와 최우선 후속 작업
+
+1. **06은 완료 처리 금지.** 최종 전체 테스트 로그 결과와 아래 문제부터 검토한다. 기존 안정 커밋과 WIP를 구분한다.
+2. 마지막 집중 테스트: **121 passed, 1 failed**. `test_calendar_dst_cancel_and_unknown_timezone`: fixture는 16:00에 처음 알게 된 일정을 13:30 위험 판단에 사용하려 하여 실패한다. `known_at <= now` 검사를 완화하지 말고, 발표 전에 확인한 별도 fixture로 수정하고 늦게 확인한 일정은 과거 blackout에 사용되지 않는 테스트를 추가한다.
+3. `NewsService._analyze`는 intake 이유를 기록하지만 여전히 analyzer를 호출한다. 회사별 max_age 설정이 내부 analyzer와 달라지면 차단되지 않을 수 있다. **이유가 있으면 유료 분석 호출 전에 명시적으로 UNKNOWN 결과를 반환**하도록 보완하고 mock 호출 0건을 검증한다.
+4. `NewsSchedule` 공유 상태 병합·동시성, Retry-After/쿨다운, GDELT 토픽 예산, 원문 cache 재시작/수정 기사, DNS pinning/압축 상한/robots pacing을 추가 리뷰한다. 보안 경계를 완화해 성공률을 올리지 않는다.
+5. trafilatura `no_fallback` 폐기 경고가 있다. 최신 문서의 `fast` 옵션으로 변경 시 추출 fixture 회귀를 확인한다.
+6. 대시보드에 06 공급자 상태·오류·나이 구간·원문 검증 결과가 아직 연결되지 않았다. 기존 메인 5개 탭을 보존하고, 메인 뉴스는 보유·집중 종목의 검증된 최신 기업 뉴스만 표시한다. 전체 거시/과거/오류는 상세 뉴스 영역에 둔다.
+7. `check-news`의 새 주기/경제일정 검사는 아직 보완하지 않았다. 읽기 검사 자체가 유료 LLM 생성·주문을 하지 않아야 한다.
+8. `sql/news_enrichment_diagnostics.sql`과 `docs/STAGE06_NEWS.md`가 아직 없다. 실제 테이블/namespace 기준 SELECT 전용 SQL 및 운영 안내를 작성한다.
+9. 신규 EconomicEvent 상태/시간 검증, 일정 수정·취소 재시작 복구, MacroContextSnapshot의 실제 ETF dict 구조·available_at·window 품질 검사를 추가 검증한다.
+10. 기존 YAML에서 명시적 news_refresh_seconds는 새 기업/거시 옵션의 fallback이고 새 키가 우선이다. 오래된 float 값/최솟값 호환도 검사한다. config 예시 문서 갱신 필요.
+11. Stage05 불변 기록/재생과 기존 전략/Paper 체결이 06 변경으로 달라지지 않는지 MySQL 포함 검증한다. 새 MacroArticle 필드는 기존 content_hash를 무조건 바꾸지 않도록 처리했으며 회귀 테스트가 필요하다.
+12. 06 완료 후 변경 파일·테스트·미검증 항목을 보고하고 **07 승인 대기**. 후속 UI/실거래/GCP를 묶어 구현하지 않는다.
+
+## 테스트 재현
+
+표준 개발 환경에서:
+
+```text
+python -m pip install -r requirements.txt
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m ruff check sessionquant tests
+python -m sessionquant doctor
+```
+
+이 작업 환경 인터프리터는 `/workspace/work/pennyquant/.venv/bin/python`이며 저장소는 `/workspace/work/pennyquant-upload`다. 새 계정에서는 자신의 clone/venv 경로를 사용한다. tests는 더미 키·모의 HTTP·tmp SQLite를 사용한다. 실제 MySQL은 `PQ_TEST_MYSQL=1`을 명시하고 **전용 격리 DB**에서만 검증한다. 사용자 기존 DB에 테스트 데이터를 쓰거나 장부를 지우지 않는다.
+
+과거 05 완료 전체 MySQL 포함 결과는 947 passed였다. 토스 보완 이후는 위 943+14다. 06 초기 집중 검사에서 발견된 5개 실패 중 4개는 출처 차단 계약에 맞는 fixture/기대값과 runtime의 mock 호환을 보완했다. 남은 calendar fixture 오류는 위 설명과 같다. 이 체크포인트의 전체 테스트 결과는 아래 추기한다.
+
+## 민감정보와 운영 원칙
+
+키 값·비밀번호·계좌번호·접속 비밀은 기록하거나 커밋하지 않는다. `.env`는 사용자 로컬에서 준비한다. 변수 이름은 `TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET`, `TOSS_ACCOUNT_SEQ`, `OPENAI_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `SEC_USER_AGENT`, `FRED_API_KEY` 및 MySQL `PQ_MYSQL_HOST`, `PQ_MYSQL_PORT`, `PQ_MYSQL_USER`, `PQ_MYSQL_PASSWORD`, `PQ_MYSQL_DATABASE`를 사용한다. 실제 정확한 별칭·namespace·환경 키는 `sessionquant/database/config.py`, `.env.example`, `local_env.py`를 확인한다. LLM 접근 가능 여부와 충전 잔액은 다르며 잔액 미확인을 충전액으로 꾸미지 않는다.
+
+실제 주문·실거래 활성화·새 유료 서비스 설정·GitHub 저장소 이름 변경은 별도 승인 대상이다. 현재 작업 중 실제 주문과 유료 LLM 호출은 0건이다. 토스 OAuth 재발급이 기존 클라이언트 인증을 무효화하므로 운영 중 별도 조회기를 무분별하게 띄우지 않는다. 뉴스 장애가 손절·청산 시계를 막지 않도록 작업을 분리한다.
+
+## 최종 체크포인트 검증 및 새 계정 시작 방법
+
+2026-11-15 전체 검사: `python -m pytest -q` → **983 passed, 4 failed, 14 skipped, 12 warnings (113.74초)**. Ruff 통과, doctor 통과, diff 공백 검사 통과. 06 체크포인트에서 격리 MySQL 검사를 다시 실행하지 않았으며 skipped 14건은 정상 통과로 계산하지 않는다.
+
+전체 검사에서 추가로 확인한 실패:
+
+- `tests/test_llm_fallback.py::test_exhausted_credit_warns_and_cools_down_across_restart[insufficient_quota]`
+- 동일 테스트의 `[credit_balance_exhausted]`
+
+두 fixture는 `example.com`, 미확인 발행사 기사이므로 새로운 출처 사전 차단에 걸려 mock OpenAI 429 호출까지 도달하지 않는다. 출력은 health UNKNOWN이며 기대값은 NO_CREDIT이다. 실제 충전액 부족 대응 코드가 동작하는지는 **유효하게 검증된 공식 기사 fixture로 검사를 다시 수행**해야 한다. 출처 검사를 제거해 테스트를 통과시키지 않는다.
+
+- `tests/test_market_reference.py::test_schema_upgrade_preserves_existing_order_ids`: 기존 기대 버전4와 새 버전5가 달라 실패한다. 버전5가 맞는지 신규 테이블과 기존 주문 ID 보존을 함께 검증한 뒤 기대값을 갱신한다.
+- `tests/test_stage06_intake.py::test_calendar_dst_cancel_and_unknown_timezone`: 위의 known_at fixture 오류.
+
+체크포인트 브랜치: **`wip/stage06-handoff-20261115`**. main의 안정 기준은 b3010e6을 유지한다. 새 Codex는 이 브랜치를 체크아웃하고 HANDOFF.md 및 기존 지침부터 읽는다.
+
+```text
+git clone https://github.com/taegyoo1104/pennyquant.git
+cd pennyquant
+git switch wip/stage06-handoff-20261115
+```
+
+새 Codex에 전달할 시작 지시 예시:
+
+> HANDOFF.md와 저장소의 기존 지침을 먼저 읽어 주세요. 안정 기준 b3010e6과 현재 06 WIP를 비교하고, 기록된 테스트 실패·분석 사전 차단·대시보드/SQL/문서 미완료부터 해결해 주세요. 기존 전략·장부·주문 안전장치는 보존하며 실제 주문과 유료 LLM 호출을 실행하지 마세요. 06 완료를 검증·보고한 뒤 07단계는 승인 대기하세요. 상세 기획서가 필요하면 재첨부를 요청하세요.

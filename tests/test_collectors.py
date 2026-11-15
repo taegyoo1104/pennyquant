@@ -203,9 +203,9 @@ def test_alpaca_unresolved_tags_do_not_fabricate_a_trading_ticker(symbols):
 
 def test_alpaca_unsupported_extra_tags_do_not_hide_known_negative_news():
     negative = parse_news({"id": 1, "headline": "Company launches a public offering",
-                           "created_at": NOW.isoformat(), "symbols": ["AAPL", "^PRIVATE"]}, NOW)
+                           "created_at": NOW.isoformat(), "source":"Benzinga", "symbols": ["AAPL", "^PRIVATE"]}, NOW)
     positive = parse_news({"id": 2, "headline": "Company receives FDA approval",
-                           "created_at": NOW.isoformat(), "symbols": ["AAPL"]}, NOW, real_time=True)
+                           "created_at": NOW.isoformat(), "source":"Benzinga", "symbols": ["AAPL"]}, NOW, real_time=True)
     assert negative.symbols == ("AAPL",) and negative.verified
     assert classify(negative).sentiment == "negative"
     assert positive_event([positive, negative], "AAPL", NOW, Settings()) is None
@@ -222,7 +222,7 @@ async def test_alpaca_rest_collects_article_with_unsupported_42nd_tag_and_later_
     broad = {"id": 1, "headline": "Broad market update", "created_at": NOW.isoformat(),
              "symbols": valid_tags + ["$PRIVATE", "MSFT"]}
     later = {"id": 2, "headline": "Company launches public offering", "created_at": NOW.isoformat(),
-             "symbols": ["AAPL"]}
+             "symbols": ["AAPL"], "source":"Benzinga"}
     async with httpx.AsyncClient(transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json={"news": [broad, later]}),
     )) as client:

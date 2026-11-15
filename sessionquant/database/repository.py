@@ -15,7 +15,7 @@ KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_even
          "alerts", "pipeline_status", "order_intents", "broker_state",
          "market_regimes", "macro_news", "macro_analysis", "llm_usage", "session_state",
          "universe_history", "reconciliations", "account_snapshots", "schema_migrations",
-         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events")
+         "macro_indicators", "economic_events", "market_reference_observations", "market_reference_metrics", "fred_reference_observations", "research_events", "news_ingestions", "news_enrichments", "macro_context_snapshots")
 
 
 class Repository:
@@ -42,8 +42,8 @@ class Repository:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS {name} (seq INTEGER PRIMARY KEY, record_id TEXT UNIQUE, payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS engine_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS controls (name TEXT PRIMARY KEY, payload TEXT NOT NULL)")
-        if self.db.execute("PRAGMA user_version").fetchone()[0] < 4:
-            self.db.execute("PRAGMA user_version=4")
+        if self.db.execute("PRAGMA user_version").fetchone()[0] < 5:
+            self.db.execute("PRAGMA user_version=5")
         self.db.commit()
         self._in_transaction = False
 

@@ -49,6 +49,10 @@ class MacroArticle:
     language: str = "English"
     discovery_source: str = "rss"
     source_family: str = ""
+    publisher_verified: bool = False
+    llm_use_allowed: bool = False
+    document_version: str = ""
+    provider_seen_at: str | None = None
 
     def __post_init__(self):
         canonical_url(self.url)
@@ -64,9 +68,12 @@ class MacroArticle:
 
     @property
     def content_hash(self):
-        return stable_hash({"title": self.title.strip(), "body": self.body.strip(), "topic": self.topic,
-                            "published_at": utc(self.published_at).isoformat() if self.published_at else None,
-                            "official": self.official, "source_family": self.source_family})
+        payload={"title": self.title.strip(), "body": self.body.strip(), "topic": self.topic,
+            "published_at": utc(self.published_at).isoformat() if self.published_at else None,
+            "official": self.official, "source_family": self.source_family}
+        if self.publisher_verified or self.llm_use_allowed or self.document_version:
+            payload.update(publisher_verified=self.publisher_verified,llm_use_allowed=self.llm_use_allowed,document_version=self.document_version)
+        return stable_hash(payload)
 
     def to_dict(self):
         value = asdict(self)
@@ -86,8 +93,13 @@ class EconomicEvent:
     importance: str = "HIGH"
     verified: bool = False
 
+    logical_id: str = ""
+    revision: int = 0
+    status: str = "CONFIRMED"
+    scheduled_local: str = ""
+
     def blackout(self, now: datetime, minutes: int = 15) -> bool:
-        return (self.verified and utc(self.known_at) <= utc(now) and self.importance == "HIGH"
+        return (self.verified and self.status != "CANCELLED" and utc(self.known_at) <= utc(now) and self.importance == "HIGH"
                 and abs((utc(now) - utc(self.scheduled_at)).total_seconds()) <= minutes * 60)
 
 

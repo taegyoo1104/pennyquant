@@ -10,7 +10,7 @@ from ..market_reference.contracts import identity
 
 CONTROL = 'research_recording_v1'
 KINDS = {'news_events', 'news_analysis', 'macro_news', 'macro_analysis', 'economic_events',
-         'llm_usage', 'universe_history', 'market_reference_observations', 'fred_reference_observations'}
+         'llm_usage', 'universe_history', 'market_reference_observations', 'fred_reference_observations','news_ingestions','news_enrichments','macro_context_snapshots'}
 CONTROLS = {'market_reference_view_v1', 'watchlist_snapshots_v1'}
 
 

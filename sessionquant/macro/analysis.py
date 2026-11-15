@@ -245,8 +245,9 @@ class BudgetedAnalyzer:
             "received_at": article.received_at.isoformat(), "analyzed_at": now.isoformat(),
             "evidence": "", "uncertainty": "자료 부족", "reason": "분석 미완료", "model": "",
             "prompt_version": self.settings.prompt_version, "error": "", "force_liquidation": False}
-        if utc(article.received_at) > now or (article.published_at and (now - utc(article.published_at)).total_seconds() > self.max_age_hours * 3600):
-            return {**baseline, "error": "stale_or_future_article"}
+        from ..news.intake import macro_reason
+        reason=macro_reason(article,now,getattr(self,'macro_max_age_hours',72))
+        if reason:return {**baseline,'error':reason}
         if not self.api_key:
             return {**baseline, "error": "llm_key_missing", "reason": "OPENAI_API_KEY 미설정; 가격·시장 분석은 계속합니다"}
         if any(not 33 <= ord(char) <= 126 for char in self.api_key):

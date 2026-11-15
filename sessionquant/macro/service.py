@@ -20,16 +20,29 @@ class NewsPipeline:
     def __init__(self, repository, *, companies=None, settings: LLMSettings | None = None,
                  include_alpaca: bool = True, analyzer=None, company_service=None,
                  official_client=None, gdelt_client=None, fred_client=None, treasury_client=None,
-                 macro_refresh_seconds: int = 600, clock=None):
+                 macro_refresh_seconds: int = 900, company_refresh_seconds=180, calendar_refresh_seconds=3600,
+                 company_max_age_hours=24,macro_max_age_hours=72,calendar_client=None,calendar_enabled=False,
+                 enrichment_policies=None,weekend_slowdown=False,enrichment_min_chars=300,enrichment_min_sentences=3,clock=None):
         if type(macro_refresh_seconds) is not int or not 300 <= macro_refresh_seconds <= 86400:
             raise ValueError("거시 뉴스 수집 주기는 300~86400초여야 합니다")
         self.repo = repository
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.analyzer = analyzer or BudgetedAnalyzer(repository, settings, clock=self.clock)
+        from ..news.schedule import NewsSchedule
+        from ..news.enrichment import ArticleEnricher
+        from .calendar import EconomicCalendarClient
+        self.schedule=NewsSchedule(repository,clock=self.clock)
+        self.enricher=ArticleEnricher(repository,policies=enrichment_policies,clock=self.clock,min_chars=enrichment_min_chars,min_sentences=enrichment_min_sentences)
+        self.calendar=calendar_client or (EconomicCalendarClient(repository,clock=self.clock) if calendar_enabled else None)
+        self.company_refresh_seconds=company_refresh_seconds;self.calendar_refresh_seconds=calendar_refresh_seconds
+        self.company_max_age_hours=company_max_age_hours;self.macro_max_age_hours=macro_max_age_hours
+        self.weekend_slowdown=weekend_slowdown
+        self.analyzer.macro_max_age_hours=macro_max_age_hours
+        if hasattr(self.analyzer,'max_age_hours'):self.analyzer.max_age_hours=company_max_age_hours
         self.company = company_service or NewsService(companies or {}, analyzer=self.analyzer,
-            include_alpaca=include_alpaca, clock=self.clock)
-        self.official = official_client or OfficialNewsClient()
-        self.gdelt = gdelt_client or GDELTClient()
+            include_alpaca=include_alpaca, clock=self.clock,repository=repository)
+        self.official = official_client or OfficialNewsClient(repository=repository)
+        self.gdelt = gdelt_client or GDELTClient(repository=repository)
         self.fred = fred_client or FREDClient()
         self.treasury = treasury_client or TreasuryClient()
         self.macro_refresh_seconds = macro_refresh_seconds
@@ -50,8 +63,12 @@ class NewsPipeline:
             try:
                 event = EconomicEvent(id=row["id"], name=row["name"], scheduled_at=utc(row["scheduled_at"]),
                     known_at=utc(row["known_at"]), source_url=row["source_url"],
-                    importance=row.get("importance", "HIGH"), verified=row.get("verified", False))
-                self._economic[event.id] = event
+                    importance=row.get("importance", "HIGH"), verified=row.get("verified", False),
+                    logical_id=row.get('logical_id',''),revision=row.get('revision',0),status=row.get('status','CONFIRMED'),
+                    scheduled_local=row.get('scheduled_local',''))
+                key=event.logical_id or event.id
+                old=self._economic.get(key)
+                if old is None or (event.revision,event.known_at)>(old.revision,old.known_at):self._economic[key]=event
             except (KeyError, TypeError, ValueError):
                 continue
 
@@ -61,7 +78,9 @@ class NewsPipeline:
             raise ValueError("경제 일정은 확인한 공식 발표 URL과 verified=true가 필요합니다")
         from dataclasses import asdict
         self.repo.record("economic_events", asdict(event))
-        self._economic[event.id] = event
+        key=event.logical_id or event.id
+        old=self._economic.get(key)
+        if old is None or (event.revision,event.known_at)>(old.revision,old.known_at):self._economic[key]=event
 
     def _store_macro(self, article: MacroArticle, analysis: dict):
         # 같은 제목·공개일·사건 유형만 보수적으로 묶는다. 기사 수는 확인 횟수가 아니다.
@@ -73,63 +92,126 @@ class NewsPipeline:
             event_id = self.repo.get_control(index_name) or "event:" + event_key[:32]
             self.repo.set_control(index_name, event_id)
             analysis = {**analysis, "event_id": event_id}
-            self.repo.record("macro_news", {**article.to_dict(), "event_id": event_id, "category": "macro"})
+            raw=article.to_dict()
+            if article.discovery_source=='gdelt':raw['body']=''
+            self.repo.record("macro_news", {**raw, "event_id": event_id, "category": "macro"})
             self.repo.record("macro_analysis", analysis)
         self._analyses[analysis["id"]] = analysis
 
-    async def refresh(self, symbols, *, held_symbols=(), now=None) -> dict:
-        now = utc(now or self.clock())
-        issues = []
-        selected = list(dict.fromkeys([*held_symbols, *symbols]))[:20]
-        try:
-            results = await self.company.refresh(selected, now)
-            for event in self.company.events:
-                self.repo.record("news_events", event)
-            for result in results:
-                row = result.to_dict()
-                row.update(id=row["analysis_id"], category="company")
-                self.repo.record("news_analysis", row)
-                self._analyses[row["id"]] = row
-            issues.extend(self.company.status)
-        except (ValueError, RuntimeError, TypeError, OSError, httpx.HTTPError):
-            issues.append({"provider": "company", "code": "company_refresh_failed"})
-        if self._last_macro is None or (now - self._last_macro).total_seconds() >= self.macro_refresh_seconds:
-            self._last_macro = now
-            articles = []
-            for provider, client in (("official", self.official), ("treasury", self.treasury), ("gdelt", self.gdelt)):
-                try:
-                    values = await client.fetch(now=now) if provider == "gdelt" else await client.fetch()
-                    articles.extend(values)
-                    issues.extend(getattr(client, "status", []))
-                except (ValueError, RuntimeError, TypeError, OSError, httpx.HTTPError):
-                    issues.append({"provider": provider, "code": "macro_refresh_failed"})
-            # 공식 자료 우선. 수집량 증가가 분석 호출량 폭증으로 이어지지 않도록 한도를 둔다.
-            articles.sort(key=lambda article: (article.official, article.published_at or article.received_at), reverse=True)
-            for article in articles[:40]:
-                analysis = await self.analyzer.analyze_macro(article, now=max(now, utc(self.clock())))
-                self._store_macro(article, analysis)
-        if self._last_fred_day != now.date().isoformat():
-            self._last_fred_day = now.date().isoformat()
+    async def refresh(self, symbols, *, held_symbols=(),allowlist=(), now=None) -> dict:
+        from ..news.intake import macro_reason,archive,statistics
+        from datetime import timedelta
+        now = utc(now or self.clock());issues=[]
+        company_interval=self.company_refresh_seconds;macro_interval=self.macro_refresh_seconds
+        calendar_interval=self.calendar_refresh_seconds
+        if self.weekend_slowdown:
+            from ..market.bars import session_bounds
+            if session_bounds(now) is None:
+                company_interval=max(1800,company_interval);macro_interval=max(1800,macro_interval)
+                calendar_interval=max(21600,calendar_interval)
+        if self.schedule.due('company_cycle',company_interval,now):
+            self.schedule.begin('company_cycle',now)
+            priority=list(dict.fromkeys([*held_symbols,*symbols]))[:20]
+            pool=[s for s in allowlist if s not in priority]
+            cursor=self.repo.get_control('news_background_cursor_v1',0)
+            background=[pool[(cursor+i)%len(pool)] for i in range(min(2,len(pool)))]
+            selected=priority+background
             try:
-                # 이 파이프라인은 운영 수집 전용이다. 기준일은 FRED의 오늘을 사용한다.
-                # 과거 기준일 조회는 FREDClient.fetch(now=...)로 별도로 요청한다.
-                for row in await self.fred.fetch():
-                    self.repo.record("macro_indicators", row)
+                results = await self.company.refresh(selected, now)
+                for event in self.company.events:self.repo.record('news_events',event)
+                for result in results:
+                    row=result.to_dict();row.update(id=row['analysis_id'],category='company')
+                    self.repo.record('news_analysis',row);self._analyses[row['id']]=row
+                issues.extend(self.company.status)
+                self.schedule.success('company_cycle',len(results),now)
+                self.repo.set_control('news_background_cursor_v1',cursor+len(background))
+            except (ValueError, RuntimeError, TypeError, OSError, httpx.HTTPError) as exc:
+                self.schedule.failure('company_cycle',exc,now=now)
+                issues.append({'provider':'company','code':'company_refresh_failed'})
+        articles=[]
+        for provider,client in (('official',self.official),('treasury',self.treasury),('gdelt',self.gdelt)):
+            key='macro:'+provider
+            if not self.schedule.due(key,macro_interval,now):continue
+            self.schedule.begin(key,now)
+            try:
+                values=await client.fetch(now=now) if provider=='gdelt' else await client.fetch()
+                articles.extend(values);issues.extend(getattr(client,'status',[]))
+                self.schedule.success(key,len(values),now)
+            except (ValueError,RuntimeError,TypeError,OSError,httpx.HTTPError) as exc:
+                self.schedule.failure(key,exc,now=now)
+                issues.append({'provider':provider,'code':'macro_refresh_failed'})
+        # 기업 요청과 독립된 시장 보조 뉴스. 무료 권한의 최근 15분은 요청하지 않는다.
+        alpaca=getattr(self.company,'alpaca_client',None)
+        if alpaca and getattr(self.company,'include_alpaca',False) and self.schedule.due('macro:alpaca',macro_interval,now):
+            self.schedule.begin('macro:alpaca',now)
+            try:
+                events=await alpaca.fetch(None,start=now-timedelta(hours=self.macro_max_age_hours),end=now-timedelta(minutes=15),max_pages=1,skip_invalid=True)
+                for event in events:
+                    articles.append(MacroArticle(event.url,event.title,event.body,event.source,event.published_at,event.received_at,
+                        discovery_source='alpaca',source_family=event.source))
+                self.schedule.success('macro:alpaca',len(events),now)
+            except (ValueError,RuntimeError,TypeError,OSError,httpx.HTTPError) as exc:
+                self.schedule.failure('macro:alpaca',exc,now=now)
+                issues.append({'provider':'alpaca_macro','code':'auxiliary_news_unavailable'})
+        candidates=[]
+        for article in articles:
+            if article.discovery_source=='gdelt':
+                # 발견 자체도 먼저 보존한다. 원문 실패로 발견 기록을 잃지 않는다.
+                archive(self.repo,article.to_dict(),provider='gdelt',reason='discovered_only',body_allowed=False)
+                self.repo.record('macro_news',{**article.to_dict(),'category':'macro','status':'DISCOVERED_ONLY'})
+                result,enriched=await self.enricher.enrich(article)
+                if enriched is None:
+                    issues.append({'provider':'gdelt_enrichment','code':result['status']});continue
+                article=enriched
+            reason=macro_reason(article,max(now,utc(self.clock())),self.macro_max_age_hours)
+            receipt=archive(self.repo,article.to_dict(),provider=article.discovery_source,reason=reason,body_allowed=article.discovery_source!='gdelt')
+            if reason or receipt['duplicate']:
+                analysis={'id':'macro-analysis:excluded:'+stable_hash([article.id,article.content_hash,reason]),
+                    'article_id':article.id,'published_at':article.published_at.isoformat() if article.published_at else None,
+                    'received_at':article.received_at.isoformat(),'analyzed_at':utc(self.clock()).isoformat(),
+                    'category':'macro','error':reason or 'duplicate_article','status':'UNKNOWN','force_liquidation':False}
+                self._store_macro(article,analysis);continue
+            candidates.append(article)
+        # 시간창 검사가 공식성보다 앞선다. 최근 2시간을 우선하며 과거 24~72시간은 배경이다.
+        candidates.sort(key=lambda a:((now-a.published_at).total_seconds()<=7200,a.published_at,a.official),reverse=True)
+        for article in candidates[:40]:
+            analysis=await self.analyzer.analyze_macro(article,now=max(now,utc(self.clock())))
+            if now-article.published_at>timedelta(hours=24):analysis={**analysis,'context_only':True}
+            self._store_macro(article,analysis)
+        if self.calendar and self.schedule.due('calendar_cycle',calendar_interval,now):
+            self.schedule.begin('calendar_cycle',now)
+            try:
+                values=await self.calendar.fetch()
+                for event in values:self.add_economic_event(event)
+                issues.extend(self.calendar.status);self.schedule.success('calendar_cycle',len(values),now)
+            except (ValueError,RuntimeError,TypeError,OSError,httpx.HTTPError) as exc:
+                self.schedule.failure('calendar_cycle',exc,now=now)
+                issues.append({'provider':'calendar','code':'calendar_unavailable'})
+        if self.schedule.due('fred_daily',86400,now):
+            self.schedule.begin('fred_daily',now)
+            try:
+                values=await self.fred.fetch()
+                for row in values:
+                    self.repo.record('macro_indicators',row)
                     from ..market_reference.contracts import identity
-                    receipt = utc(self.clock()).isoformat()
+                    receipt=utc(self.clock()).isoformat()
                     self.repo.record('fred_reference_observations',{**row,'id':'fred-received:'+identity({'row':row,'ingested_at':receipt}),
                         'ingested_at':receipt,'purpose':'OFFICIAL_DAILY_BASELINE','source':'FRED','latency_class':'DAILY',
                         'publication_time_status':'UNKNOWN' if row.get('published_at') is None else 'PROVIDED'})
-            except (ValueError, RuntimeError, TypeError, OSError, httpx.HTTPError):
-                issues.append({"provider": "fred", "code": "daily_context_unavailable"})
-        self.status = {"status": "AVAILABLE" if self._analyses else "UNKNOWN",
-            "updated_at": utc(self.clock()).isoformat(), "issues": issues,
-            "budget": self.analyzer.ledger.snapshot(now), "force_liquidation": False,
-            "llm_health":self.repo.get_control("llm_provider_health",{})}
-        self.repo.set_control("session_news_status", self.status)
-        # 원본·분석 DB 기록을 지우지 않고 현재 위험 조회용 메모리만 제한한다.
-        self._analyses = {key: row for key, row in self._analyses.items()
-                          if self._recent(row, utc(self.clock()))}
+                self.schedule.success('fred_daily',len(values),now)
+            except (ValueError,RuntimeError,TypeError,OSError,httpx.HTTPError) as exc:
+                self.schedule.failure('fred_daily',exc,now=now)
+                issues.append({'provider':'fred','code':'daily_context_unavailable'})
+        self.status={'status':'AVAILABLE' if any(not r.get('error') and self._recent(r,now) for r in self._analyses.values()) else 'UNKNOWN',
+            'updated_at':utc(self.clock()).isoformat(),'issues':issues,'budget':self.analyzer.ledger.snapshot(now),
+            'force_liquidation':False,'llm_health':self.repo.get_control('llm_provider_health',{}),
+            'schedule':self.schedule.state,'statistics':statistics(self.repo.recent('news_ingestions',limit=2000),now),
+            'intervals':{'company':company_interval,'macro':macro_interval,'calendar':calendar_interval,'fred':86400}}
+        self.repo.set_control('session_news_status',self.status)
+        from .context import build_context
+        snapshot=build_context(self.repo,now,analyses=self._analyses.values(),events=self._economic.values())
+        self.repo.record('macro_context_snapshots',snapshot)
+        self._analyses={key:row for key,row in self._analyses.items() if self._recent(row,utc(self.clock()))}
         return self.status
 
     @staticmethod
@@ -137,7 +219,7 @@ class NewsPipeline:
         try:
             published = row.get("published_at") or row.get("event", {}).get("published_at")
             completed = utc(row["analyzed_at"])
-            return (published is not None and utc(published) <= completed <= now
+            return (not row.get("context_only") and published is not None and utc(published) <= completed <= now
                     and (now - utc(published)).total_seconds() <= 24 * 3600)
         except (ValueError, TypeError, KeyError, AttributeError):
             return False
@@ -188,5 +270,6 @@ class NewsPipeline:
                 "force_liquidation": False}
 
     async def aclose(self):
-        for service in (self.company, self.official, self.treasury, self.gdelt, self.fred):
+        for service in (self.company, self.official, self.treasury, self.gdelt, self.fred, self.calendar, self.enricher):
+            if service is None:continue
             await service.aclose()

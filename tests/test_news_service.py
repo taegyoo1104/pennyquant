@@ -125,7 +125,7 @@ async def test_unverified_rss_feed_never_inherits_candidate_ticker():
         await service.aclose()
     assert rss.calls[0]["symbols"] == () and rss.calls[0]["verified"] is False
     assert results[0].event.symbols == () and not results[0].entry_eligible
-    assert results[0].error == "unverified_source_or_ticker"
+    assert results[0].error == "ticker_not_in_article_symbols"
 
 
 async def test_verified_company_rss_can_supply_primary_evidence_but_alpaca_is_auxiliary():
