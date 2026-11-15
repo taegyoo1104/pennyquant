@@ -68,9 +68,17 @@ class StartupWarmup:
                 self.jobs.extend(current)
                 self.report['required_tasks'] += len(current)
 
-    def _quality(self, job, now, known):
+    def _visible(self, job, now):
         _, bars = self.store.get(job['symbol'],job['day'])
-        visible = [b for b in bars if b.received_at <= now and b.timestamp <= job['end']]
+        return [b for b in bars if b.received_at <= now and job['opened'] < b.timestamp <= job['end']]
+
+    def _missing(self, job, now):
+        expected = {job['opened']+timedelta(minutes=i)
+                    for i in range(1,int((job['end']-job['opened']).total_seconds()//60)+1)}
+        return expected-{b.timestamp for b in self._visible(job,now)}
+
+    def _quality(self, job, now, known):
+        visible = self._visible(job,now)
         quality = session_quality(visible,job['opened'],job['end'])
         if job['current']:
             # DB completeness alone does not prove the running engine received the bars.
@@ -91,7 +99,7 @@ class StartupWarmup:
                 'current_session':job['current'],'reason':reason or 'history_minutes_missing_or_conflicting',
                 **quality})
 
-    async def advance(self, manager, fetch, accept, known, *, priority=(), max_pages=4):
+    async def advance(self, manager, fetch, accept, known, *, priority=(), max_pages=4, hydrate=None):
         now = utc(self.clock())
         session = operating_session(now)[0]
         if self.session != session:
@@ -119,10 +127,23 @@ class StartupWarmup:
             job = self.jobs[0]
             self.report.update(current_symbol=job['symbol'],current_session=job['day'])
             try:
+                if job['current'] and not job.get('hydrated'):
+                    # Loading DB observations is not a new provider receipt. The source
+                    # records their availability in this run separately from received_at.
+                    (hydrate or accept)(job['symbol'],self._visible(job,utc(self.clock())))
+                    job['hydrated'] = True
                 quality = self._quality(job,utc(self.clock()),known)
                 if quality['complete']:
                     self._finish_job(job,quality)
                     continue
+                missing = self._missing(job,utc(self.clock()))
+                pending = [stamp for stamp in missing if stamp <= job['cursor']]
+                if not pending:
+                    # Already queried holes and conflicting versions cannot be repaired
+                    # by repeatedly downloading the same pages. Keep the quality failure.
+                    self._finish_job(job,quality)
+                    continue
+                job['cursor'] = max(pending)
                 response = await fetch(job['symbol'],job['cursor'])
                 if response is None:
                     self.report.update(status='RETRY_WAIT',message='조회 제한·오류 또는 이번 회차 예산으로 다음 조회를 기다립니다.')

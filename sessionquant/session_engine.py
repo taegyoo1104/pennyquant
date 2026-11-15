@@ -28,7 +28,13 @@ def event_time(raw: dict) -> datetime:
     """외부 이벤트가 실제 사용 가능해진 시각을 읽는다."""
     data = raw["data"]
     field = {"eligibility": "checked_at", "rvol": "observed_at", "risk_context": "available_at"}.get(raw["kind"], "received_at")
-    return utc(data[field])
+    received = utc(data[field])
+    if 'restored_at' in raw:
+        restored = utc(raw['restored_at'])
+        if raw['kind'] != 'bar' or restored < received:
+            raise ValueError('저장 분봉 복원 시각은 원본 수신 이후여야 합니다.')
+        return restored
+    return received
 
 
 class SessionEngine:

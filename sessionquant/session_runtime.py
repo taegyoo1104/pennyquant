@@ -102,6 +102,8 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
 
 def batch_events(batch) -> list[dict]:
     result = [{"kind": "bar", "data": jsonable(x)} for x in batch.bars]
+    result += [{"kind":"bar","data":jsonable(x),"restored_at":jsonable(batch.observed_at)}
+               for x in getattr(batch,'cached_bars',())]
     result += [{"kind": "quote", "data": jsonable(x)} for x in batch.quotes]
     result += [{"kind": "eligibility", "data": jsonable(x)} for x in batch.eligibility]
     return sorted(result, key=event_time)

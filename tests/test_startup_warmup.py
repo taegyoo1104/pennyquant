@@ -106,8 +106,8 @@ async def test_restart_reuses_completed_history_but_hydrates_current_engine(tmp_
                             begin_session(repo,mode='paper',now=NOW),clock=lambda:clock.now)
         again=Provider(clock)
         await finish(other,manager,again)
-        assert all(cursor.date()==NOW.date() for _,cursor in again.calls)
-        assert len(again.seen('AAPL'))==240 and len(again.calls)==6
+        assert not again.calls
+        assert len(again.seen('AAPL'))==240
         assert repo.get_control(CONTROL)['history_ready_count']==1
     finally:repo.close()
 
@@ -124,6 +124,81 @@ async def test_retry_keeps_gate_closed_and_progress_is_bounded(tmp_path):
         with pytest.raises(ValueError):
             request_command(repo,'start',run_id=control['run_id'],environment='PAPER_LOCAL',now=NOW)
     finally:repo.close()
+
+
+@pytest.mark.parametrize('offsets',[(11,),(11,300)])
+async def test_sparse_holes_query_from_missing_minutes_not_session_close(tmp_path,offsets):
+    sunday=datetime(2026,11,15,12,tzinfo=timezone.utc)
+    repo,store,selection,_,clock,worker,manager=setup(tmp_path,now=sunday)
+    try:
+        prepare(store,'AAPL',sunday)
+        day,opened,_=history_plan(sunday)[-1]
+        row,bars=store.get('AAPL',day)
+        missing={opened+timedelta(minutes=i) for i in offsets}
+        repo.record('market_history_sessions',{**row,'bars':jsonable([b for b in bars if b.timestamp not in missing])})
+        store.cache.pop(record_id('AAPL',day))
+        provider=Provider(clock)
+        await finish(worker,manager,provider)
+        assert provider.calls==[('AAPL',stamp) for stamp in sorted(missing,reverse=True)]
+        assert selection.allowed(['AAPL'],sunday)==['AAPL']
+        assert worker.report['status']=='READY'
+    finally:repo.close()
+
+
+async def test_current_gap_uses_cache_and_one_missing_tail_request(tmp_path):
+    repo,store,_,_,clock,worker,manager=setup(tmp_path)
+    try:
+        prepare(store,'AAPL',NOW)
+        opened,_=session_bounds(NOW)
+        old=NOW-timedelta(minutes=120)
+        store.ingest(minute_rows('AAPL',opened,count=120,known=old))
+        for symbol in ('SPY','QQQ'):
+            store.ingest(minute_rows(symbol,opened,count=240,known=NOW))
+        provider=Provider(clock)
+        await finish(worker,manager,provider)
+        assert provider.calls==[('AAPL',NOW.replace(second=0))]
+        assert len(provider.seen('AAPL'))==240
+        assert store.get('AAPL','2026-11-16')[1][0].received_at==old
+    finally:repo.close()
+
+
+async def test_cached_conflicts_and_future_receipts_cannot_become_ready(tmp_path):
+    sunday=datetime(2026,11,15,12,tzinfo=timezone.utc)
+    repo,store,selection,_,clock,worker,manager=setup(tmp_path,now=sunday)
+    try:
+        prepare(store,'AAPL',sunday)
+        day,_,_=history_plan(sunday)[-1]
+        first=store.get('AAPL',day)[1][0]
+        store.save('AAPL',day,[replace(first,volume=first.volume+1)])
+        provider=Provider(clock)
+        await finish(worker,manager,provider)
+        assert not provider.calls and not selection.allowed(['AAPL'],sunday)
+        assert worker.report['status']=='PARTIAL'
+        # A future receipt must still be fetched; stored quality flags are not proof.
+        day,_,_=history_plan(sunday)[-2]
+        row,bars=store.get('AAPL',day)
+        repo.record('market_history_sessions',{**row,'bars':jsonable([
+            replace(b,received_at=sunday+timedelta(hours=1)) if i==10 else b for i,b in enumerate(bars)])})
+        other=StartupWarmup(repo,HistoryStore(repo),DailyHistorySelection(repo,startup_pending=True),
+                            begin_session(repo,mode='paper',now=sunday),clock=lambda:sunday)
+        again=Provider(clock)
+        await finish(other,manager,again)
+        assert again.calls==[('AAPL',bars[10].timestamp)]
+        assert other.report['status']=='PARTIAL'
+    finally:repo.close()
+
+
+def test_cached_bar_availability_does_not_rewrite_receipt_or_accept_future(observed):
+    from sessionquant.session_engine import event_time
+    bar=next(row for row in observed.rows if row['kind']=='bar')
+    restored={**bar,'restored_at':SIGNAL_NOW.isoformat()}
+    assert event_time(restored)==SIGNAL_NOW
+    assert restored['data']['received_at']==bar['data']['received_at']
+    for bad in ({**restored,'restored_at':'2000-01-01T00:00:00+00:00'},
+                {**restored,'kind':'quote'}):
+        with pytest.raises(ValueError):event_time(bad)
+    with pytest.raises(ValueError):
+        observed.engine.apply_batch([{**restored,'restored_at':(SIGNAL_NOW+timedelta(seconds=1)).isoformat()}],SIGNAL_NOW)
 
 
 async def test_weekend_and_next_session_use_completed_exchange_days(tmp_path):
@@ -175,6 +250,12 @@ def test_recording_replay_preserves_warmup_gate(observed,tmp_path,monkeypatch):
     clock.now=SIGNAL_NOW+timedelta(seconds=1)
     enter(observed)
     assert observed.repo.all('orders')==[]
+    cached=next(row for row in observed.rows if row['kind']=='bar')
+    observed.engine.apply_batch([{**cached,'restored_at':clock.now.isoformat()}],clock.now)
+    frames=[row for row in observed.repo.all('research_events') if row['kind']=='engine_batch']
+    restored=next(raw for frame in frames for raw in frame['data']['events'] if 'restored_at' in raw)
+    assert restored['data']['received_at']==cached['data']['received_at']
+    assert restored['timing']['received_at']==cached['data']['received_at']
     control['data_ready']=True
     clock.now=SIGNAL_NOW+timedelta(seconds=2)
     observed.engine.apply_batch([r for r in observed.rows if event_time(r)==clock.now],clock.now)
@@ -229,18 +310,22 @@ async def test_source_prioritizes_risk_and_respects_budget_during_warmup(tmp_pat
     finally:repo.close()
 
 
-async def test_source_delivers_caught_up_minutes_to_actual_engine(tmp_path):
+@pytest.mark.parametrize('cached',[False,True])
+async def test_source_delivers_caught_up_minutes_to_actual_engine(tmp_path,cached):
     from watchlist_fixtures import context, NOW as stamp
     from test_watchlist_source import Market
     from sessionquant.market.source import TossSessionSource
     from sessionquant.market.bars import indicators
     from sessionquant.session_engine import SessionEngine
     from sessionquant.session_runtime import batch_events
+    stamp += timedelta(seconds=2)
     repo,universe,_,_,manager=context(tmp_path,size=1)
     try:
         await manager.refresh(stamp)
         store=HistoryStore(repo)
         prepare(store,'T499',stamp)
+        if cached:
+            store.ingest(minute_rows('T499',session_bounds(stamp)[0],count=90,known=stamp-timedelta(seconds=1)))
         manager.history_selection=DailyHistorySelection(repo,startup_pending=True)
         control=begin_session(repo,mode='paper',now=stamp)
         worker=StartupWarmup(repo,store,manager.history_selection,control,clock=lambda:stamp)
@@ -250,10 +335,18 @@ async def test_source_delivers_caught_up_minutes_to_actual_engine(tmp_path):
         provider=Provider(SimpleNamespace(now=stamp))
         class Client(Market):
             async def candles(self,symbol,**kwargs):
+                if cached and symbol=='T499' and kwargs.get('before'):
+                    pytest.fail('complete cached current session must not be downloaded again')
                 return await provider.fetch(symbol,kwargs.get('before') or stamp.replace(second=0))
+        def receive(batch):
+            from sessionquant.session_engine import event_time
+            # Match the real runtime: old receipts alone would be silently dropped.
+            events=[row for row in batch_events(batch)
+                    if engine.last_time is None or event_time(row)>=engine.last_time]
+            engine.apply_batch(events,stamp)
         source=TossSessionSource(Client(lambda:stamp),watchlist=manager,clock=lambda:stamp,
             history_store=store,warmup=worker,
-            on_priority_batch=lambda batch:engine.apply_batch(batch_events(batch),stamp))
+            on_priority_batch=receive)
         for _ in range(20):
             batch=await source.poll([])
             engine.apply_batch(batch_events(batch),stamp)
@@ -263,6 +356,8 @@ async def test_source_delivers_caught_up_minutes_to_actual_engine(tmp_path):
         data=indicators(engine.market.bars['T499'],stamp)
         assert len(data.five)==18 and len(data.fifteen)==6
         assert data.vwap is not None and data.atr14 is not None and data.ema9 is not None
+        if cached:
+            assert min(bar.received_at for bar in engine.market.bars['T499'])==stamp-timedelta(seconds=1)
         assert repo.all('orders')==[]
     finally:repo.close()
 
