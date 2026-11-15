@@ -66,6 +66,9 @@ class NewsService:
             if source.symbol != symbol:
                 raise ValueError("company source symbol does not match its mapping key")
             self.companies[symbol] = source
+        if analyzer is None and repository is not None:
+            from ..macro.analysis import BudgetedAnalyzer
+            analyzer=BudgetedAnalyzer(repository,clock=clock)
         self.analyzer = analyzer or NewsAnalyzer()
         self.sec_client = sec_client or SecEdgarClient()
         self.document_client = document_client or SecDocumentClient()
@@ -100,9 +103,10 @@ class NewsService:
             from ..models import jsonable
             archive(self.repo,jsonable(event),provider=kind,reason=reason,ticker=symbol)
         if reason:
+            precheck=self.analyzer.record_skip(event,reason,ticker=symbol,source_kind=kind) if hasattr(self.analyzer,'record_skip') else None
             result = NewsAnalysis(symbol, event, source_kind=kind, analyzed_at=analyzed_at,
                 error=reason, reason='뉴스의 출처·종목·시각·본문 확인이 필요합니다.',
-                input_digest=event_digest(event, symbol))
+                input_digest=event_digest(event, symbol),precheck_id=precheck)
         else:
             result = await self.analyzer.analyze(event, symbol, source_kind=kind, primary_verified=primary,
                                                  now=analyzed_at)

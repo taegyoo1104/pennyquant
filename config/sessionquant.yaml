@@ -27,3 +27,8 @@ portfolio:
   min_entry_to_exit_minutes: 30
 # 모델 접근 권한과 비용은 본인 OpenAI 계정에서 별도 확인한다.
 llm: {}
+# 07 메타데이터 감사는 기본 적용. 원문 보관·사건 해설은 별도 opt-in이다.
+llm_debug_audit:
+  enabled: false
+macro_context_llm:
+  enabled: false

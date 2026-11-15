@@ -435,3 +435,89 @@ def test_real_mysql_stage06_diagnostics_sql_is_select_only_and_scoped(mysql_repo
     assert results[1][0][0] == 'fixture'
     assert results[4][0][0] == 'rss:fixture'
     assert len(repo.all('news_ingestions')) == len(other.all('news_ingestions')) == 1
+
+
+async def test_real_mysql_stage07_call_usage_join_sql_and_namespace(mysql_repositories):
+    import json
+    from pathlib import Path
+    import httpx
+    from sessionquant.macro.analysis import BudgetedAnalyzer
+    from test_stage07_audit import company,response,NOW
+    repo,other=mysql_repositories(),mysql_repositories()
+    repo.record('orders',{'id':'pre-stage07-order','qty':'0.123456'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json=response()))) as http:
+        result=await BudgetedAnalyzer(repo,api_key='fixture-key',client=http,clock=lambda:NOW).analyze(company(),'TEST',source_kind='rss',primary_verified=True)
+    repo.record('news_analysis',result.to_dict())
+    repo.record('news_enrichments',{'id':'funnel-fixture','article_id':'unanalysed-fixture',
+        'content_hash':'body-hash-v1','document_version':'document-v1',
+        'publisher_name':'FixturePublisher','body_char_count':500,'eligible_for_llm':True})
+    other.record('news_enrichments',{'id':'other-funnel','article_id':'other-article',
+        'content_hash':'other-document','publisher_name':'OtherPublisher','body_char_count':500,'eligible_for_llm':True})
+    assert result.llm_call_ids and other.all('llm_calls')==other.all('llm_usage')==[]
+    assert repo.all('orders')[0]['id']=='pre-stage07-order'
+    with repo.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=6')
+        assert cursor.fetchone()[0]==6
+        cursor.execute("SELECT c.payload->>'$.article_id',u.payload->>'$.llm_call_id' FROM pq_llm_calls c "
+            "JOIN pq_llm_usage u ON u.namespace=c.namespace AND u.payload->>'$.llm_call_id'=c.payload->>'$.llm_call_id' WHERE c.namespace=%s",(repo.namespace,))
+        assert cursor.fetchone()==(company().id,result.llm_call_ids[0])
+        text=(Path(__file__).resolve().parents[1]/'sql/llm_call_audit.sql').read_text()
+        text='\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('--'))
+        results=[]
+        for statement in text.replace('REPLACE_WITH_PAPER_NAMESPACE',repo.namespace).split(';'):
+            if not statement.strip():continue
+            assert statement.lstrip().startswith(('SELECT','WITH'))
+            cursor.execute(statement);results.append(cursor.fetchall())
+    assert results[0][0][0]=='SUCCEEDED'
+    assert results[1][0][0]==result.llm_call_ids[0]
+    assert results[4]==results[5]==results[6]==()
+    assert results[7]==()
+    assert results[8][0][0]=='FixturePublisher' and results[8][0][1:7]==(1,1,1,0,0,0)
+    assert len(results[8])==1
+
+
+def test_real_mysql_stage07_parallel_budget_caps_and_idempotent_settlement(mysql_repositories):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sessionquant.macro.analysis import BudgetLedger,BudgetBlocked
+    from sessionquant.macro.models import LLMSettings
+    first=mysql_repositories();second=mysql_repositories(first.namespace)
+    now=datetime(2026,11,13,16,tzinfo=timezone.utc)
+    settings=LLMSettings(hourly_primary_call_cap=1)
+    barrier=Barrier(2)
+    def reserve(repo):
+        barrier.wait()
+        try:return asyncio.run(BudgetLedger(repo,settings).reserve('primary',{'messages':[]},now))
+        except BudgetBlocked:return None
+    with ThreadPoolExecutor(max_workers=2) as pool:reservations=list(pool.map(reserve,[first,second]))
+    assert sum(value is not None for value in reservations)==1
+    reservation=next(value for value in reservations if value is not None)
+    barrier=Barrier(2)
+    def settle(repo):
+        barrier.wait()
+        return asyncio.run(BudgetLedger(repo,settings).settle(reservation,'primary',settings.primary_model,
+            input_tokens=100,output_tokens=20,now=now))
+    with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(settle,[first,second]))
+    assert len(first.all('llm_usage'))==1
+    assert first.all('llm_usage')[0]['cost_usd']=='0.000072'
+    assert BudgetLedger(first,settings).snapshot(now)['reserved_usd']=='0'
+
+
+async def test_real_mysql_stage07_encrypted_expiry_does_not_cross_namespace(mysql_repositories,tmp_path):
+    import httpx
+    from sessionquant.macro.analysis import BudgetedAnalyzer
+    from test_stage07_audit import company,response,NOW
+    repo,other=mysql_repositories(),mysql_repositories()
+    options={'enabled':True,'key_file':str(tmp_path/'mysql-audit.key'),'retention_days':1,
+             'publishers':{'issuer.test':'https://issuer.test/terms'}}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(200,json=response()))) as http:
+        analyzer=BudgetedAnalyzer(repo,api_key='fixture-key',client=http,clock=lambda:NOW,audit_settings=options)
+        result=await analyzer.analyze(company(),'TEST',source_kind='rss',primary_verified=True)
+    assert repo.all('llm_audit_bodies')
+    other.record('llm_audit_bodies',repo.all('llm_audit_bodies')[0])
+    assert repo.expire_llm_bodies(NOW+timedelta(days=2),dry_run=True)==1
+    assert repo.expire_llm_bodies(NOW+timedelta(days=2))==1
+    assert repo.all('llm_audit_bodies')==[] and other.all('llm_audit_bodies')
+    assert repo.get_record('llm_calls',result.llm_call_ids[0])['status']=='SUCCEEDED'
+    assert len(repo.all('llm_usage'))==1

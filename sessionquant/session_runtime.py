@@ -143,7 +143,9 @@ async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, m
                                     calendar_enabled=True,enrichment_policies=config.news_enrichment.get('publishers',{}),
                                     weekend_slowdown=config.news_weekend_slowdown,
                                     enrichment_min_chars=config.news_enrichment.get('min_chars',300),
-                                    enrichment_min_sentences=config.news_enrichment.get('min_sentences',3))
+                                    enrichment_min_sentences=config.news_enrichment.get('min_sentences',3),
+                                    audit_settings=config.llm_debug_audit,macro_context_llm=config.macro_context_llm,
+                                    environment=config.environment)
             from .trading_controls import begin_session
             control_state=begin_session(repo,mode="paper")
             from .trading_controls import finish_session

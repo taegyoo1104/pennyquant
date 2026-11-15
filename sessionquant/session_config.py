@@ -49,6 +49,8 @@ class SessionConfig:
     companies: dict = field(default_factory=dict)
     portfolio: dict = field(default_factory=dict)
     llm: dict = field(default_factory=dict)
+    llm_debug_audit: dict = field(default_factory=dict)
+    macro_context_llm: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.environment != "PAPER_LOCAL":
@@ -110,6 +112,12 @@ class SessionConfig:
             value=self.news_enrichment.get(key,default)
             if type(value) is not int or not minimum<=value<=maximum:raise ValueError('본문 검증 임계값을 확인하세요.')
         from .market_reference.settings import reference_settings
+        from .llm.audit import AuditSettings
+        from .macro.context_analysis import ContextSettings
+        if not isinstance(self.llm_debug_audit,dict) or not isinstance(self.macro_context_llm,dict):
+            raise ValueError('LLM 감사·거시 맥락 설정은 객체여야 합니다.')
+        AuditSettings(**self.llm_debug_audit)
+        ContextSettings(**self.macro_context_llm)
         reference_settings(self.market_reference)
         from .market_reference.risk import filter_settings
         filter_settings(self.macro_reference_filter)
@@ -123,6 +131,10 @@ def load_session_config(path: str | Path) -> SessionConfig:
     if not isinstance(payload, dict) or set(payload) - {f.name for f in fields(SessionConfig)}:
         raise ValueError("알 수 없는 SessionQuant 설정 항목이 있습니다.")
     # 구 YAML에서만 명시된 600초 옵션은 기업·거시 수집 주기에 매핑한다.
+    if payload.get('llm_debug_audit',{}).get('enabled'):
+        audit=payload['llm_debug_audit']
+        key_file=Path(audit.get('key_file','../data/llm-audit.key'))
+        audit['key_file']=str(key_file if key_file.is_absolute() else (path.parent/key_file).resolve())
     if 'news_refresh_seconds' in payload:
         for key in ('company_news_refresh_seconds','macro_news_refresh_seconds'):
             payload.setdefault(key,payload['news_refresh_seconds'])

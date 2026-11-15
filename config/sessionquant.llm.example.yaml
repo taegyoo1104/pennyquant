@@ -1,0 +1,34 @@
+# 07단계 PAPER 예시. 실제 유료 평가와 실주문은 별도 실행 승인 사항이다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-paper-local.db
+source: toss
+strategy: pullback
+company_news_refresh_seconds: 180
+macro_news_refresh_seconds: 900
+economic_calendar_refresh_seconds: 3600
+llm:
+  primary_model: gpt-4.1-mini
+  escalation_model: gpt-6.1-terra
+  daily_primary_call_cap: 45
+  daily_escalation_call_cap: 5
+  hourly_primary_call_cap: 10
+  hourly_escalation_call_cap: 2
+  monthly_soft_budget_usd: '2.0'
+  monthly_hard_budget_usd: '3.0'
+  max_output_tokens: 1200
+  format_retry_limit: 0
+  enable_event_cache: true
+  enable_escalation: true
+  pricing_verified: false # 공개 단가와 내 계정의 실제 청구는 구분한다.
+llm_debug_audit:
+  enabled: false
+  retention_days: 7
+  key_file: ../data/llm-audit.key
+  publishers: {} # 원문 보관 권한을 확인한 host: HTTPS terms URL만 명시한다.
+macro_context_llm:
+  enabled: false
+  cooldown_seconds: 3600
+  minimum_zscore: '3'
+news_enrichment:
+  publishers: {}

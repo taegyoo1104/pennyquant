@@ -168,10 +168,12 @@ async def run_system(config: PipelineConfig, repository: Repository, *, engine=N
         market = TossMarketClient()
     scanner = MarketScanner(market, config, clock=clock)
     if news_service is None:
-        from .news.analysis import NewsAnalyzer
+        from .macro.analysis import BudgetedAnalyzer
+        from .macro.models import LLMSettings
         from .news.service import NewsService
         news_service = NewsService(config.companies, include_alpaca=config.include_alpaca,
-                                   analyzer=NewsAnalyzer(max_age_hours=settings.primary_news_max_age_hours))
+                                   analyzer=BudgetedAnalyzer(repository,LLMSettings(max_age_hours=settings.primary_news_max_age_hours),clock=clock),
+                                   repository=repository)
     tail = EventTail(config.input_event_path, repository.get_control("pipeline_feed_cursor")) if config.input_event_path else None
     candidates: dict[str, Candidate] = {}
     analyses: dict[str, dict] = {}
