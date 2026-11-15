@@ -9,13 +9,14 @@
 - **P1 시계/일일 손실:** 과거 거래일로 전환한 뒤 오늘로 복귀하면 손실 중지가 초기화되는 것을 재현했다. `PaperBroker.roll_session`은 과거 거래일을 거절한다. `SessionEngine`은 수신 커서와 별도 `last_decision_at`을 저장·복구해 빈 tick의 과거 처리도 변경 전에 차단한다. 원래의 오래된 수신 자료는 현재 처리 시각으로 안전하게 평가할 수 있다.
 - **P2 LLM 비용:** 05 보고서가 단가 확인+측정 토큰을 공식 청구처럼 합산할 수 있었다. `research/costs.py`에서 프로그램 추정과 명시적 청구 대사를 구분하고 호출 ID별 개정 중복 합산을 막았다. 기존 검증 청구 키는 유지하되 실제 증거가 없으면 null, 추정 합계는 새 키로 제공한다. 원래 사용량을 삭제하거나 의미를 소급 변경하지 않는다.
 - **P2 CI:** 누락된 `.github/workflows/ci.yml`을 추가했다. Python3.12, 해시 잠금 설치/import/CLI/doctor/Ruff/pytest, 선택적 임시 MySQL이다. contents:read·checkout 인증 유지 OFF·공식 action SHA 고정·운영 secrets 미사용·테스트 외부 연결 차단을 적용했다. `requirements-dev.lock` 66개는 기존 운영 잠금 59개 버전을 유지한다.
+- **P2 설정 권한:** `dc8eef5`의 첫 원격 CI가 기존 `.env` 0644 권한 보존 문제를 발견했다(1 failed, 1,148 passed, 21 skipped). POSIX에서 새 값을 쓰기 전 0600을 적용하고 권한 변경 실패 시 미기록하도록 보완했다. 입력 권한을 명시한 회귀와 매 재작성 전후·실패 경로를 추가했다. 로컬 umask 077 의존을 제거하고 umask 022에서 재검증했다. Windows ACL은 별도 확인 대상이다.
 - **문서:** 기존 STRATEGIES/SYSTEM_RUN의 PennyQuant 레거시 표식과 현재 실행 링크를 보완했다. 거래량·호가 bool 검사는 기존 코드에서 정상 거절을 확인해 변경하지 않았다.
 - 시계 가드가 드러낸 기존 위험 테스트의 과거 이동 fixture는 진입 시간까지의 테이프로 분리했다. UNKNOWN 차단·대기 매수 취소·청산 검증은 유지한다.
 
-최종 로컬 검증(새 CI 잠금 가상환경, Python3.12.14):
+최종 로컬 검증(새 CI 잠금 가상환경, Python3.12.14, umask 022):
 
-- `SQ_TEST_OFFLINE=1 PQ_TEST_MYSQL=1 ... python -m pytest -q` → **1,170 passed, 0 failed, 0 skipped, 8 warnings (190.66초)**. 전용 MySQL8.4 21건 포함. 기존 pandas 시간대 경고 8건을 기능 실패와 구분한다.
-- 앞선 보완 집중 80 passed, 외부 연결 차단 집중 78 passed, 새 잠금 시계·위험 집중 39 passed. `requirements-dev.lock`의 해시 설치·editable 설치·pip check·doctor, CI YAML/권한/선택 job/SHA 정적 확인, Ruff·CLI·문서 링크·diff 검사 통과.
+- `SQ_TEST_OFFLINE=1 PQ_TEST_MYSQL=1 ... python -m pytest -q` → **1,172 passed, 0 failed, 0 skipped, 8 warnings (191.12초)**. 전용 MySQL8.4 21건 포함. 기존 pandas 시간대 경고 8건을 기능 실패와 구분한다.
+- 앞선 보완 집중 80 passed, 외부 연결 차단 집중 78 passed, 새 잠금 시계·위험 집중 39 passed, umask 022 권한·시계·비용 집중 19 passed. `requirements-dev.lock`의 해시 설치·editable 설치·pip check·doctor, CI YAML/권한/선택 job/SHA 정적 확인, Ruff·CLI·문서 링크·diff 검사 통과.
 - 원격 CI는 이 후속 커밋의 Actions 체크에서 확인한다. 기본 job의 MySQL skip은 통과 수에 포함하지 않으며 선택 job은 폐기 가능한 서비스만 사용한다.
 
 **실주문·유료 LLM·사용자 DB 접근 0건.** 실제 토스 권한·분할/RVOL 근거·섹터 전체 커버리지·지연/성능·발행사 조건·장기 실제 기록/외표본·실비/모델 품질은 미검증이다. 실제 기록이 없어 08 실데이터 가점 비교는 미실행이며 합성 결과로 수익성을 주장하지 않는다. 다음 08A·09/10·GCP와 유료 평가·실거래 활성화는 별도 승인 대기, KIS 제외 상태다.

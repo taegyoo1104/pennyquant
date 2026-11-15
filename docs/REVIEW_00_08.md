@@ -9,6 +9,7 @@
 | P1 | Paper 장부가 전날로 이동한 뒤 다시 오늘로 이동하면 일일 기준 자산과 손실 중지가 초기화됨. 빈 엔진 tick은 수신 커서만 검사하므로 처리 시각 역전도 허용했음 | `portfolio/broker.py`에서 과거 거래일 전환을 거절. `session_engine.py`가 수신 시각과 별도로 `last_decision_at`을 보존·복구하고 과거 처리 시각을 변경 전에 거절. 손실 중지·저장 상태 보존 및 직전 tick 이전에 수신한 자료를 현재 시각으로 처리하는 호환 검증 |
 | P2 | 05 연구 보고서가 `pricing_verified=true`와 구 `cost_is_estimate=false`를 실제 청구 확인으로 오인. 07의 측정된 토큰 추정도 검증 청구 합계에 들어갈 수 있었음 | `research/costs.py`가 프로그램 추정과 명시적 청구 대사를 구분. `llm_recorded_estimated_usd` 추가, 기존 `llm_recorded_verified_usd`는 실제 청구 대사 증거가 없으면 null. usage 개정은 호출 ID별 마지막 버전만 집계하고 과거 미매핑은 별도 표기 |
 | P2 | 00에서 요청한 CI가 없고 로컬 검사 이력만 존재 | `.github/workflows/ci.yml` 추가. 고정 Python 3.12·해시 잠금·import/CLI/doctor·Ruff·pytest, 선택적 임시 MySQL job. 운영 secrets·실주문 명령을 사용하지 않음. `tests/conftest.py`의 CI 전용 외부 연결 차단 |
+| P2 | 첫 원격 CI에서 기존 `.env`의 0644 권한이 비밀값 저장 후에도 남는 것을 확인. 로컬 umask 077에서는 기존 테스트의 입력도 0600이어서 드러나지 않았음 | `local_env.py`가 POSIX에서 쓰기 전에 0600으로 제한. 권한 변경 실패 시 새 비밀값을 쓰지 않음. 기존 테스트에 0644를 명시하고 0666에서 매 재작성 전후의 제한·권한 실패 시 미기록 회귀 추가. Windows ACL은 별도 운영 확인 |
 | P3 | `docs/STRATEGIES.md`, `SYSTEM_RUN.md`가 과거 PennyQuant 1분봉/뉴스 필수 흐름임을 첫 화면에서 구분하기 어려움 | 원본·링크를 보존하고 레거시 표식 및 현재 SessionQuant 진입 링크 추가 |
 
 시계 검증을 추가하자 기존 `test_active_unknown_blocks_new_signals_and_cancels_pending_buy`가 청산까지 끝낸 테이프에서 과거 진입 시각으로 돌아가고 있음이 드러났다. fixture를 진입 시간까지의 입력으로 분리했다. UNKNOWN 위험이 유효 신규 신호를 막고 대기 매수를 취소하는 검사는 유지하며 시간 검증을 완화하지 않았다.
@@ -19,7 +20,7 @@
 
 | 단계 | 확인한 실제 경로·주요 회귀 | 결과와 남은 확인 |
 |---|---|---|
-| 00 기준선·문서·CI | `SESSIONQUANT_CURRENT`, 레거시 안내, 설치/도움말/doctor, 새 CI | CI 구성·잠금 설치·로컬 동등 검사 추가. 원격 결과는 해당 커밋의 Actions 체크에서 확인 |
+| 00 기준선·문서·CI | `SESSIONQUANT_CURRENT`, 레거시 안내, 설치/도움말/doctor, 새 CI·`local_env.py` | CI 구성·잠금 설치·로컬 동등 검사 추가. 원격에서 발견한 기존 설정 파일 권한 보완. 원격 결과는 해당 커밋의 Actions 체크에서 확인 |
 | 01 감시 100/집중 20 | `watchlist/capitalization.py`, `selection.py`, 공정 조회·시총/편입·만료·실보유 우선 검사 | 임의 시총·지수 편입·참고 ETF 혼입 없음. 실제 토스 커버리지/쿼터/수집 지연 미검증 |
 | 02 시장 데이터·자격·RVOL | `market/{source,eligibility,quality}.py`, `test_market_data_quality`, `test_relative_volume` | 동일 경과 분 20일·미확정/미래/충돌·기업행동 근거·bool 차단 유지. 실제 계좌/소수점/분할 비교 증거 미확보는 UNKNOWN |
 | 03 Paper 체결 | `portfolio/{broker,market_fills}.py`, `test_paper_market_fills` | 다음 유효 호가·접수/취소 지연·부분/미확정·잔량·멱등성 유지. 실제 브로커 체결·수수료 재현 보증 없음 |
@@ -56,6 +57,8 @@ SQ_TEST_OFFLINE=1 python -m pytest -q
 MySQL은 `PQ_TEST_MYSQL=1`과 **테스트 전용 격리 DB**를 지정한 경우에만 검사한다. 사용자 DB를 연결하지 않는다. 이 개발 세션은 별도로 생성한 MySQL 8.4 컨테이너와 임의 namespace를 사용했다. 기본 CI의 MySQL skip은 통과 수에 포함하지 않는다. Actions의 `workflow_dispatch → run_mysql=true`는 폐기 가능한 MySQL 서비스에서 별도 21건을 실행한다.
 
 워크플로 권한은 contents:read, checkout 인증 유지 OFF다. [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1)과 [setup-python v7.1.0](https://github.com/actions/setup-python/releases/tag/v7.1.0)의 공식 태그·action 정의를 확인하고 commit SHA를 고정했다. 배포·주문·유료 LLM 생성 단계는 없다.
+
+`dc8eef5`의 [첫 원격 CI](https://github.com/taegyoo1104/pennyquant/actions/runs/43676057626)는 설치·doctor·Ruff 통과 후 파일 권한 1건이 실패했다(1,148 passed, 21 skipped). 위의 권한 보완을 적용하고 관련 19건을 umask 022에서 다시 통과했다. 이 실패를 통과로 처리하거나 검사 기준을 완화하지 않았다.
 
 최종 검사 횟수·시간·커밋은 [HANDOFF 최신 절](../HANDOFF.md)에 기록한다. CI YAML·권한·선택 MySQL·SHA 정적 검사, 새 가상환경 해시 설치/패키지 설치/pip check, 오프라인 집중 검사도 수행했다. 기존 pandas 시간대 경고는 기능 실패와 구분한다.
 
