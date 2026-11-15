@@ -98,6 +98,19 @@ class EconomicEvent:
     status: str = "CONFIRMED"
     scheduled_local: str = ""
 
+    def __post_init__(self):
+        utc(self.scheduled_at)
+        utc(self.known_at)
+        canonical_url(self.source_url)
+        if (not isinstance(self.id, str) or not self.id.strip() or not isinstance(self.name, str) or not self.name.strip()
+                or type(self.verified) is not bool or self.importance not in {'LOW', 'MEDIUM', 'HIGH'}
+                or type(self.revision) is not int or self.revision < 0
+                or self.status not in {'CONFIRMED', 'TENTATIVE', 'CANCELLED'}
+                or not isinstance(self.logical_id, str)):
+            raise ValueError('경제 일정의 식별자·상태·수정 번호를 확인하세요.')
+        if self.scheduled_local and utc(self.scheduled_local) != utc(self.scheduled_at):
+            raise ValueError('경제 일정의 UTC·로컬 시각이 일치하지 않습니다.')
+
     def blackout(self, now: datetime, minutes: int = 15) -> bool:
         return (self.verified and self.status != "CANCELLED" and utc(self.known_at) <= utc(now) and self.importance == "HIGH"
                 and abs((utc(now) - utc(self.scheduled_at)).total_seconds()) <= minutes * 60)

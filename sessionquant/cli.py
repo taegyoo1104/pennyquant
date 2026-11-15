@@ -38,7 +38,7 @@ def parser():
     news_check=sub.add_parser("check-news",help="뉴스 키·소스·모델 설정 점검; 기본은 연결하지 않음")
     news_check.add_argument("--config",type=Path,default=Path("config/sessionquant.yaml"))
     news_check.add_argument("--connect",action="store_true",help="주문·LLM 생성 없이 API 읽기 연결 검사")
-    news_check.add_argument("--provider",choices=("all","openai","fred","alpaca","sec","rss","official","treasury","gdelt"),default="all")
+    news_check.add_argument("--provider",choices=("all","openai","fred","alpaca","sec","rss","official","treasury","gdelt","calendar"),default="all")
     news_check.add_argument("--symbol",default="AAPL")
     setup=sub.add_parser("setup-env",help="한 번 저장한 로컬 접속 설정을 다음 실행에서 자동 사용")
     setup.add_argument("--from-current",action="store_true",help="현재 환경변수를 비밀값 출력 없이 .env에 저장")

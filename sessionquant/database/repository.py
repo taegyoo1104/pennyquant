@@ -183,6 +183,13 @@ class Repository:
         row = self.db.execute("SELECT payload FROM controls WHERE name=?", (name,)).fetchone()
         return json.loads(row[0]) if row else default
 
+    def update_control(self, name: str, update, default=None):
+        """Read and replace under a database write lock, including the first insert."""
+        with self.transaction():
+            value = update(self.get_control(name, default))
+            self.set_control(name, value)
+            return value
+
     def log(self, level: str, message: str, **extra) -> None:
         self.record("system_logs", {"timestamp": datetime.now(timezone.utc), "level": level, "message": message, **extra})
 

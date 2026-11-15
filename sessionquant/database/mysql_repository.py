@@ -360,6 +360,19 @@ class MySQLRepository:
                             (self.namespace, name), fetch="one")
         return self._decode(row[0]) if row else default
 
+    def update_control(self, name: str, update, default=None):
+        """Lock the namespace/key before reading so independent connections cannot lose updates."""
+        self._control_name(name)
+        with self.transaction():
+            self._execute("INSERT INTO pq_controls(namespace,name,payload) VALUES(%s,%s,%s) "
+                          "ON DUPLICATE KEY UPDATE name=VALUES(name)",
+                          (self.namespace, name, self._json(default)))
+            row = self._execute("SELECT payload FROM pq_controls WHERE namespace=%s AND name=%s FOR UPDATE",
+                                (self.namespace, name), fetch="one")
+            value = update(self._decode(row[0]))
+            self.set_control(name, value)
+            return value
+
     def log(self, level: str, message: str, **extra) -> None:
         self.record("system_logs", {"timestamp": datetime.now(timezone.utc), "level": level, "message": message, **extra})
 

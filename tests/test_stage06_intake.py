@@ -79,9 +79,12 @@ def ical(stamp='20261113T083000',tz=';TZID=America/New_York',status='CONFIRMED',
 
 def test_calendar_dst_cancel_and_unknown_timezone(repo):
     url='https://www.bls.gov/schedule/news_release/bls.ics'
-    events,issues=parse_calendar(ical(),url,NOW)
+    known=NOW-timedelta(hours=4)
+    events,issues=parse_calendar(ical(),url,known)
     assert not issues and events[0].scheduled_at.hour==13 and events[0].verified
     assert events[0].blackout(datetime(2026,11,13,13,30,tzinfo=timezone.utc))
+    late,_=parse_calendar(ical(),url,NOW)
+    assert not late[0].blackout(datetime(2026,11,13,13,30,tzinfo=timezone.utc))
     cancelled,_=parse_calendar(ical(status='CANCELLED',sequence=1),url,NOW)
     assert events[0].logical_id==cancelled[0].logical_id and events[0].id!=cancelled[0].id
     assert not cancelled[0].blackout(events[0].scheduled_at)

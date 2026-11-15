@@ -156,3 +156,58 @@ def test_main_screen_with_closed_market_null_schedule(tmp_path, monkeypatch):
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception
     assert any('청산 시작: — · 미청산 경고: —' in row.value for row in app.caption)
+
+
+def test_stage06_main_news_scopes_verified_current_company_and_keeps_details():
+    from copy import deepcopy
+    from datetime import timedelta
+    from sessionquant.dashboard.news_panel import current_company_news, provider_rows, calendar_rows
+    from sessionquant.models import jsonable, NewsEvent
+    now = datetime(2026, 11, 13, 16, tzinfo=timezone.utc)
+    data = DashboardData(state={'broker': {'positions': {'AAPL': {'qty': '1', 'avg_price': '100'}}}},
+        watchlist_state={'status': 'VALID', 'updated_at': now.isoformat(), 'items': [
+            {'ticker': 'MSFT', 'focused': True, 'focus_valid_until': (now+timedelta(minutes=5)).isoformat()}]})
+    def news(identity, ticker='AAPL', **changes):
+        event = jsonable(NewsEvent(identity, (ticker,), 'Results', now-timedelta(minutes=1), now,
+            'Company IR', 'https://issuer.test/news', 'Full verified company release.', True, False))
+        return {'event': event | changes, 'ticker': ticker, 'source_kind': 'rss', 'primary_verified': True,
+                'analyzed_at': now.isoformat()}
+    rows = [news('rss:held'), news('rss:focus', 'MSFT'), news('rss:unrelated', 'AMZN'),
+            news('rss:stale', published_at=(now-timedelta(hours=25)).isoformat()),
+            news('rss:unverified', verified=False), news('rss:future', published_at=(now+timedelta(minutes=1)).isoformat()),
+            news('rss:empty', body=''), news('rss:error') | {'error': 'llm_budget_limit'}]
+    before = deepcopy(rows)
+    assert {r['event']['id'] for r in current_company_news(rows, data, build_view(data, now), now)} == {'rss:held', 'rss:focus'}
+    assert rows == before
+    assert provider_rows({'schedule': {'gdelt': {'status': 'PROVIDER_RATE_LIMITED', 'http_429': 1}}})[0]['429'] == 1
+    event = {'id': 'a', 'logical_id': 'jobs', 'name': 'Jobs', 'verified': True, 'known_at': now.isoformat(),
+             'scheduled_at': (now+timedelta(hours=1)).isoformat(), 'source_url': 'https://www.bls.gov/', 'revision': 0}
+    cancelled = event | {'id': 'b', 'revision': 1, 'status': 'CANCELLED', 'known_at': (now+timedelta(minutes=1)).isoformat()}
+    assert calendar_rows([event, cancelled], now)[0]['상태'] == 'CONFIRMED'
+    assert calendar_rows([event, cancelled], now+timedelta(minutes=1))[0]['상태'] == 'CANCELLED'
+
+
+def test_stage06_dashboard_renders_populated_provider_and_enrichment_details(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from sessionquant.database.repository import Repository
+    now = datetime.now(timezone.utc)
+    path = tmp_path/'news-dashboard.db'
+    repo = Repository(path, backend='sqlite')
+    repo.set_control('session_news_status', {'updated_at': now.isoformat(),
+        'issues': [{'provider': 'bls', 'code': 'http_403'}]})
+    repo.set_control('news_provider_schedule_v1', {'gdelt': {'status': 'PROVIDER_RATE_LIMITED', 'calls': 1,
+        'http_429': 1, 'cooldown_until': (now+timedelta(hours=1)).isoformat()}})
+    repo.record('news_ingestions', {'id': 'old', 'provider': 'alpaca', 'published_at': '2015-01-01T00:00:00Z',
+        'skip_reason': 'stale_article', 'eligible_for_llm': False})
+    repo.record('news_enrichments', {'id': 'one', 'publisher_domain': 'publisher.test', 'status': 'RIGHTS_UNKNOWN',
+        'body': None, 'body_char_count': 0, 'eligible_for_llm': False})
+    repo.close()
+    monkeypatch.setenv('SQ_DB_BACKEND', 'sqlite')
+    monkeypatch.setenv('SQ_DB', str(path))
+    monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    assert not app.exception and not app.error
+    assert len([tab for tab in app.tabs if tab.label in {'시장 현황', '종목 현황', '포트폴리오', '뉴스 분석', '주문 및 운영'}]) == 5
+    assert any('뉴스 공급자' in item.label for item in app.expander)
+    values = ' '.join(frame.value.to_string() for frame in app.dataframe)
+    assert 'PROVIDER_RATE_LIMITED' in values and 'RIGHTS_UNKNOWN' in values and 'stale_article' in values

@@ -2,13 +2,14 @@
 from dataclasses import replace
 from datetime import datetime,timedelta,timezone
 from hashlib import sha256
+from time import monotonic
 import asyncio
 import ipaddress
 import json
 import re
 import socket
 import zlib
-from urllib.parse import urlsplit,urljoin
+from urllib.parse import urlsplit,urljoin,unquote
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -17,7 +18,7 @@ from ..models import utc
 from ..macro.models import canonical_url,stable_hash
 from .schedule import NewsSchedule
 
-VERSION='article-enrichment-v1'
+VERSION='article-enrichment-v2'
 AGENT='SessionQuantNews/1.0'
 PERMANENT={'FETCH_401','FETCH_403','FETCH_404','PAYWALL','ROBOTS_DISALLOWED','REDIRECT_INVALID',
     'URL_INVALID','SSRF_BLOCKED','WRONG_ARTICLE','UNSUPPORTED_CONTENT_TYPE','UNSUPPORTED_MEDIA','PUBLISHED_AT_UNKNOWN',
@@ -26,6 +27,32 @@ PERMANENT={'FETCH_401','FETCH_403','FETCH_404','PAYWALL','ROBOTS_DISALLOWED','RE
 
 class FetchBlocked(ValueError):
     def __init__(self,code):self.code=code;super().__init__(code)
+
+
+def robots_entries(parser):
+    """Select the most specific matching product-token groups, then the wildcard group."""
+    token=AGENT.split('/')[0].lower()
+    matching=[(max((len(agent) for agent in entry.useragents if agent.lower() in token),default=0),entry)
+              for entry in parser.entries if entry.applies_to(AGENT)]
+    if matching:
+        best=max(length for length,_ in matching)
+        return [entry for length,entry in matching if length==best]
+    return [parser.default_entry] if parser.default_entry else []
+
+
+def robots_allowed(parser,url):
+    # RobotFileParser's first-prefix match can let "Allow: /" hide a longer Disallow.
+    # Apply the longest matching path rule, including wildcard and end anchors.
+    parsed=urlsplit(url);path=unquote(parsed.path or '/')+('?' + unquote(parsed.query) if parsed.query else '')
+    matches=[]
+    for entry in robots_entries(parser):
+        for rule in entry.rulelines:
+            pattern=unquote(rule.path)
+            anchored=pattern.endswith('$')
+            if anchored:pattern=pattern[:-1]
+            expression='^'+re.escape(pattern).replace(r'\*','.*')+('$' if anchored else '')
+            if re.search(expression,path):matches.append((len(pattern.replace('*','')),rule.allowance))
+    return max(matches)[1] if matches else not parser.disallow_all
 
 
 def safe_url(url,allowed):
@@ -55,21 +82,26 @@ class SafeArticleFetcher:
         self.allowed=set(allowed);self.client=client or httpx.AsyncClient(timeout=10,follow_redirects=False,trust_env=False)
         self.owns=client is None;self.resolve=resolver or public_addresses
         self.max_bytes=max_bytes;self.max_redirects=max_redirects
-        self.limiters={}
+        self.limiters={};self.started={}
 
     def pacing(self,host,seconds):
         from ..collectors.common import RateLimiter
         limiter=self.limiters.setdefault(host,RateLimiter(.5))
         limiter.interval=max(limiter.interval,seconds)
+        if host in self.started:
+            limiter._next=max(limiter._next,self.started[host]+limiter.interval)
 
-    async def get(self,url,*,headers=None):
+    async def get(self,url,*,headers=None,url_guard=None):
         chain=[]
         for hop in range(self.max_redirects+1):
             _,host=safe_url(url,self.allowed)
+            if url_guard is not None:
+                url_guard(url)
             addresses=await asyncio.wait_for(self.resolve(host),timeout=5)
             if not addresses or any(not ipaddress.ip_address(v).is_global for v in addresses):raise FetchBlocked('SSRF_BLOCKED')
             self.pacing(host,2)
             await self.limiters[host].wait()
+            self.started[host]=monotonic()
             # 접속 시 DNS를 다시 조회하지 않는다. IPv6도 httpx가 대괄호 URL로 처리한다.
             pinned=httpx.URL(url).copy_with(host=addresses[0])
             request_headers={'Host':host,'User-Agent':AGENT,'Accept-Encoding':'identity',**(headers or {})}
@@ -116,6 +148,7 @@ def extract_article(document,url,title,language,*,min_chars=300,min_sentences=3)
     """본문 추출기는 날짜 추측·웹 조회를 수행하지 않는다."""
     from lxml import html
     import trafilatura
+    from trafilatura.deduplication import LRUCache
     tree=html.fromstring(document,parser=html.HTMLParser(no_network=True,recover=True))
     metas={str(n.get('property') or n.get('name') or '').lower():n.get('content','') for n in tree.xpath('//meta')}
     titles=tree.xpath('//h1//text()') or tree.xpath('//title//text()')
@@ -154,7 +187,7 @@ def extract_article(document,url,title,language,*,min_chars=300,min_sentences=3)
     expected_language={'English':'en','Korean':'ko'}.get(language,language.lower()[:2])
     if html_language!=expected_language:raise FetchBlocked('LANGUAGE_UNKNOWN')
     body=trafilatura.extract(document,url=url,favor_precision=True,include_comments=False,include_tables=False,
-        include_links=False,deduplicate=True,no_fallback=True) or ''
+        include_links=False,deduplicate=LRUCache(maxsize=10000),fast=True) or ''
     sentences=[s.strip() for s in re.split(r'[.!?。]\s*',body) if len(s.strip())>15]
     if len(body)<min_chars or len(sentences)<min_sentences:raise FetchBlocked('CONTENT_TOO_SHORT')
     if len(set(sentences))/max(1,len(sentences))<.7:raise FetchBlocked('BOILERPLATE_ONLY')
@@ -173,7 +206,8 @@ class ArticleEnricher:
 
     async def enrich(self,article):
         now=utc(self.clock());host=urlsplit(article.url).hostname or ''
-        key='news_enrich_cache:'+stable_hash([canonical_url(article.url),self.policies.get(host),VERSION])
+        key='news_enrich_cache:'+stable_hash([canonical_url(article.url),self.policies.get(host),VERSION,
+            article.title,article.language,self.min_chars,self.min_sentences])
         cached=self.repo.get_control(key)
         baseline={'article_id':article.id,'discovery_source':article.discovery_source,'discovered_at':article.received_at.isoformat(),
             'source_url':article.url,'publisher_domain':host,'publisher_name':None,'publisher_verified':False,
@@ -186,20 +220,20 @@ class ArticleEnricher:
             return self._store(baseline,key),None
         domain='article:'+host
         if cached and cached['status'] in PERMANENT and now-utc(cached['checked_at'])<timedelta(days=1):return cached,None
-        if not self.schedule.due(domain,2,now):return {**(cached or baseline),'status':'COOLDOWN','eligible_for_llm':False},None
         baseline['attempt_count']=(cached or {}).get('attempt_count',0)+1
         if cached and cached.get('consecutive_failures',0)>=3 and now-utc(cached['checked_at'])<timedelta(days=1):
             return self._store({**baseline,'status':'RETRY_EXHAUSTED'},key),None
-        self.schedule.begin(domain,now)
+        if not self.schedule.claim(domain,2,now):return {**(cached or baseline),'status':'COOLDOWN','eligible_for_llm':False},None
         async with self.semaphore:
             try:
                 result=await asyncio.wait_for(self._fetch(article,cached,baseline,policy),timeout=25)
                 row,enriched=result
-                self.schedule.success(domain,1,utc(self.clock()))
+                self.schedule.success(domain,1,utc(self.clock()),minimum_wait=row.get('robots_delay_seconds',2))
             except httpx.HTTPStatusError as exc:
                 self.schedule.failure(domain,exc,now=utc(self.clock()))
                 row={**baseline,'status':'FETCH_'+str(exc.response.status_code),'http_status':exc.response.status_code};enriched=None
             except FetchBlocked as exc:
+                self.schedule.failure(domain,code=exc.code,now=utc(self.clock()))
                 row={**baseline,'status':exc.code,'block_reason':exc.code};enriched=None
             except (httpx.HTTPError,ValueError,TypeError,KeyError,TimeoutError,OSError,zlib.error):
                 self.schedule.failure(domain,code='fetch_or_extract_unavailable',now=utc(self.clock()))
@@ -219,19 +253,25 @@ class ArticleEnricher:
             robots={'text':text,'valid_until':(utc(self.clock())+timedelta(days=1)).isoformat()}
             self.repo.set_control(robots_key,robots)
         parser=RobotFileParser();parser.parse(robots['text'].splitlines())
-        if not parser.can_fetch(AGENT,article.url):raise FetchBlocked('ROBOTS_DISALLOWED')
-        delay=parser.crawl_delay(AGENT) or parser.crawl_delay('*') or 0
-        rate=parser.request_rate(AGENT) or parser.request_rate('*')
-        if rate:delay=max(delay,rate.seconds/rate.requests)
+        def robots_guard(url):
+            if not robots_allowed(parser,url):raise FetchBlocked('ROBOTS_DISALLOWED')
+        robots_guard(article.url)
+        entries=robots_entries(parser)
+        delay=max((entry.delay or 0 for entry in entries),default=0)
+        for entry in entries:
+            if entry.req_rate:delay=max(delay,entry.req_rate.seconds/entry.req_rate.requests)
         if delay>20:raise FetchBlocked('ROBOTS_RATE_LIMITED')
+        baseline['robots_delay_seconds']=max(2,delay)
         if hasattr(self.fetcher,'pacing'):self.fetcher.pacing(host,max(2,delay))
         headers={}
-        if cached:
+        completed = cached and cached.get('analysis_content_hash') and self.repo.get_control(
+            'news_macro_analyzed:'+stable_hash([article.id,cached['analysis_content_hash']]),False)
+        if completed:
             for name,key in [('If-None-Match','etag'),('If-Modified-Since','last_modified')]:
                 if cached.get(key):headers[name]=cached[key]
-        response=await self.fetcher.get(article.url,headers=headers)
+        response=await self.fetcher.get(article.url,headers=headers,url_guard=robots_guard)
         if response['status']==304:
-            if not cached:raise FetchBlocked('INVALID_CACHE')
+            if not completed:raise FetchBlocked('INVALID_CACHE')
             return {**cached,'status':'DUPLICATE','eligible_for_llm':False},None
         mime=response['headers'].get('content-type','').split(';')[0].lower()
         if mime not in {'text/html','application/xhtml+xml'}:raise FetchBlocked('UNSUPPORTED_CONTENT_TYPE')
@@ -240,15 +280,18 @@ class ArticleEnricher:
         now=utc(self.clock())
         if not extracted['published_at']<=article.received_at<=now:raise FetchBlocked('DATE_CONFLICT')
         if now-extracted['published_at']>timedelta(hours=72):raise FetchBlocked('STALE')
-        duplicate=cached and cached.get('content_hash')==extracted['content_hash']
+        document_version=stable_hash([extracted['content_hash'],extracted['extracted_title'],extracted['published_at'].isoformat()])
+        duplicate=completed and cached.get('document_version')==document_version
         row={**baseline,**extracted,'published_at':extracted['published_at'].isoformat(),'fetched_at':now.isoformat(),
             'final_url':response['final_url'],'redirect_chain':response['redirect_chain'],'publisher_name':policy['publisher_name'],
             'publisher_verified':True,'terms_url':policy['terms_url'],'etag':response['headers'].get('etag'),
             'last_modified':response['headers'].get('last-modified'),'eligible_for_llm':not duplicate,
+            'document_version':document_version,
             'status':'DUPLICATE' if duplicate else 'ELIGIBLE_FOR_LLM',
             'stage_history':['DISCOVERED_ONLY','FETCH_PENDING','FETCHED','BODY_EXTRACTED','SOURCE_AND_TIME_VERIFIED']}
-        enriched=replace(article,url=response['final_url'],body=extracted['body'],source=policy['publisher_name'],
-            published_at=extracted['published_at'],publisher_verified=True,llm_use_allowed=True,document_version=extracted['content_hash'])
+        enriched=replace(article,body=extracted['body'],source=policy['publisher_name'],
+            published_at=extracted['published_at'],publisher_verified=True,llm_use_allowed=True,document_version=document_version)
+        row['analysis_content_hash']=enriched.content_hash
         row['body']=None
         row['body_retention']='HASH_AND_METADATA_ONLY'
         return row,None if duplicate else enriched

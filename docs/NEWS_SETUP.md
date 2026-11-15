@@ -126,11 +126,11 @@ OpenAI의 `accessible: true`는 모델 메타데이터 접근 성공이며 실�
 .\venv\Scripts\python.exe -m sessionquant run --config config/sessionquant.yaml
 ```
 
-`news_enabled: true`, `include_alpaca: true`, `news_refresh_seconds: 600`에서 위 소스를 수집·분석한다. 화면에서 매매 시작을 누르기 전에도 뉴스·시세 수집은 동작하며 OpenAI 키가 있으면 분석 비용이 발생할 수 있다.
+`news_enabled: true`, `include_alpaca: true`에서 위 소스를 수집·분석한다. 06단계 기본 주기는 기업 180초·거시 900초·공식 일정 3600초·FRED 86400초다. 기존 명시적 `news_refresh_seconds`는 기업/거시 새 키가 없을 때만 fallback으로 사용한다. [독립 주기·권한 설정 예시](../config/sessionquant.news.example.yaml)와 [06 운영 안내](STAGE06_NEWS.md)를 참고한다. 화면에서 매매 시작을 누르기 전에도 뉴스·시세 수집은 동작하며 OpenAI 키가 있으면 분석 비용이 발생할 수 있다.
 
 중요: 현재 뉴스·LLM 위험 통합은 `run`의 PAPER_LOCAL 엔진에서 사용한다. `run-account`는 실제 계좌 조회이고 `live-local`은 Phase 5의 소액 주문 검증이다. 두 경로에 키를 넣었다고 뉴스 기반 완전 자동 실거래가 연결되지는 않는다.
 
-발표 전후 15분 진입 제한은 확인된 경제 일정이 DB에 있어야 작동한다. 뉴스 RSS 연결만으로 향후 FOMC·CPI 일정이 자동 등록되는 것은 아니다. [Fed 일정](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm), [BLS 일정](https://www.bls.gov/schedule/news_release/), [BEA 일정](https://www.bea.gov/news/schedule)을 확인하고 [입력 형식](EVENT_FORMAT.md)에 따라 `calendar-import`로 등록한다. 일정은 확인 전 UNKNOWN이며 예시 날짜를 실제 확정 일정으로 가져오지 않는다.
+발표 전후 15분 진입 제한은 확인된 경제 일정이 DB에 있어야 작동한다. BLS·BEA는 별도 공식 ICS에서 명시한 발표 시각만 자동 등록한다. RSS 기사로 향후 일정을 추측하지 않으며 FOMC·EIA·Treasury는 확인한 수동 입력을 유지한다. `check-news --connect --provider calendar`는 생성·주문 없이 공식 일정 읽기 연결만 검사한다. [Fed 일정](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm), [BLS 일정](https://www.bls.gov/schedule/news_release/), [BEA 일정](https://www.bea.gov/news/schedule)을 확인하고 [입력 형식](EVENT_FORMAT.md)에 따라 `calendar-import`로 등록한다. 일정은 확인 전 UNKNOWN이며 예시 날짜를 실제 확정 일정으로 가져오지 않는다.
 
 실거래 설정의 최소 주문 금액·소수점 자격 확인·계좌 확인·기존 위험 설정은 [PHASE5_LOCAL.md](PHASE5_LOCAL.md)를 따른다. 현재 단계에서 GCP 키·배포 설정은 필요 없다.
 

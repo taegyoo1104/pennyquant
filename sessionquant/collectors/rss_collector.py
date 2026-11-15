@@ -122,9 +122,8 @@ class RSSCollector:
         cache_key='news_feed_cache:'+stable_hash(url)
         cached=self.repository.get_control(cache_key,{}) if self.repository else self.cache.get(cache_key,{})
         name='rss:'+stable_hash(url)
-        if not self.schedule.due(name,0):
+        if not self.schedule.claim(name,0):
             self.status=[{'provider':source,'code':'provider_cooldown'}];return []
-        self.schedule.begin(name)
         headers={'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml'}
         for field,key in [('If-None-Match','etag'),('If-Modified-Since','last_modified')]:
             if cached.get(key):headers[field]=cached[key]

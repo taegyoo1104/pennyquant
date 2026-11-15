@@ -31,7 +31,9 @@ async def test_exhausted_credit_warns_and_cools_down_across_restart(tmp_path, co
         return httpx.Response(429, json={'error': {'code': code}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         analyzer = BudgetedAnalyzer(repo, api_key='mock-key', client=client, clock=lambda: NOW)
-        article = MacroArticle('https://example.com/news', 'Market update', 'Test article body', 'fixture', NOW, NOW)
+        article = MacroArticle('https://www.federalreserve.gov/newsevents/pressreleases/fixture.htm',
+            'Policy statement', 'The committee released its monetary policy statement.',
+            'Federal Reserve', NOW, NOW, official=True)
         result = await analyzer.analyze_macro(article)
         assert result['status'] == 'UNKNOWN' and result['force_liquidation'] is False
         assert repo.get_control('llm_provider_health')['code'] == 'NO_CREDIT'

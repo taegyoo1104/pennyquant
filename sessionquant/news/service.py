@@ -94,18 +94,23 @@ class NewsService:
             event = original
         self._events[event.id] = event
         from .intake import company_reason,archive
-        reason=company_reason(event,symbol,kind,primary,now,getattr(self.analyzer,'max_age_hours',24))
+        analyzed_at = max(now, utc(self.clock()))
+        reason=company_reason(event,symbol,kind,primary,analyzed_at,getattr(self.analyzer,'max_age_hours',24))
         if self.repo:
             from ..models import jsonable
             archive(self.repo,jsonable(event),provider=kind,reason=reason,ticker=symbol)
-        result = await self.analyzer.analyze(event, symbol, source_kind=kind, primary_verified=primary,
-                                             now=max(now, utc(self.clock())))
+        if reason:
+            result = NewsAnalysis(symbol, event, source_kind=kind, analyzed_at=analyzed_at,
+                error=reason, reason='뉴스의 출처·종목·시각·본문 확인이 필요합니다.',
+                input_digest=event_digest(event, symbol))
+        else:
+            result = await self.analyzer.analyze(event, symbol, source_kind=kind, primary_verified=primary,
+                                                 now=analyzed_at)
         self.analyses[f"{event.id}:{symbol}"] = result
         return result
 
     async def _request(self,name,call):
-        if not self.schedule.due(name,0):return []
-        self.schedule.begin(name)
+        if not self.schedule.claim(name,0):return []
         try:
             result=await call()
             self.schedule.success(name,len(result) if hasattr(result,'__len__') else int(result is not None))

@@ -52,10 +52,12 @@ def archive(repo,raw,*,provider,reason='',ticker=None,body_allowed=True):
     data=dict(raw);article_id=data.get('id') or 'unidentified:'+stable_hash(data)[:32]
     content_hash=data.get('content_hash') or stable_hash({k:v for k,v in data.items() if k not in {'received_at','discovered_at'}})
     key='news_first_available:'+stable_hash([article_id,content_hash])
-    first=repo.get_control(key)
-    duplicate=first is not None
-    if first is None:
-        first=data.get('received_at');repo.set_control(key,first)
+    duplicate=False
+    def remember(first):
+        nonlocal duplicate
+        duplicate=first is not None
+        return first if duplicate else data.get('received_at')
+    first=repo.update_control(key,remember)
     if not body_allowed:data.pop('body',None)
     payload={'article_id':article_id,'content_hash':content_hash,'provider':provider,'ticker':ticker,
         'published_at':data.get('published_at'),'received_at':data.get('received_at'),'first_available_at':first,

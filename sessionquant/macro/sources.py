@@ -108,17 +108,19 @@ class GDELTClient:
             raise ValueError("GDELT 주제 이름을 확인하십시오")
         self.limiter = RateLimiter(0.2)
         self.status = []
+        self._topic_cursor = 0
 
     async def fetch(self, *, now: datetime | None = None) -> list[MacroArticle]:
         now = utc(now or datetime.now(timezone.utc))
         self.status, articles, seen = [], [], set()
-        if not self.schedule.due('gdelt',0,now):
+        if not self.schedule.claim('gdelt',900,now):
             self.status=[{'provider':'gdelt','code':'provider_cooldown'}];return []
-        cursor=self.repo.get_control('gdelt_topic_cursor_v1',0) if self.repo else 0
+        cursor=self.repo.get_control('gdelt_topic_cursor_v1',0) if self.repo else self._topic_cursor
         topics=[self.topics[(cursor+i)%len(self.topics)] for i in range(min(2,len(self.topics)))]
+        failed=False
         for topic in topics:
-            if not self.schedule.due('gdelt:'+topic,900,now):continue
-            self.schedule.begin('gdelt',now);self.schedule.begin('gdelt:'+topic,now)
+            if not self.schedule.claim('gdelt:'+topic,900,now):continue
+            count_before=len(articles)
             try:
                 response = await get_readonly(self.client, "https://api.gdeltproject.org/api/v2/doc/doc",
                     limiter=self.limiter, attempts=1, params={"query": TOPICS[topic], "mode": "artlist",
@@ -134,12 +136,15 @@ class GDELTClient:
                         articles.append(article)
                         seen.add(article.id)
                 self.status.append({"provider": "gdelt", "topic": topic, "code": "ok"})
-                self.schedule.success('gdelt',len(articles),now);self.schedule.success('gdelt:'+topic,len(articles),now)
+                self.schedule.success('gdelt:'+topic,len(articles)-count_before,now)
             except (httpx.HTTPError, ValueError, KeyError, TypeError, RuntimeError) as exc:
                 self.schedule.failure('gdelt',exc,now=now);self.schedule.failure('gdelt:'+topic,exc,now=now)
                 self.status.append({"provider": "gdelt", "topic": topic, "code": "discovery_unavailable", **source_error(exc)})
+                failed=True
                 break
-        if self.repo:self.repo.set_control('gdelt_topic_cursor_v1',(cursor+len(topics))%max(1,len(self.topics)))
+        if not failed:self.schedule.success('gdelt',len(articles),now)
+        self._topic_cursor=(cursor+len(topics))%max(1,len(self.topics))
+        if self.repo:self.repo.set_control('gdelt_topic_cursor_v1',self._topic_cursor)
         return articles
 
     async def aclose(self):

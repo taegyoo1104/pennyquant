@@ -21,6 +21,7 @@ TABLES = (
     "market_regimes", "candidates", "quote_snapshots", "market_bars", "news_events", "news_analysis",
     "macro_news", "macro_analysis", "llm_usage", "orders", "executions", "positions", "alerts",
     "session_state", "account_snapshots", "reconciliations", "daily_performance", "pipeline_status",
+    "news_ingestions", "news_enrichments", "economic_events",
 )
 REGIMES = {"BULLISH": "상승", "NEUTRAL": "중립", "BEARISH": "하락", "UNKNOWN": "확인 필요"}
 STATUS_NAMES = {
@@ -46,6 +47,7 @@ class DashboardData:
     market_quality: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
     fred_references: list = field(default_factory=list)
+    news_status: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -107,6 +109,8 @@ def load_database(path: str | Path) -> DashboardData:
         result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
         result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
         result.fred_references=repository.recent('fred_reference_observations',limit=30)
+        result.news_status=repository.get_control('session_news_status',{}) or {}
+        result.news_status['schedule']=repository.get_control('news_provider_schedule_v1',{}) or {}
         result.actual_account=repository.get_control("actual_account_snapshot")
         result.account_status=repository.get_control("account_monitor_status",{}) or {}
         result.context = repository.get_control("sessionquant_context", {}) or {}
@@ -219,6 +223,7 @@ def _table(rows: list[dict], message: str = "아직 저장된 기록이 없습�
 
 
 def _news_rows(rows: list[dict]) -> list[dict]:
+    from sessionquant.news.intake import age_bucket
     result = []
     for row in rows:
         event = row.get("event", row)
@@ -226,6 +231,8 @@ def _news_rows(rows: list[dict]) -> list[dict]:
             "제목": event.get("title", row.get("title", "")), "종목·주제": ", ".join(event.get("symbols", [])) or row.get("topic", ""),
             "출처": event.get("source", row.get("source", "")), "발표 시각": timestamp(event.get("published_at")),
             "수집 시각": timestamp(event.get("received_at")), "방향": row.get("sentiment", row.get("direction", "UNKNOWN")),
+            "나이 구간": age_bucket(event.get('published_at'),datetime.now(timezone.utc)),
+            "제외·오류": row.get('error',row.get('skip_reason','')),
             "확인 상태": row.get("verification_status", row.get("confirmation_status", row.get("status", "UNKNOWN"))),
             "분석 근거": row.get("reason", row.get("rationale", row.get("summary", ""))),
             "원문": event.get("url", row.get("url", "")),
@@ -302,9 +309,10 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
         from sessionquant.dashboard.reference_panel import render_references
         render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references)
-        schedule = data.context.get("economic_calendar", [])
-        if isinstance(schedule, list) and schedule:
-            _table([{"일정": row.get("name", row.get("event", "")), "발표 시각": timestamp(row.get("timestamp", row.get("published_at"))), "출처": row.get("source", "")} for row in schedule if isinstance(row, dict)])
+        from sessionquant.dashboard.news_panel import calendar_rows
+        schedule = calendar_rows(data.tables['economic_events'])
+        if schedule:
+            _table(schedule)
         else:
             st.caption("중요 경제 일정: 미확인. 일정이 없다는 뜻은 아닙니다.")
     with candidates:
@@ -342,12 +350,21 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                      '평가금액':usd(row.get('market_value')),'예상 위험 사유':', '.join(row.get('issues',[]))}
                     for symbol,row in risk.get('positions',{}).items()],'예상 위험 기록이 없습니다. 입력 미확인은 안전 판정이 아닙니다.')
     with news:
+        from sessionquant.dashboard.news_panel import render_news_diagnostics
+        render_news_diagnostics(data)
         corporate, macro, usage = st.tabs(["기업 뉴스", "경제·정치·국제정세", "LLM 사용량"])
         with corporate:
-            _table(_news_rows(data.tables["news_analysis"] or data.tables["news_events"]))
+            from sessionquant.dashboard.news_panel import current_company_news
+            rows=data.tables['news_analysis'] or data.tables['news_events']
+            _table(_news_rows(current_company_news(rows,data,view)),
+                '보유·집중 종목의 검증된 최근 24시간 기업 뉴스가 없습니다.')
+            with st.expander('전체 기업 뉴스·과거·오류 상세'):
+                _table(_news_rows(rows))
             st.caption("SEC·검증된 기업 IR/RSS를 우선 확인합니다. 무료 Alpaca REST는 보조 자료로 표시합니다.")
         with macro:
-            _table(_news_rows(data.tables["macro_analysis"] or data.tables["macro_news"]))
+            originals={row['id']:row for row in data.tables['macro_news'] if row.get('id')}
+            rows=[{**originals.get(row.get('article_id'),{}),**row} for row in data.tables['macro_analysis']]
+            _table(_news_rows(rows or data.tables['macro_news']))
             st.caption("GDELT 검색 결과는 사건 확정의 증거가 아닙니다. 출처·공개 시각·독립 검증·실제 시장 반응을 확인하며 미확인 국제 뉴스만으로 강제 청산하지 않습니다.")
         with usage:
             st.metric("표시된 호출의 추정 비용", usd(view["usage_cost"]))

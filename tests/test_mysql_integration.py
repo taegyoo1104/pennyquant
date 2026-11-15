@@ -361,3 +361,77 @@ def test_real_mysql_research_journal_revisions_rollback_and_namespace(mysql_repo
     with reader.db.cursor() as cursor:
         cursor.execute('SELECT version FROM sq_schema_versions WHERE version=4')
         assert cursor.fetchone()[0]==4
+
+
+def test_real_mysql_stage06_schedule_atomic_claim_and_counters(mysql_repositories):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sessionquant.news.schedule import NewsSchedule
+    first = mysql_repositories()
+    second = mysql_repositories(first.namespace)
+    now = datetime(2026, 11, 13, 16, tzinfo=timezone.utc)
+    barrier = Barrier(2)
+    def worker(repo):
+        schedule = NewsSchedule(repo, clock=lambda: now)
+        barrier.wait()
+        claimed = schedule.claim('gdelt', 900, now)
+        for _ in range(15): schedule.begin('rss', now)
+        return claimed
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(worker, [first, second])) == [False, True]
+    schedule = NewsSchedule(first, clock=lambda: now)
+    assert schedule.state['rss']['calls'] == 30
+    assert schedule.state['gdelt']['calls'] == 1
+    assert not schedule.due('gdelt', 0, now+timedelta(seconds=299))
+
+
+def test_real_mysql_stage06_journals_schema_namespace_and_order_preservation(mysql_repositories):
+    from sessionquant.news.intake import archive
+    from sessionquant.macro.models import EconomicEvent
+    from test_stage06_regressions import minimal_pipeline
+    repo, other = mysql_repositories(), mysql_repositories()
+    now = datetime(2026, 11, 13, 16, tzinfo=timezone.utc)
+    repo.record('orders', {'id': 'stage05-order', 'qty': '0.123456'})
+    first = archive(repo, {'id': 'article', 'body': 'original', 'received_at': now.isoformat()}, provider='fixture')
+    later = archive(repo, {'id': 'article', 'body': 'original', 'received_at': (now+timedelta(seconds=1)).isoformat()}, provider='fixture')
+    assert later['duplicate'] and later['first_available_at'] == first['first_available_at']
+    repo.record('news_enrichments', {'id': 'enrichment', 'status': 'RIGHTS_UNKNOWN', 'body': None})
+    repo.record('macro_context_snapshots', {'id': 'context', 'causal_inference_verified': False})
+    pipeline = minimal_pipeline(repo)
+    event = EconomicEvent('original', 'CPI', now, now-timedelta(days=1), 'https://www.bls.gov/news.release/cpi.htm',
+                          verified=True, logical_id='cpi')
+    pipeline.add_economic_event(event)
+    pipeline.add_economic_event(replace(event, id='cancel', revision=1, status='CANCELLED', known_at=now+timedelta(minutes=1)))
+    reader = mysql_repositories(repo.namespace)
+    restored = minimal_pipeline(reader)
+    assert restored.risk_context(now)['blackout']
+    assert not restored.risk_context(now+timedelta(minutes=1))['blackout']
+    assert reader.all('orders')[0] == {'id': 'stage05-order', 'qty': '0.123456'}
+    for kind in ('news_ingestions', 'news_enrichments', 'macro_context_snapshots', 'economic_events'):
+        assert reader.all(kind) and other.all(kind) == []
+    with reader.db.cursor() as cursor:
+        cursor.execute('SELECT version FROM sq_schema_versions WHERE version=5')
+        assert cursor.fetchone()[0] == 5
+
+
+def test_real_mysql_stage06_diagnostics_sql_is_select_only_and_scoped(mysql_repositories):
+    from pathlib import Path
+    from sessionquant.news.schedule import NewsSchedule
+    repo = mysql_repositories()
+    other = mysql_repositories()
+    repo.record('news_ingestions', {'id': 'one', 'provider': 'fixture', 'eligible_for_llm': False})
+    other.record('news_ingestions', {'id': 'other', 'provider': 'other', 'eligible_for_llm': True})
+    NewsSchedule(repo).begin('rss:fixture')
+    sql = (Path(__file__).resolve().parents[1]/'sql/news_enrichment_diagnostics.sql').read_text()
+    sql = '\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
+    statements = [part.strip() for part in sql.replace('REPLACE_WITH_PAPER_NAMESPACE', repo.namespace).split(';') if part.strip()]
+    results = []
+    with repo.db.cursor() as cursor:
+        for statement in statements:
+            assert statement.startswith('SELECT')
+            cursor.execute(statement)
+            results.append(cursor.fetchall())
+    assert results[0][0] == ('news_ingestions', 1)
+    assert results[1][0][0] == 'fixture'
+    assert results[4][0][0] == 'rss:fixture'
+    assert len(repo.all('news_ingestions')) == len(other.all('news_ingestions')) == 1

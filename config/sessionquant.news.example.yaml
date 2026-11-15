@@ -1,0 +1,24 @@
+# 06단계 PAPER 뉴스 설정. 기존 키·계좌·DB 비밀은 .env에서 읽는다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-paper-local.db
+universe_path: ../data/sp500-universe.json
+source: toss
+strategy: pullback
+news_enabled: true
+include_alpaca: true
+company_rss_catalog: true
+# 새 키가 우선. 구 news_refresh_seconds만 명시하면 기업·거시의 fallback이 된다.
+company_news_refresh_seconds: 180
+macro_news_refresh_seconds: 900
+economic_calendar_refresh_seconds: 3600
+company_new_analysis_max_age_hours: 24
+macro_new_analysis_max_age_hours: 72
+news_weekend_slowdown: false
+news_enrichment:
+  # 기본 공백: 권한 근거 없이 임의의 발행사를 방문하거나 LLM에 보내지 않는다.
+  publishers: {}
+  min_chars: 300
+  min_sentences: 3
+companies: {}
+llm: {}

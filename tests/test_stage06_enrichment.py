@@ -156,6 +156,8 @@ async def test_enrichment_success_hash_only_restart_cache_and_exact_identity(rep
     assert result['status']=='ELIGIBLE_FOR_LLM' and result['body'] is None and value.body
     assert value.id==article().id and value.published_at==NOW-timedelta(hours=1)
     assert not value.official and value.publisher_verified and value.llm_use_allowed
+    from sessionquant.macro.models import stable_hash
+    repo.set_control('news_macro_analyzed:'+stable_hash([value.id,value.content_hash]),True)
     clock[0]+=timedelta(minutes=16)
     restored=ArticleEnricher(repo,policies=POLICY,fetcher=fake,clock=lambda:clock[0])
     duplicate,value=await restored.enrich(article(topic='other'))
@@ -170,3 +172,116 @@ async def test_title_only_is_never_sent_to_paid_model(repo):
         result=await analyzer.analyze_macro(article(),now=NOW)
         assert result['error']=='published_at_unknown' and calls==[] and repo.all('llm_usage')==[]
         await analyzer.aclose()
+
+
+async def test_failed_analysis_can_refetch_after_restart_and_revision_is_not_a_duplicate(repo):
+    from sessionquant.macro.models import stable_hash
+    fake = FakeFetcher()
+    clock = [NOW]
+    first = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await first.enrich(article())
+    # No completed analysis marker: a crash or LLM failure must not consume this version.
+    clock[0] += timedelta(minutes=16)
+    restored = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    retry, value = await restored.enrich(article())
+    assert value is not None and retry['status'] == 'ELIGIBLE_FOR_LLM'
+    repo.set_control('news_macro_analyzed:'+stable_hash([value.id, value.content_hash]), True)
+    clock[0] += timedelta(minutes=16)
+    fake.data = document(datePublished='2026-11-13T15:10:00Z')
+    revised, value = await restored.enrich(article())
+    assert value is not None and revised['status'] == 'ELIGIBLE_FOR_LLM'
+    assert revised['content_hash'] == row['content_hash']  # Same body, revised explicit publication metadata.
+    assert revised['document_version'] != row['document_version']
+    assert all(r.get('body') is None for r in repo.all('news_enrichments'))
+
+
+async def test_conditional_304_only_suppresses_completed_analysis(repo):
+    from sessionquant.macro.models import stable_hash
+    class Conditional(FakeFetcher):
+        async def get(self, url, **kwargs):
+            if kwargs.get('headers', {}).get('If-None-Match'):
+                self.calls.append(url)
+                return {'status': 304}
+            return await super().get(url, **kwargs)
+    fake = Conditional()
+    clock = [NOW]
+    first = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await first.enrich(article())
+    repo.set_control('news_macro_analyzed:'+stable_hash([value.id, value.content_hash]), True)
+    clock[0] += timedelta(minutes=16)
+    restored = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await restored.enrich(article())
+    assert row['status'] == 'DUPLICATE' and value is None and row['body'] is None
+    assert len(fake.calls) == 3
+
+
+async def test_robots_crawl_delay_applies_and_redirect_disallow_stops_before_second_hop(repo):
+    calls = []
+    async def resolve(_): return ['93.184.216.34']
+    def handler(request):
+        calls.append(request)
+        if request.url.path == '/robots.txt':
+            return httpx.Response(200, content=b'User-agent: *\nAllow: /\nDisallow: /private\nCrawl-delay: 7')
+        return httpx.Response(302, headers={'Location': '/private/story'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        fetcher = SafeArticleFetcher(POLICY, client=http, resolver=resolve)
+        from sessionquant.collectors.common import RateLimiter
+        limiter = RateLimiter(.5)
+        limiter.wait = immediate
+        fetcher.limiters['publisher.test'] = limiter
+        result, value = await ArticleEnricher(repo, policies=POLICY, fetcher=fetcher, clock=lambda: NOW).enrich(article())
+    assert result['status'] == 'ROBOTS_DISALLOWED' and value is None
+    assert [r.url.path for r in calls] == ['/robots.txt', '/news/rates']
+    assert limiter.interval >= 7
+
+
+@pytest.mark.parametrize('rules,path,allowed', [
+    ('Allow: /\nDisallow: /private', '/private/story', False),
+    ('Disallow: /\nAllow: /public', '/public/story', True),
+    ('Disallow: /*?secret=*', '/story?secret=value', False),
+    ('Disallow: /private$', '/private/story', True),
+    ('Disallow: /private$', '/private', False),
+])
+def test_robots_longest_rule_wildcard_and_end_anchor(rules, path, allowed):
+    from urllib.robotparser import RobotFileParser
+    from sessionquant.news.enrichment import robots_allowed
+    parser = RobotFileParser()
+    parser.parse(('User-agent: *\n'+rules).splitlines())
+    assert robots_allowed(parser, 'https://publisher.test'+path) is allowed
+
+
+async def test_robots_pacing_survives_enricher_restart(repo):
+    fake = FakeFetcher(robots='User-agent: *\nCrawl-delay: 7')
+    clock = [NOW]
+    first = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await first.enrich(article())
+    assert row['robots_delay_seconds'] == 7 and value is not None
+    clock[0] += timedelta(seconds=6)
+    restored = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await restored.enrich(article())
+    assert row['status'] == 'COOLDOWN' and value is None and len(fake.calls) == 2
+    clock[0] += timedelta(seconds=1)
+    row, value = await restored.enrich(article())
+    assert row['status'] == 'ELIGIBLE_FOR_LLM' and value is not None and len(fake.calls) == 3
+
+
+async def test_redirect_preserves_discovery_identity_and_completed_cache(repo):
+    from sessionquant.macro.models import stable_hash
+    final = 'https://publisher.test/news/rates-final'
+    class Redirected(FakeFetcher):
+        async def get(self, url, **kwargs):
+            response = await super().get(url, **kwargs)
+            if not url.endswith('/robots.txt'):
+                response.update(final_url=final, redirect_chain=[url, final])
+            return response
+    fake = Redirected(data=document().replace(URL.encode(), final.encode()))
+    clock = [NOW]
+    enricher = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await enricher.enrich(article())
+    assert value is not None and value.id == article().id and value.url == URL
+    assert row['final_url'] == final and row['article_id'] == article().id
+    repo.set_control('news_macro_analyzed:'+stable_hash([value.id, value.content_hash]), True)
+    clock[0] += timedelta(minutes=16)
+    restored = ArticleEnricher(repo, policies=POLICY, fetcher=fake, clock=lambda: clock[0])
+    row, value = await restored.enrich(article())
+    assert row['status'] == 'DUPLICATE' and value is None

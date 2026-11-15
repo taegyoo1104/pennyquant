@@ -62,8 +62,7 @@ class EconomicCalendarClient:
         self.status=[];events=[]
         for provider,url in self.feeds.items():
             key='calendar:'+provider
-            if not self.schedule.due(key,3600):continue
-            self.schedule.begin(key)
+            if not self.schedule.claim(key,3600):continue
             try:
                 response=await get_readonly(self.client,url,limiter=self.limiter,attempts=1)
                 values,issues=parse_calendar(response.content,url,utc(self.clock()))

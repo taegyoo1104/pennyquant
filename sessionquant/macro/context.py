@@ -23,11 +23,13 @@ def build_context(repo,now,*,analyses=(),events=()):
     for row in repo.recent('fred_reference_observations',limit=30):
         try:
             known=utc(row.get('ingested_at') or row['received_at'])
-            if known>now or utc(row['received_at'])>now:raise ValueError('미래 수신')
+            received=utc(row['received_at'])
+            if not received<=known<=now:raise ValueError('미래 또는 역전된 수신')
+            if row.get('observation_date') and row['observation_date']>now.date().isoformat():raise ValueError('미래 관측')
             value={**row,'role':'OFFICIAL_DAILY_REFERENCE','intraday_tick':False}
             if row.get('published_at') is None or not row.get('point_in_time_verified'):
                 value['eligible_for_market_inference']=False;reasons.append('fred_publication_time_unknown')
-            elif utc(row['published_at'])>known:raise ValueError('공표 시각 역전')
+            elif utc(row['published_at'])>received:raise ValueError('공표 시각 역전')
             else:value['eligible_for_market_inference']=True
             daily.append(value)
         except (ValueError,TypeError,KeyError,AttributeError):reasons.append('fred_time_mismatch_rejected')
@@ -39,16 +41,27 @@ def build_context(repo,now,*,analyses=(),events=()):
             try:
                 stamp=row.get('available_at')
                 if stamp is None or utc(stamp)>now or now-utc(stamp)>timedelta(minutes=15):raise ValueError('시각 불일치')
-                if row.get('event_at') is None or utc(row['event_at'])>now or row.get('quality_status')!='GOOD':raise ValueError('검증 자료 부족')
-                for minutes,window in row.get('windows',{}).items():
+                if (row.get('event_at') is None or utc(row['event_at'])>utc(stamp)
+                        or row.get('quality_status')!='GOOD' or utc(row['valid_until'])<now):raise ValueError('검증 자료 부족')
+                windows=row.get('windows',{})
+                if not windows or not any(w.get('quality_status')=='GOOD' for w in windows.values()):
+                    raise ValueError('시간창 미확인')
+                verified_windows={}
+                for minutes,window in windows.items():
                     if window.get('quality_status')!='GOOD':continue
                     if (not utc(window['start_at'])<=utc(window['event_at'])<=utc(window['available_at'])<=now
-                            or utc(window['event_at'])-utc(window['start_at'])!=timedelta(minutes=int(minutes))):raise ValueError('시간창 불일치')
-                proxies.append({**row,'role':'ETF_PROXY_ONLY','source_window_preserved':True})
-            except (ValueError,TypeError,AttributeError):reasons.append('proxy_time_mismatch_rejected')
+                            or utc(window['available_at'])>utc(stamp)
+                            or utc(window['event_at'])!=utc(row['event_at'])
+                            or utc(window['event_at'])-utc(window['start_at'])!=timedelta(minutes=int(minutes))
+                            or window.get('sample_count')!=int(minutes)+1
+                            or window.get('required_samples')!=int(minutes)+1):raise ValueError('시간창 불일치')
+                    verified_windows[minutes]=window
+                proxies.append({**row,'windows':verified_windows,'role':'ETF_PROXY_ONLY','source_window_preserved':True})
+            except (ValueError,TypeError,KeyError,AttributeError):reasons.append('proxy_time_mismatch_rejected')
     for row in analyses:
         try:
             if (row.get('source_verified') is True and row.get('status')=='CONFIRMED' and not row.get('error')
+                    and not row.get('context_only') and now-utc(row['published_at'])<=timedelta(hours=24)
                     and utc(row['published_at'])<=utc(row['received_at'])<=utc(row['analyzed_at'])<=now):news.append(row['article_id'])
         except (ValueError,TypeError,KeyError,AttributeError):reasons.append('news_time_mismatch_rejected')
     if not news:reasons.append('verified_news_cause_unknown')

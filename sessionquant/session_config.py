@@ -89,7 +89,8 @@ class SessionConfig:
                 ('economic_calendar_refresh_seconds',3600,86400),('company_new_analysis_max_age_hours',1,24),
                 ('macro_new_analysis_max_age_hours',1,72)]:
             value=getattr(self,name)
-            if type(value) is not int or not low<=value<=high:raise ValueError(f'{name} 범위를 확인하세요.')
+            if (isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value)
+                    or not low<=value<=high):raise ValueError(f'{name} 범위를 확인하세요.')
         if type(self.news_weekend_slowdown) is not bool:raise ValueError('주말 수집 감속은 불리언이어야 합니다.')
         if not isinstance(self.news_enrichment,dict) or set(self.news_enrichment)-{'publishers','min_chars','min_sentences'}:
             raise ValueError('기사 원문 검증 설정을 확인하세요.')
