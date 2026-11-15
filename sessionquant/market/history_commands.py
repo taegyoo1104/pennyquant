@@ -119,7 +119,7 @@ def collection_selection(manager, now, *, allow_partial=False):
         'missing_market_cap_symbols':sorted({row['ticker'] for row in issues if row.get('code')=='market_cap_missing'})}
 
 
-async def command(config, action, *, max_requests=5000, refresh=False, allow_partial=False):
+async def command(config, action, *, max_requests=5000, refresh=False, allow_partial=False, details=False, output=None):
     from ..session_runtime import _open, bind_runtime
     from ..database.repository import Repository
     from ..watchlist.selection import WatchlistManager
@@ -130,8 +130,21 @@ async def command(config, action, *, max_requests=5000, refresh=False, allow_par
         repo = Repository(config.db_path,backend=config.database_backend)
         try:
             from .history import current_view
-            return {'backfill':repo.get_control(PROGRESS,{}),'rvol':current_view(repo.get_control(VIEW,{})),
+            report = {'backfill':repo.get_control(PROGRESS,{}),'rvol':current_view(repo.get_control(VIEW,{})),
                     'order_writes':0,'llm_generation_calls':0}
+            if details or output is not None:
+                from .history_diagnostics import diagnose_history
+                report['history_quality']=diagnose_history(repo,report['backfill'])
+            if output is not None:
+                import json
+                from pathlib import Path
+                target=Path(output)
+                target.parent.mkdir(parents=True,exist_ok=True)
+                with target.open('x',encoding='utf-8') as handle:
+                    json.dump(report,handle,ensure_ascii=False,indent=2)
+                return {'output':str(target),'history_quality':report['history_quality']['summary'],
+                        'provider_calls':0,'order_writes':0,'llm_generation_calls':0}
+            return report
         finally:
             repo.close()
     if config.source != 'toss' or not config.watchlist_enabled:

@@ -4,6 +4,8 @@
 
 ## 감시 50종목 과거 분봉 DB·RVOL 연결
 
+사용자 로컬 최초 분봉 수집(2026-11-15 06:58~07:31 UTC)은 50종목×20일, 2,000회 조회 후 `error:null`, `INCOMPLETE`, 872/1000 종목×거래일 완료였다. 128개 조합의 실제 누락/충돌 원인은 아직 미확인이다. `history-status --details --output <새 JSON 경로>`로 API 재조회 없이 원본 DB의 날짜별 누락 구간·충돌·페이지 종료 사유와 구간별 분봉 확보 거래일 수를 진단하도록 보완했다. 87.2%는 분봉 자체 확보율이 아닌 종목×거래일 완전성 비율이다. 사용자에게 전체 재수집이나 누락 0 보간을 지시하지 않는다. 후속 진단·기존 분봉/시총 진단 관련 20 passed, 4 warnings; Ruff·diff 검사 통과.
+
 사용자 로컬에서 `watchlist-refresh`가 PARTIAL/50으로 반환됐고 BNY·FITB·FTV·HON·KHC·SKYD·VYLR의 `market_cap_missing`을 확인했다. 정확한 누락 원인은 아직 미확정이다. `watchlist-diagnose [--connect]`로 섹터 자료 누락과 개별 종목 기본 정보 응답을 구분한다. 완료 시총 자료는 하루 캐시되므로 무조건 재실행을 권하지 않는다. `history-backfill --allow-partial-watchlist`는 시총 누락만 있는 유효 기간 내 토스 PARTIAL 후보의 분봉 사전 저장만 허용하고, 보고서에 순위 미확정을 기록한다. 감시목록 VALID 승격·매수 허용·자동 티커 치환은 하지 않는다. 실제 전체 상위 50의 확정은 여전히 미완료다.
 
 이 후속 변경 검증: 시총 진단·분봉 저장·토스 시총·감시목록 통합 관련 32 passed, 4 warnings; Ruff·diff 검사 통과. 사용자 DB와 API에는 클라우드에서 접근하지 않았다.
