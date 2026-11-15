@@ -30,7 +30,7 @@ class TossSessionSource:
     def __init__(self, client: TossMarketClient | None = None, *, candidates_per_cycle: int = 2, clock=None,
                  watchlist=None, max_api_calls=24, light_refresh_seconds=30, ranking_refresh_seconds=60,
                  max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None,
-                 history_store=None, watchlist_candles_per_cycle=4):
+                 history_store=None, watchlist_candles_per_cycle=4, warmup=None):
         if type(candidates_per_cycle) is not int or not 1 <= candidates_per_cycle <= 10:
             raise ValueError("한 주기에 상세 수집할 종목 수는 1~10개입니다")
         self.client = client or TossMarketClient()
@@ -47,6 +47,7 @@ class TossSessionSource:
         self.on_priority_batch = on_priority_batch
         self.reference_monitor = reference_monitor
         self.history_store = history_store
+        self.warmup = warmup
         self.watchlist_candles_per_cycle = watchlist_candles_per_cycle
         if type(watchlist_candles_per_cycle) is not int or not 0 <= watchlist_candles_per_cycle <= 10:
             raise ValueError('감시목록 분봉 조회 수는 0~10개입니다.')
@@ -298,6 +299,16 @@ class TossSessionSource:
             current_snapshot=manager.store.at(utc(self.clock())) or {}
             force_cap=isinstance(manager.provider,TossMarketCapProvider) and manager.provider.state.get('complete',False) and current_snapshot.get('contract')!='toss_reported_security_krw_v1'
             await manager.refresh(utc(self.clock()),force=force_cap)
+            if self.warmup is not None:
+                async def warmup_read(symbol,cursor):
+                    return await call('toss_startup_backfill',self.client.candles,symbol,count=200,
+                                      before=cursor,symbol=symbol,optional=True)
+                await self.warmup.advance(manager,warmup_read,accept,
+                    lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols)
+                await deliver()
+                if not self.warmup.control.get('data_ready'):
+                    batch.observed_at = utc(self.clock())
+                    return batch
             if self.reference_monitor is not None:
                 async def reference_read(stream,symbol):
                     from ..market_reference.contracts import REFERENCES

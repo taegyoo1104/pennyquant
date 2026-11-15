@@ -16,6 +16,35 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+async def test_mysql_startup_repair_and_readiness_survive_new_connection(mysql_repositories):
+    from types import SimpleNamespace
+    from sessionquant.market.history import HistoryStore
+    from sessionquant.market.warmup import StartupWarmup, CONTROL
+    from sessionquant.watchlist.history_selection import DailyHistorySelection
+    from sessionquant.trading_controls import begin_session, heartbeat, request_command
+    from test_history_selection import prepare
+    from test_startup_warmup import NOW, Provider, finish
+    repo=mysql_repositories();other=mysql_repositories()
+    store=HistoryStore(repo)
+    prepare(store,'AAPL',NOW,omit_last=True)
+    control=begin_session(repo,mode='paper',now=NOW)
+    clock=SimpleNamespace(now=NOW)
+    selection=DailyHistorySelection(repo,startup_pending=True)
+    worker=StartupWarmup(repo,store,selection,control,clock=lambda:clock.now)
+    heartbeat(repo,control,now=NOW)
+    reopened=mysql_repositories(repo.namespace)
+    with pytest.raises(ValueError):
+        request_command(reopened,'start',run_id=control['run_id'],environment='PAPER_LOCAL',now=NOW)
+    manager=SimpleNamespace(allow_synthetic=False,base_symbols=lambda _:['AAPL'],
+        store=SimpleNamespace(status=lambda *args,**kwargs:{'status':'VALID'}))
+    await finish(worker,manager,Provider(clock))
+    heartbeat(repo,control,now=NOW)
+    assert reopened.get_control(CONTROL)['status']=='READY'
+    assert reopened.get_control('trade_control_state')['data_ready'] is True
+    assert other.get_control(CONTROL) is None
+    assert repo.all('orders')==other.all('orders')==[]
+
+
 def test_real_mysql_rvol_history_restart_namespace_and_schema7(mysql_repositories):
     from sessionquant.market.history import HistoryStore, KIND
     from test_watchlist_history import seeded, NOW

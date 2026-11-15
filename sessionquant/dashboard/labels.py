@@ -2,6 +2,9 @@
 import re
 
 LABELS = {
+    'WARMING':'자료 준비 중','COLLECTING':'자료 수집 중','WAITING_WATCHLIST':'감시 목록 확인 중',
+    'RETRY_WAIT':'다음 조회 대기','cursor_stalled':'이전 분봉 조회 중단',
+    'startup_data_not_ready':'시작 자료 준비 중',
     'PAPER_LOCAL':'모의매매','LIVE_LOCAL':'실제 계좌','LIVE_GCP':'실제 계좌',
     'UNKNOWN':'확인 필요','NOT_STARTED':'아직 시작 안 함','WAITING':'시작 버튼 대기',
     'RUNNING':'실행 중','STOPPED':'종료','LIQUIDATING':'매도 진행 중','OFFLINE':'연결 확인 필요',
@@ -90,6 +93,8 @@ LABELS = {
 }
 
 COLUMNS = {
+    'session':'거래일','current_session':'당일 자료','engine_minutes_missing':'전략에 전달할 분봉 수',
+    'received_minutes':'확보한 분봉 수',
     '403':'접근 제한 횟수','429':'요청 제한 횟수',
     'id':'기록 번호','kind':'구분','status':'상태','code':'사유','timestamp':'시각','observed_at':'확인 시각',
     'symbol':'종목','ticker':'종목','provider':'공급자','source':'출처','message':'설명','reason':'사유',

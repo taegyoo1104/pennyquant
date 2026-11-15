@@ -52,6 +52,7 @@ class DashboardData:
     news_status: dict = field(default_factory=dict)
     portfolio_selection: dict = field(default_factory=dict)
     news_flow: dict = field(default_factory=dict)
+    warmup: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -119,6 +120,7 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
             result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
             result.fred_references=repository.recent('fred_reference_observations',limit=30)
             result.news_status=repository.get_control('session_news_status',{}) or {}
+            result.warmup=repository.get_control('startup_data_warmup_v1',{}) or {}
             result.news_status['schedule']=repository.get_control('news_provider_schedule_v1',{}) or {}
             result.actual_account=repository.get_control("actual_account_snapshot")
             result.account_status=repository.get_control("account_monitor_status",{}) or {}

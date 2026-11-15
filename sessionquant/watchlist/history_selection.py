@@ -61,8 +61,9 @@ def inspect_history(store, symbols, now):
 
 
 class DailyHistorySelection:
-    def __init__(self, repo):
+    def __init__(self, repo, *, startup_pending=False):
         self.repo = repo
+        self.startup_pending = startup_pending
         saved = repo.get_control(CONTROL, {}) or {}
         # A new process rechecks pre-open preparation; an active session remains frozen.
         self.frame = saved if saved.get('frozen') else {}
@@ -70,6 +71,11 @@ class DailyHistorySelection:
     def ensure(self, symbols, now):
         now = utc(now)
         day, opened, _ = operating_session(now)
+        if self.startup_pending:
+            return {'session':day,'session_open':opened.isoformat(),'checked_at':now.isoformat(),
+                    'known_at':now.isoformat(),'base_symbols':list(symbols),'base_count':len(symbols),
+                    'included_symbols':[],'included_count':0,'excluded_count':len(symbols),
+                    'items':[],'frozen':False,'preparing':True,'coverage_only':True}
         frozen = now >= opened
         frame = self.frame
         if (frame.get('session') != day or utc(frame['checked_at']) > now
