@@ -53,12 +53,15 @@ VM 서비스 계정은 해당 백업 버킷에 새 파일을 쓰는 권한만 �
 
 ## 2. 서버 안에서 설치
 
-SSH로 들어간 **서버 안에서** 실행한다. 마지막 인자는 1단계에서 만든 버킷 이름이다.
+SSH로 들어간 **서버 안에서** 실행한다. 새 Debian 서버에는 Git이 없을 수 있으므로 먼저 설치한다. 프로젝트 ID는 GCE 메타데이터에서 읽고, 1단계의 기본 이름으로 만든 백업 버킷을 사용한다. 버킷 이름을 직접 다르게 정했다면 마지막 인자를 해당 이름으로 바꾼다.
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y git curl ca-certificates
 sudo git clone --branch wip/stage06-handoff-20261115 https://github.com/taegyoo1104/pennyquant.git /opt/sessionquant
 cd /opt/sessionquant
-sudo bash deploy/gcp/install.sh YOUR_PROJECT_ID-sq-backups
+SQ_PROJECT_ID="$(curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/project/project-id)"
+test -n "$SQ_PROJECT_ID" && sudo bash deploy/gcp/install.sh "${SQ_PROJECT_ID}-sq-backups"
 sudo nano /etc/sessionquant/app.env
 ```
 
