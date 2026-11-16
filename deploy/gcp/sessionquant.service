@@ -1,0 +1,16 @@
+[Unit]
+Description=SessionQuant Paper (manual VM start, manual trading start)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target sessionquant-cost-guard.timer
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/sessionquant/deploy/gcp/start.sh
+ExecStop=/usr/bin/docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml stop -t 180
+TimeoutStartSec=300
+TimeoutStopSec=240
+
+[Install]
+WantedBy=multi-user.target
