@@ -117,7 +117,13 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     expected='live' if environment=='LIVE_LOCAL' else 'paper' if environment=='PAPER_LOCAL' else None
     active=bool(active and expected==state.get('mode') and not readonly)
     from .dashboard.labels import label
-    st.write('**실행 상태 · '+(label(state.get('status','UNKNOWN')) if active else '연결 확인 필요 · 조회만 가능')+'**')
+    status=label(state.get('status','UNKNOWN')) if active else '연결 확인 필요 · 조회만 가능'
+    if compact:
+        if active:status={'WAITING':'매매 대기','RUNNING':'매매 중'}.get(state.get('status'),status)
+        columns=st.columns([2,1,1])
+        columns[0].markdown('**'+status+'**')
+        if state.get('status')=='WAITING' and active:columns[0].caption('매매 시작 버튼 대기')
+    else:st.write('**실행 상태 · '+status+'**')
     run=state['run_id']
     requests=[r for r in repo.recent('order_intents',200) if r.get('kind')=='dashboard_command' and r.get('run_id')==run]
     selling=set(((repo.load_state() or {}).get('broker') or {}).get('exit_intents') or {})
@@ -127,17 +133,17 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
             request_command(repo,action,run_id=run,environment=environment,symbol=symbol,now=now)
             st.rerun()
         except Exception:st.error('요청을 전달하지 못했습니다. 현재 실행·관리 수량·미체결을 확인하세요.')
-    with st.expander('매매 시작 확인'):
+    with columns[1].popover('매매 시작',width='stretch',type='primary') if compact else st.expander('매매 시작 확인'):
         confirm=st.checkbox('표시된 계좌와 모드를 확인했습니다.',key='confirm-start-'+run)
         if st.button('매매 시작',disabled=not active or bool(unresolved) or state.get('status')!='WAITING' or state.get('data_ready') is False or not confirm,key='trading-start'):submit('start')
-    with st.expander('일괄 매매 종료·청산 확인'):
+    with columns[2].popover('전체 매도',width='stretch') if compact else st.expander('일괄 매매 종료·청산 확인'):
         st.caption('신규 매수 차단 → 미체결 매수 취소 → 전략 관리 포지션 시장가 청산. 시장 시간·유동성에 따라 부분체결/미체결될 수 있습니다.')
         st.caption('대상: '+(', '.join(str(r.get('symbol'))+' '+str(r.get('qty')) for r in positions) or '관리 포지션 없음/미확인'))
         confirm=st.checkbox('시스템 관리 포지션 전량 청산 위험을 확인했습니다.',key='confirm-stop-'+run)
         live_ok=st.checkbox('마스킹된 실제 계좌 **의 청산 요청을 추가 확인합니다.',key='confirm-live-'+run) if expected=='live' else True
         if st.button('일괄 매매 종료·청산 요청',disabled=not active or not confirm or not live_ok or any(r.get('action')=='stop_all' for r in unresolved),key='trading-stop'):submit('stop_all')
     from .portfolio.models import decimal
-    for row in positions[:5] if compact else positions:
+    for row in [] if compact else positions:
         symbol=row.get('symbol');qty=row.get('qty')
         if not symbol:continue
         try:positive=decimal(qty)>0
@@ -147,8 +153,8 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
             confirm=st.checkbox(f'{symbol} 전략 관리 수량 전량 시장가 매도를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
             if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or symbol in selling or any(r.get('symbol')==symbol and r.get('status')=='pending' for r in requests)):
                 submit('sell_symbol',symbol)
-    st.caption('주문 처리와 남은 수량은 매매 내역에서 확인하세요.')
     if not compact:
+        st.caption('주문 처리와 남은 수량은 매매 내역에서 확인하세요.')
         for row in requests[-5:]:st.caption(str(row.get('action'))+': '+str(row.get('status')))
 
 

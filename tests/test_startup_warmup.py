@@ -374,5 +374,6 @@ def test_dashboard_shows_preparation_and_disables_start(tmp_path,monkeypatch):
     app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30).run()
     assert not app.exception
     assert app.button(key='trading-start').disabled
-    assert any('12/50' in item.value for item in app.info)
+    assert next(item for item in app.metric if item.label=='종목').value=='분봉 확인'
+    assert any('12 / 50구간 확인' in item.value for item in app.caption)
 

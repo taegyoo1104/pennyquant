@@ -53,6 +53,7 @@ class DashboardData:
     portfolio_selection: dict = field(default_factory=dict)
     news_flow: dict = field(default_factory=dict)
     warmup: dict = field(default_factory=dict)
+    engine_state: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -121,6 +122,7 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
             result.fred_references=repository.recent('fred_reference_observations',limit=30)
             result.news_status=repository.get_control('session_news_status',{}) or {}
             result.warmup=repository.get_control('startup_data_warmup_v1',{}) or {}
+            result.engine_state=repository.get_control('trade_control_state',{}) or {}
             result.news_status['schedule']=repository.get_control('news_provider_schedule_v1',{}) or {}
             result.actual_account=repository.get_control("actual_account_snapshot")
             result.account_status=repository.get_control("account_monitor_status",{}) or {}
@@ -142,7 +144,7 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
                 result.news_flow=summarize_news(result.tables['news_ingestions'],repository.recent('llm_calls',limit=limit),
                     network_calls=repository.recent_llm_attempts(limit=limit),
                     schedule=result.news_status.get('schedule',{}),health=repository.get_control('llm_provider_health',{}),
-                    engine=repository.get_control('trade_control_state',{}),
+                    engine=result.engine_state,
                     ingestion_limit=300 if page=='대시보드' else 2000,audit_limit=limit)
     except Exception:
         # 드라이버의 원문 오류에는 접속 주소나 인증 정보가 포함될 수 있다.
@@ -273,12 +275,14 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     view=build_view(data)
     account=view['account']
     from sessionquant.dashboard.labels import label
-    st.caption(f"{label(view['environment'])} · 마지막 시세 {view['last_event']}")
+    if page != '대시보드' or view['environment']!='PAPER_LOCAL':
+        st.caption(f"{label(view['environment'])} · 마지막 시세 {view['last_event']}")
     if data.error: st.error(data.error)
     if not data.connected: st.info('저장된 실행 기록이 없습니다. 계좌·연결 상태는 미확인입니다.')
     if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
     if data.context.get('paper_data_policy')=='observed_paper_v1':
-        st.info('합성 자료 사용 · 거래는 모의로 진행합니다.' if view['synthetic'] else '실제 시세 사용 · 거래는 모의로 진행합니다.')
+        if page != '대시보드':
+            st.info('합성 자료 사용 · 거래는 모의로 진행합니다.' if view['synthetic'] else '실제 시세 사용 · 거래는 모의로 진행합니다.')
         if page=='시스템·설정':
             st.caption('실제 계좌 권한은 확인하지 않습니다. 소수점 거래와 미확인 거래정지·기업행동, 거래량 비교 조건은 모의 가정으로 기록합니다.')
     if page=='대시보드':
@@ -333,6 +337,13 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         _table(rows)
         st.caption('뉴스가 없어도 차트 조건으로 후보가 될 수 있습니다. 선택한 거래 조건과 위험 한도를 통과해야 매수합니다.')
     if page == '매매 내역':
+        if data.connected and view['environment']=='PAPER_LOCAL':
+            from sessionquant.database.repository import Repository
+            from sessionquant.trading_controls import render_controls
+            from contextlib import closing
+            with closing(Repository(path)) as repo:
+                positions=(data.state.get('broker') or {}).get('positions') or {}
+                render_controls(repo,positions=[{'symbol':s,**r} for s,r in positions.items()],environment=view['environment'])
         from sessionquant.dashboard.summary_panels import render_actual_account
         if view['environment']=='LIVE_LOCAL': render_actual_account(data.actual_account,data.account_status)
         from sessionquant.dashboard.overview import filter_trades
@@ -432,17 +443,15 @@ def main() -> None:
     parser.add_argument("--db", default=os.getenv("SQ_DB", "data/sessionquant-paper-local.db"))
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
-    st.title("SessionQuant")
-    st.caption("미국 주식 · 시세와 뉴스 분석")
+    from sessionquant.dashboard.overview import PAGES
     with st.sidebar:
-        st.subheader("화면 설정")
+        st.title("SessionQuant")
+        page=st.radio('화면',PAGES,key='dashboard_page',label_visibility='collapsed')
+        st.divider()
         refresh = st.toggle("자동 갱신 · 5초", value=True,help='메인과 뉴스 화면을 자동으로 갱신합니다.')
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
-        st.caption("표시 시각: 한국 표준시\n\n거래 시간: 뉴욕 현지시각\n\n통화: 미국 달러")
-
-    from sessionquant.dashboard.overview import PAGES
-    page=st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
+        st.caption("한국시간 · 미국 달러")
 
     @st.fragment(run_every="5s" if refresh and page in {'대시보드','뉴스·LLM'} else None)
     def monitor() -> None:

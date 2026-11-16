@@ -107,7 +107,8 @@ def test_all_six_pages_navigation_and_refresh_are_read_only(tmp_path,monkeypatch
     repo.save_state({'broker':{'cash':'100','reserved_cash':'0','equity':'100','positions':{}}});repo.close()
     monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setattr('sys.argv',['session_app.py','--db',str(path)])
     app=AppTest.from_file(APP,default_timeout=30).run()
-    assert len(app.metric)==4 and app.radio(key='dashboard_page').options==list(PAGES)
+    assert [m.label for m in app.metric]==['시세','종목','뉴스','AI 분석','모의 총자산','매수 가능 금액']
+    assert app.sidebar.radio(key='dashboard_page').options==list(PAGES)
     assert app.button(key='trading-start').disabled
     app.checkbox[0].check().run()
     for page in PAGES:

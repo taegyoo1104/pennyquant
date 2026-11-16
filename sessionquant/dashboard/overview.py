@@ -79,6 +79,13 @@ def recent_trades(rows,now):
 
 
 def render_overview(data,view,path,usage_path=None,usage_environment=None):
+    if view['environment']=='PAPER_LOCAL':
+        from .operations_overview import render_operations
+        return render_operations(data,view,path)
+    return render_account_overview(data,view,path,usage_path,usage_environment)
+
+
+def render_account_overview(data,view,path,usage_path=None,usage_environment=None):
     import streamlit as st
     from .session_app import usd,timestamp,_table,age_seconds
     from ..database.repository import Repository
@@ -188,6 +195,8 @@ def render_system(data,view):
     import streamlit as st
     from .session_app import _table,timestamp
     st.subheader('시스템·설정 · 읽기 전용')
+    from .operations_overview import render_warmup_details
+    render_warmup_details(data.warmup)
     st.caption('엔진 마지막 수신: '+view['last_event']+' · API 연결 정상 여부는 저장 기록만으로 확정하지 않습니다.')
     st.subheader('알림')
     _table(data.tables['alerts'])

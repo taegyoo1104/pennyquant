@@ -17,8 +17,9 @@ def test_empty_dashboard_does_not_invent_account(tmp_path, monkeypatch):
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception
     assert app.title[0].value == "SessionQuant"
-    assert app.metric[0].value == "—"
-    assert len(app.metric)==4
+    assert next(m for m in app.metric if m.label=='모의 총자산').value == '—'
+    assert next(m for m in app.metric if m.label=='시세').value == '연결 미확인'
+    assert len(app.metric)==6
     assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     assert not any("실거래 활성화" == button.label for button in app.button)
     assert not (tmp_path / "absent.db").exists()
