@@ -19,6 +19,7 @@ from typing import Iterator
 from ..models import utc
 from .serialization import dumps, exact_jsonable, record_identity
 from .config import MySQLConfig, namespace_for
+from ..performance import timed, measure
 
 PRUNABLE_KINDS = ("price_samples", "quote_snapshots", "market_bars", "system_logs")
 
@@ -79,6 +80,7 @@ class MySQLRepository:
             self.close()
             raise
 
+    @timed('db_query')
     def _execute(self, sql: str, params=(), *, fetch: str | None = None):
         with self._mutex:
             try:
@@ -170,7 +172,8 @@ class MySQLRepository:
             self._in_transaction = True
             try:
                 yield
-                self.db.commit()
+                with measure('db_commit'):
+                    self.db.commit()
             except self._driver_errors:
                 try:
                     self.db.rollback()

@@ -9,6 +9,7 @@ from ..events import parse_event
 from ..models import jsonable, utc, symbol_valid
 from ..scanners.relative_volume import NEW_YORK, _calendar
 from .bars import session_bounds
+from ..performance import timed
 
 KIND = 'market_history_sessions'
 SOURCE = 'toss:/api/v1/candles:1m'
@@ -86,9 +87,11 @@ class HistoryStore:
             self.cache.popitem(last=False)
         return self.cache[key]
 
+    @timed('history_save')
     def save(self, symbol, day, bars, *, progress=None):
         old, previous = self.get(symbol, day)
         values = {signature(b):b for b in previous}
+        changed = False
         for bar in bars:
             if (bar.symbol != symbol or bar.source != SOURCE or bar.price_adjustment != 'raw'
                     or bar.received_at < bar.timestamp or bar.timestamp.second or bar.timestamp.microsecond
@@ -97,18 +100,22 @@ class HistoryStore:
             prior = values.get(signature(bar))
             if prior is None or bar.received_at < prior.received_at:
                 values[signature(bar)] = bar
+                changed = True
         values = sorted(values.values(), key=lambda b:(b.timestamp,b.received_at))
         bounds = session_bounds(datetime.fromisoformat(day+'T12:00:00-05:00'))
         if not bounds:
             raise ValueError('거래일 달력을 확인할 수 없습니다.')
         if any(not bounds[0] < b.timestamp <= bounds[1] for b in values):
             raise ValueError('정규장 밖의 분봉은 비교 이력에 저장하지 않습니다.')
+        if old is not None and not changed and (progress is None or progress == old.get('progress',{})):
+            return old
         row = {'id':record_id(symbol,day), 'symbol':symbol, 'session':day, 'source':SOURCE,
                'price_adjustment':'raw', 'bars':jsonable(values),
                'quality':session_quality(values,*bounds),
                'progress':progress if progress is not None else (old or {}).get('progress',{}),
                'received_at':max((b.received_at for b in values),default=datetime.now(timezone.utc)).isoformat()}
-        self.repo.record(KIND,row)
+        if old != row:
+            self.repo.record(KIND,row)
         self.cache[row['id']] = (row,values)
         return row
 
@@ -126,6 +133,7 @@ class HistoryStore:
             for (symbol,day), rows in grouped.items():
                 self.save(symbol,day,rows)
 
+    @timed('history_load')
     def load(self, symbol, now, *, record=False, include_current=False):
         days = [day for day,_,_ in history_plan(now)]
         today = str(utc(now).astimezone(NEW_YORK).date())

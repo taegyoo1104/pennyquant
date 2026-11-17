@@ -7,6 +7,7 @@ from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from ..models import Bar, utc
+from ..performance import timed
 
 NY = ZoneInfo("America/New_York")
 
@@ -22,11 +23,17 @@ def session_bounds(now: datetime) -> tuple[datetime, datetime] | None:
     day = utc(now).astimezone(NY).date()
     try:
         cal = calendar(day.year)
-        if not cal.is_session(str(day)):
-            return None
-        return cal.session_open(str(day)).to_pydatetime(), cal.session_close(str(day)).to_pydatetime()
+        return _day_bounds(day, cal)
     except (ValueError, KeyError, TypeError, ImportError, OverflowError):
         return None
+
+
+@lru_cache(maxsize=512)
+def _day_bounds(day, cal):
+    # Calendar identity is part of the key; lookup failures are never cached.
+    if not cal.is_session(str(day)):
+        return None
+    return cal.session_open(str(day)).to_pydatetime(), cal.session_close(str(day)).to_pydatetime()
 
 
 def available_minutes(bars: list[Bar], now: datetime, symbol: str | None = None) -> list[Bar]:
@@ -65,8 +72,13 @@ def aggregate_bars(bars: list[Bar], minutes: int, now: datetime, *, symbol: str 
     bounds = session_bounds(now)
     if bounds is None:
         return []
+    return _aggregate_available(available_minutes(bars, now, symbol), minutes, now, bounds)
+
+
+def _aggregate_available(available, minutes, now, bounds):
+    """Only accepts minutes already checked for receipt time and conflicts."""
     opened, closed = bounds
-    lookup = {bar.timestamp: bar for bar in available_minutes(bars, now, symbol)}
+    lookup = {bar.timestamp: bar for bar in available}
     result = []
     end = opened + timedelta(minutes=minutes)
     while end <= min(closed, utc(now)):
@@ -108,6 +120,10 @@ def atr(bars: list[Bar], period: int = 14) -> float | None:
 def session_vwap(bars: list[Bar], now: datetime, *, through: datetime | None = None) -> float | None:
     selected = available_minutes(bars, now)
     bounds = session_bounds(now)
+    return _vwap_available(selected, bounds, through)
+
+
+def _vwap_available(selected, bounds, through):
     if not selected or not bounds:
         return None
     if through:
@@ -143,17 +159,20 @@ class Indicators:
                 'calculated_at':self.calculated_at.isoformat() if self.calculated_at else None}
 
 
+@timed('indicators')
 def indicators(bars: list[Bar], now: datetime) -> Indicators:
-    five = aggregate_bars(bars, 5, now)
-    fifteen = aggregate_bars(bars, 15, now)
+    bounds = session_bounds(now)
+    available = available_minutes(bars, now)
+    five = _aggregate_available(available, 5, now, bounds) if bounds else []
+    fifteen = _aggregate_available(available, 15, now, bounds) if bounds else []
     through = five[-1].timestamp if five else None
-    selected = [bar for bar in available_minutes(bars, now) if through and bar.timestamp <= through]
+    selected = [bar for bar in available if through and bar.timestamp <= through]
     continuous = contiguous(five, 5)
     previous_volume = sum(bar.volume for bar in five[-6:-1]) / 5 if len(five) >= 6 else 0
-    return Indicators(tuple(five), tuple(fifteen), session_vwap(bars, now, through=through) if through else None,
+    return Indicators(tuple(five), tuple(fifteen), _vwap_available(available, bounds, through) if through else None,
                       ema([bar.close for bar in five]) if continuous else None,
                       atr(five) if continuous else None,
                       five[-1].volume / previous_volume if previous_volume and continuous else None,
                       sum(bar.volume for bar in selected), sum(bar.close * bar.volume for bar in selected),
-                      session_vwap(bars, now, through=five[-2].timestamp) if len(five) >= 2 else None,
+                      _vwap_available(available, bounds, five[-2].timestamp) if len(five) >= 2 else None,
                       through,five[-2].timestamp if len(five)>=2 else None,utc(now))

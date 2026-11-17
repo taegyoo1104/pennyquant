@@ -16,6 +16,27 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+def test_mysql_unchanged_history_skips_sql_but_corrections_and_timing_survive_restart(mysql_repositories):
+    from sessionquant.market.history import HistoryStore,history_plan
+    from sessionquant.performance import capture
+    from test_watchlist_history import NOW,minute_rows
+    repo=mysql_repositories()
+    store=HistoryStore(repo)
+    day,opened,_=history_plan(NOW)[-1]
+    rows=minute_rows('AAPL',opened,count=2)
+    store.save('AAPL',day,rows)
+    with capture() as repeated:
+        store.save('AAPL',day,[replace(b,received_at=NOW+timedelta(seconds=10)) for b in rows])
+    assert not any(r['phase']=='db_query' for r in repeated.snapshot()['phases'])
+    with capture() as changed:
+        store.save('AAPL',day,[replace(rows[0],volume=999)])
+    assert any(r['phase']=='db_query' and r['calls']>=1 for r in changed.snapshot()['phases'])
+    reopened=mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    row,bars=HistoryStore(reopened).get('AAPL',day)
+    assert len(bars)==3 and row['quality']['conflicting_minutes']==1
+    assert repo.all('orders')==[]
+
+
 async def test_mysql_startup_repair_and_readiness_survive_new_connection(mysql_repositories):
     from types import SimpleNamespace
     from sessionquant.market.history import HistoryStore

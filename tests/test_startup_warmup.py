@@ -218,6 +218,24 @@ async def test_weekend_and_next_session_use_completed_exchange_days(tmp_path):
     finally:repo.close()
 
 
+async def test_close_keeps_today_selection_without_next_day_warmup_or_db_scan(tmp_path,monkeypatch):
+    repo,store,selection,control,clock,worker,manager=setup(tmp_path)
+    try:
+        prepare(store,'AAPL',NOW)
+        provider=Provider(clock)
+        await finish(worker,manager,provider)
+        previous=worker.report.copy()
+        calls=len(provider.calls)
+        frame=selection.ensure(['AAPL'],NOW)
+        def unexpected(*args,**kwargs):pytest.fail('post-close must not rescan next-day history')
+        monkeypatch.setattr('sessionquant.watchlist.history_selection.inspect_history',unexpected)
+        clock.now=session_bounds(NOW)[1]+timedelta(seconds=1)
+        await worker.advance(manager,provider.fetch,provider.accept,provider.seen)
+        assert worker.report==previous and control['data_ready']
+        assert selection.ensure(['AAPL'],clock.now)==frame and len(provider.calls)==calls
+    finally:repo.close()
+
+
 def test_engine_rejects_queued_start_and_buy_while_warming(observed):
     from sessionquant.research import journal
     journal.start(observed.repo,observed.engine,source='fixture')

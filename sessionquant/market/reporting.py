@@ -89,6 +89,7 @@ def persist_quality(engine, now):
     report['source_state'] = {k:v for k,v in report['source_state'].items() if k in {
         'last_cycle_calls','cycle_call_budget','last_cycle_duration_seconds','backoff_until',
         'read_measurements','priority_delivered_at','priority_phase_seconds','budget_exhausted','history_progress',
+        'candidate_delivered_at','pre_focus_phase_seconds','focus_phase_seconds','optional_deadline_reached',
         'provider_read_observations','candle_observations'}}
     report['scope'] = 'focus_and_risk_priority' if manager else 'evaluated_symbols'
     report['market_reference_quality'] = {s:bar_quality(engine.market.bars.get(s,[]),s,now) for s in ['SPY','QQQ']}

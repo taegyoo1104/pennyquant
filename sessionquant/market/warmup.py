@@ -127,6 +127,9 @@ class StartupWarmup:
 
     async def advance(self, manager, fetch, accept, known, *, priority=(), max_pages=4, hydrate=None):
         now = utc(self.clock())
+        bounds = session_bounds(now)
+        if bounds and now >= bounds[1]:
+            return
         session = operating_session(now)[0]
         if self.session != session:
             self.session = session
