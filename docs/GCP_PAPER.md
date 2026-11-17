@@ -6,11 +6,11 @@
 
 ## 구성과 비용
 
-| 항목 | 초기 구성 |
+| 항목 | 현재 운영 구성 |
 | --- | --- |
-| 서버 | `e2-small` · 메모리 2GB · Debian 12 · `us-central1-a` |
+| 서버 | `e2-standard-2` · 2 vCPU·메모리 8GB · Ubuntu 24.04 · `us-central1-a` |
 | DB | 같은 서버의 MySQL, 외부 접속 차단 |
-| 데이터 | 20GB 표준 영구 디스크. 서버 중지 후에도 보존 |
+| 데이터 | 40GB 표준 영구 디스크. 서버 중지 후에도 보존 |
 | 화면 | SSH/IAP 터널을 통한 `localhost:8501` 접속 |
 | 백업 | 종료 시 SQL과 앱 자료를 묶음. 서버 안 최근 3개, 비공개 Cloud Storage 7일 보관 |
 | 시작 | GCP에서 서버를 수동 시작 → 예열 → 화면에서 매매 시작 |
@@ -18,7 +18,7 @@
 
 서버를 사용한 시간의 CPU·메모리·외부 IPv4, 영구 디스크, 백업 저장/요청·전송량이 비용 항목이다. 고정 IP·Cloud SQL·Cloud NAT·로드밸런서·Cloud Scheduler는 만들지 않는다. 서버를 중지하면 계산 자원 요금은 멈추지만 디스크와 백업 비용은 남는다. 임시 외부 IP는 중지 후 반납되며 다시 켜면 달라질 수 있다.
 
-`e2-small`은 무료 사용량 대상 `e2-micro`와 다르다. 1GB 서버에 DB·수집·화면을 함께 넣으면 메모리 부족 위험이 있어 초기값은 2GB로 잡았다. 무료 크레딧의 남은 금액·만료일·사용 가능 서비스는 결제 화면에서 확인한다. 이는 확정 월 견적이나 비용 상한이 아니다. 비용은 실행 시간과 사용량으로 확인한다.
+초기 2GB·20GB 구성에서 장중 CPU 포화와 저장 공간 부족을 확인해 위 사양으로 변경했다. 무료 사용량 대상 `e2-micro`와는 다르다. 추가 증설은 처리 시간 기록을 확인한 뒤 판단한다. 무료 크레딧의 남은 금액·만료일·사용 가능 서비스는 결제 화면에서 확인한다. 이는 확정 월 견적이나 비용 상한이 아니다. 비용은 실행 시간과 사용량으로 확인한다.
 
 OpenAI API 비용은 GCP 크레딧과 별개다. 기존 AI 월 한도 설정을 유지한다.
 
@@ -39,13 +39,13 @@ gcloud services enable compute.googleapis.com iap.googleapis.com storage.googlea
 gcloud iam service-accounts create sessionquant-vm --display-name='SessionQuant backup uploader'
 gcloud storage buckets create "gs://$SQ_BACKUP_BUCKET" --location=us-central1 --uniform-bucket-level-access --public-access-prevention
 gcloud storage buckets add-iam-policy-binding "gs://$SQ_BACKUP_BUCKET" --member="serviceAccount:$SQ_VM_SA" --role=roles/storage.objectCreator
-git clone --branch wip/stage06-handoff-20261115 https://github.com/taegyoo1104/pennyquant.git
+git clone --branch main https://github.com/taegyoo1104/pennyquant.git
 cd pennyquant
 gcloud storage buckets update "gs://$SQ_BACKUP_BUCKET" --lifecycle-file=deploy/gcp/backup-lifecycle.json
 gcloud compute networks create sessionquant-net --subnet-mode=custom
 gcloud compute networks subnets create sessionquant-subnet --network=sessionquant-net --region=us-central1 --range=10.42.0.0/24
 gcloud compute firewall-rules create sessionquant-iap-ssh --network=sessionquant-net --allow=tcp:22 --source-ranges=35.235.240.0/20 --target-tags=sessionquant-iap
-gcloud compute instances create sessionquant-paper --zone=us-central1-a --machine-type=e2-small --image-family=debian-12 --image-project=debian-cloud --boot-disk-size=20GB --boot-disk-type=pd-standard --no-boot-disk-auto-delete --subnet=sessionquant-subnet --tags=sessionquant-iap --service-account="$SQ_VM_SA" --scopes=cloud-platform --metadata=enable-oslogin=TRUE --no-restart-on-failure
+gcloud compute instances create sessionquant-paper --zone=us-central1-a --machine-type=e2-standard-2 --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud --boot-disk-size=40GB --boot-disk-type=pd-standard --no-boot-disk-auto-delete --subnet=sessionquant-subnet --tags=sessionquant-iap --service-account="$SQ_VM_SA" --scopes=cloud-platform --metadata=enable-oslogin=TRUE --no-restart-on-failure
 gcloud compute ssh sessionquant-paper --zone=us-central1-a --tunnel-through-iap
 ```
 
@@ -53,12 +53,12 @@ VM 서비스 계정은 해당 백업 버킷에 새 파일을 쓰는 권한만 �
 
 ## 2. 서버 안에서 설치
 
-SSH로 들어간 **서버 안에서** 실행한다. 새 Debian 서버에는 Git이 없을 수 있으므로 먼저 설치한다. 프로젝트 ID는 GCE 메타데이터에서 읽고, 1단계의 기본 이름으로 만든 백업 버킷을 사용한다. 버킷 이름을 직접 다르게 정했다면 마지막 인자를 해당 이름으로 바꾼다.
+SSH로 들어간 **서버 안에서** 실행한다. 새 Ubuntu 서버에는 Git이 없을 수 있으므로 먼저 설치한다. 프로젝트 ID는 GCE 메타데이터에서 읽고, 1단계의 기본 이름으로 만든 백업 버킷을 사용한다. 버킷 이름을 직접 다르게 정했다면 마지막 인자를 해당 이름으로 바꾼다.
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y git curl ca-certificates
-sudo git clone --branch wip/stage06-handoff-20261115 https://github.com/taegyoo1104/pennyquant.git /opt/sessionquant
+sudo git clone --branch main https://github.com/taegyoo1104/pennyquant.git /opt/sessionquant
 cd /opt/sessionquant
 SQ_PROJECT_ID="$(curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/project/project-id)"
 test -n "$SQ_PROJECT_ID" && sudo bash deploy/gcp/install.sh "${SQ_PROJECT_ID}-sq-backups"
@@ -105,6 +105,7 @@ sudo bash deploy/gcp/backup.sh
 
 ```bash
 sudo systemctl enable sessionquant.service sessionquant-cost-guard.timer
+sudo systemctl start sessionquant-cost-guard.timer
 sudo systemctl start sessionquant.service
 ```
 
@@ -143,6 +144,38 @@ sudo systemctl disable --now sessionquant.service sessionquant-cost-guard.timer
 sudo systemctl stop sessionquant-market-close.timer
 ```
 
-코드 업데이트도 위와 같이 엔진과 타이머를 먼저 중지하고 `/opt/sessionquant`에서 `sudo git pull --ff-only origin wip/stage06-handoff-20261115`, `sudo docker build -t sessionquant:local .`을 실행한다. 변경된 unit 파일이 있다면 설치 스크립트를 다시 실행한다. 마지막에는 4단계로 자동 실행·종료를 다시 활성화한다. DB 디렉터리를 삭제하거나 `down -v`를 실행하지 않는다.
+기존 운영 서버 업데이트는 아래 장전 절차를 사용한다. 서버에 수동 복구 수정이 남아 있을 수 있으므로 `reset --hard`나 강제 덮어쓰기를 하지 않는다. DB 디렉터리를 삭제하거나 `down -v`를 실행하지 않는다.
 
-백업은 `database.sql`과 `app/`을 담은 `tar.gz`다. 복구는 자동 실행을 끈 **별도 빈 서버**에서만 한다. 관리자 계정으로 버킷에서 백업을 내려받아 임시 폴더에 풀고, 3단계와 같은 방식으로 SQL을 빈 DB에 가져온 뒤 `app/`을 `/var/lib/sessionquant/app`에 복사하고 소유자를 `1000:1000`으로 맞춘다. 최신 백업의 장부·분봉·뉴스 기록을 확인한 뒤 실행한다. 기존 운영 DB 위에 덮어쓰지 않는다. 이 설치의 버킷과 디스크는 VM을 삭제해도 별도로 남으므로 프로젝트를 종료할 때 잔여 저장 비용도 확인한다.
+새 백업은 압축한 `database.sql.gz`와 `app/`을 담은 `tar.gz`다. 이전 백업은 `database.sql`일 수 있으며 두 형식을 가져오기 도구가 지원한다. 복구는 자동 실행을 끈 **별도 빈 서버**에서만 한다. 관리자 계정으로 버킷에서 백업을 내려받아 임시 폴더에 풀고, 3단계와 같은 방식으로 SQL을 빈 DB에 가져온 뒤 `app/`을 `/var/lib/sessionquant/app`에 복사하고 소유자를 `1000:1000`으로 맞춘다. 최신 백업의 장부·분봉·뉴스 기록을 확인한 뒤 실행한다. 기존 운영 DB 위에 덮어쓰지 않는다. 이 설치의 버킷과 디스크는 VM을 삭제해도 별도로 남으므로 프로젝트를 종료할 때 잔여 저장 비용도 확인한다.
+
+## 장전 업데이트와 확인
+
+2026-11-17 장은 한국시간 **23:30 개장**, 현재 전략의 신규 매수 판단은 다음 날 **00:45부터**다. 22:00~22:30에 VM을 켜서 업데이트·예열을 시작하는 것을 권장한다. 실제 소요 시간은 API 응답에 따라 달라지며 자료 준비 완료를 보장하는 시각은 아니다. 휴장일·폐장 이후 부팅은 자동 종료하므로 장전 작업 시간에 실행한다.
+
+1. **Cloud Shell**에서 운영 VM을 시작하고 외부 IP를 확인한다. IP가 달라졌다면 토스 API 허용 IP를 수정한다. 복구 VM은 켜지 않는다.
+
+```bash
+gcloud compute instances start sessionquant-paper --project=sessionquant --zone=us-central1-a
+gcloud compute instances describe sessionquant-paper --project=sessionquant --zone=us-central1-a --format='value(networkInterfaces[0].accessConfigs[0].natIP)'
+gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap
+```
+
+2. **운영 VM**에서 검사가 통과하고 main에 병합된 커밋의 `deploy/gcp/update_preopen.sh`를 별도 임시 파일로 내려받아 실행한다. 실행 인자는 해당 전체 커밋 SHA다. 릴리스 안내에 제공한 고정 주소와 SHA256 검증 명령을 사용한다. 실행 중 SSH 창은 열어 둔다. 이 스크립트는 미국 정규장 시작 전에만 동작한다.
+
+업데이트는 알려진 복구 파일 변경만 허용하며 원본을 `/var/lib/sessionquant/update-backups/`에 보관한다. 다른 수정·준비된 Git 변경이 있으면 덮지 않고 중단한다. `.env`·서버 환경 파일·DB·앱 자료는 보존한다. 배포된 Git 체크아웃은 검토한 커밋으로 고정되며 기존 브랜치 이력은 남는다. 이후 업데이트도 같은 도구를 사용한다.
+
+새 이미지 빌드 후 앱을 멈추고 새 Cloud Storage 백업을 만든다. DB 변경 로그 OFF, 전송 크기 64MiB 이상, 테이블 준비, 백업 성공, 토스 인증·AAPL 조회를 확인한 뒤 앱을 다시 실행한다. 실패하면 오류를 해결하고 재실행한다. 자동으로 매매 시작을 누르거나 초기 모의 장부를 만들지 않는다. 저장 공간 장애를 처음 복구하는 서버라면 [저장 공간 복구 안내](GCP_STORAGE_RECOVERY.md)가 먼저 필요하다.
+
+3. **완료 출력**에서 `sessionquant-market-close.timer`와 `sessionquant-storage-guard.timer`가 활성 상태인지 확인한다. 일반 거래일 겨울 기준 다음 날 06:05부터 종료·백업하고 VM도 꺼진다. 실제 전원 종료까지는 몇 분 더 걸릴 수 있다.
+
+4. 대시보드에서 예열 완료와 운영 종목 수를 확인하고 **매매 시작**을 직접 누른다. 장전에는 장중 시세·집중 종목·전략 판단이 대기일 수 있다. 개장 뒤 시장·종목에서 종목/SPY 비교 가격과 거래대금이 모이는지, 집중 제외 이유와 처리 속도 기록이 갱신되는지 본다. **ETF 관측 가격 표시만으로 분석 검증 완료를 판단하지 않는다.**
+
+서버 안에서 연결 점검만 다시 할 때는 `sudo bash /opt/sessionquant/deploy/gcp/preopen_check.sh`를 사용한다. 이 점검은 DB를 읽고 토스 인증·현재가만 조회한다. 주문·유료 LLM 생성은 하지 않으며 뉴스 분석의 의미적 정확성이나 전략 체결을 보증하지 않는다. 실행 중인 엔진은 별도로 설정된 뉴스 수집·분석을 계속할 수 있다.
+
+Cloud Shell에서 화면 터널은 별도 터미널에 연다.
+
+```bash
+gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap -- -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8501:127.0.0.1:8501
+```
+
+웹 미리보기 포트는 8501이다. 이미 사용 중이면 기존 터널을 이용한다. 미리보기 호스트가 바뀌었을 때만 `STREAMLIT_BROWSER_SERVER_ADDRESS`를 새 호스트와 맞춘다. 터널을 닫아도 VM의 엔진은 계속 실행된다.

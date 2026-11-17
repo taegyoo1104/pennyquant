@@ -25,8 +25,17 @@ def ready_data():
 def test_fresh_receipts_and_ready_selection_have_distinct_scopes():
     data=ready_data();cards=operation_cards(data,build_view(data,NOW),NOW)
     assert cards[0]['value']=='최근 수신' and cards[0]['detail']=='0초 전 · 1종목'
-    assert cards[1]['value']=='26개 준비' and cards[1]['detail']=='분봉 부족 24개 제외'
+    assert cards[1]['value']=='26개 준비' and cards[1]['detail']=='집중 —개 · 분봉 부족 24개 제외'
     assert cards[2]['value']=='기록 없음' and cards[3]['value']=='기록 없음'
+
+
+def test_home_focus_count_excludes_expired_saved_focus():
+    data=ready_data()
+    data.watchlist_state.update(focus_count=3,items=[
+        {'focused':True,'focus_valid_until':(NOW+timedelta(seconds=30)).isoformat()},
+        {'focused':True,'focus_valid_until':(NOW-timedelta(seconds=1)).isoformat()},
+        {'focused':True,'focus_valid_until':'invalid'}])
+    assert operation_cards(data,build_view(data,NOW),NOW)[1]['detail'].startswith('집중 1개')
 
 
 @pytest.mark.parametrize('field',['heartbeat','timestamp','received_at'])

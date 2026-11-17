@@ -309,7 +309,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         _table(market_rows, "SPY·QQQ의 최신 확정봉과 호가를 기다리고 있습니다.")
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
         from sessionquant.dashboard.reference_panel import render_references
-        render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references)
+        render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,quotes=view['quotes'])
         from sessionquant.dashboard.news_panel import calendar_rows
         schedule = calendar_rows(data.tables['economic_events'])
         if schedule:

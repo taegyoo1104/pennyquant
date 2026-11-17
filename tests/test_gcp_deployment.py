@@ -69,7 +69,8 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
     script=tmp_path/'stop.sh'
     # The disposable copy cannot execute host poweroff or access production paths.
     body=(DEPLOY/'stop.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
-        '/run/sessionquant-stop.lock',str(tmp_path/'stop.lock')).replace('/usr/bin/systemctl',str(bindir/'systemctl'))
+        '/run/sessionquant-stop.lock',str(tmp_path/'stop.lock')).replace('/usr/bin/systemctl',str(bindir/'systemctl')).replace(
+        '/etc/sessionquant',str(tmp_path/'etc'))
     script.write_text(body)
     result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
         'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
@@ -80,6 +81,7 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
     assert lines[-2:]==['sync','systemctl poweroff']
     assert not any(' -v' in line for line in lines)
     assert ('백업 실패' in result.stderr) is failed_backup
+    if failed_backup: assert (tmp_path/'etc/backup-status').read_text().startswith('FAILED ')
 
 
 @pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
@@ -90,6 +92,7 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     executable(bindir/'docker',f'echo "docker $*" >> "$CALLS"\nif [[ "$1" == run ]]; then echo {delay}; exit {int(error)}; fi\n')
     executable(bindir/'systemctl','echo "systemctl $*" >> "$CALLS"\nif [[ "$1" == is-active ]]; then exit 3; fi\n')
     executable(bindir/'systemd-run','echo "timer $*" >> "$CALLS"\n')
+    executable(bindir/'python3','exit 0\n')  # Storage check tested separately below.
     script=tmp_path/'start.sh'
     script.write_text((DEPLOY/'start.sh').read_text().replace('/opt/sessionquant',str(root)))
     result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
@@ -104,10 +107,14 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
 
 
 @pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
+@pytest.mark.parametrize('compressed', [False, True])
 @pytest.mark.parametrize('tables,running,allowed',[(0,False,True),(12,False,False),(0,True,False)])
-def test_import_only_accepts_empty_database_with_app_stopped(tmp_path,tables,running,allowed):
+def test_import_only_accepts_empty_database_with_app_stopped(tmp_path,tables,running,allowed,compressed):
+    import gzip
     root=tmp_path/'repo';root.mkdir();bindir=tmp_path/'bin';bindir.mkdir()
-    dump=tmp_path/'source.sql';dump.write_text('CREATE TABLE fixture (id INT);')
+    payload=b'CREATE TABLE fixture (id INT);'
+    dump=tmp_path/('source.sql.gz' if compressed else 'source.sql')
+    dump.write_bytes(gzip.compress(payload) if compressed else payload)
     copied=tmp_path/'copied.sql'
     executable(bindir/'docker',f'''if [[ "$*" == *"--services app"* ]]; then
   {'echo app' if running else ':'}
@@ -122,4 +129,159 @@ fi
     result=subprocess.run(['bash',str(script),str(dump)],env={**os.environ,
         'PATH':str(bindir)+':'+os.environ['PATH'],'COPIED':str(copied)},capture_output=True,text=True,timeout=10)
     assert (result.returncode==0) is allowed and copied.exists() is allowed
-    if allowed:assert copied.read_bytes()==dump.read_bytes()
+    if allowed:assert copied.read_bytes()==payload
+
+
+def test_storage_thresholds_and_inode_exhaustion_fail_closed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    spec = importlib.util.spec_from_file_location('storage_check', DEPLOY/'storage_check.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    stats = dict(f_bavail=2048, f_frsize=1024*1024, f_files=1000, f_favail=900)
+    monkeypatch.setattr(module.os, 'statvfs', lambda path: SimpleNamespace(**stats))
+    assert module.check([tmp_path], 2048)
+    stats['f_bavail'] = 2047
+    assert not module.check([tmp_path], 2048)
+    stats.update(f_bavail=4096, f_favail=49)
+    assert not module.check([tmp_path], 2048)
+    def unavailable(path):
+        raise OSError('fixture')
+    monkeypatch.setattr(module.os, 'statvfs', unavailable)
+    assert not module.check([tmp_path], 2048)
+
+
+@pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
+@pytest.mark.parametrize('failure', ['', 'dump', 'upload', 'space'])
+def test_backup_streams_compressed_sql_and_preserves_previous_backup_on_failure(tmp_path, failure):
+    import tarfile
+    import gzip
+    root=tmp_path/'repo'; deploy=root/'deploy/gcp'; deploy.mkdir(parents=True)
+    data=tmp_path/'data'; (data/'app').mkdir(parents=True)
+    (data/'app/state.json').write_text('{"fixture":true}')
+    backups=data/'backups'; backups.mkdir()
+    old=backups/'sessionquant-20000101.tar.gz'; old.write_bytes(b'previous backup')
+    etc=tmp_path/'etc'; etc.mkdir()
+    bindir=tmp_path/'bin'; bindir.mkdir()
+    executable(bindir/'docker', '''if [[ "$*" == *"--services app"* ]]; then exit 0; fi
+printf 'CREATE TABLE fixture (id INT);\\n'
+if [[ "$FAILURE" == dump ]]; then exit 1; fi
+''')
+    (deploy/'storage_check.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="space"))')
+    (deploy/'upload_backup.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="upload"))')
+    body=(DEPLOY/'backup.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
+        '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)).replace(
+        '/run/sessionquant-backup.lock',str(tmp_path/'backup.lock'))
+    script=tmp_path/'backup.sh'; script.write_text(body)
+    result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
+        'FAILURE':failure},capture_output=True,text=True,timeout=20)
+    assert (result.returncode==0) == (not failure), result.stderr
+    assert old.read_bytes()==b'previous backup'
+    assert not list(backups.glob('.working.*'))
+    completed=[p for p in backups.glob('sessionquant-*.tar.gz') if p!=old]
+    assert len(completed)==(1 if failure in ('', 'upload') else 0)
+    assert (etc/'backup-status').read_text().startswith('FAILED' if failure else 'UPLOADED')
+    if completed:
+        with tarfile.open(completed[0]) as archive:
+            assert 'database.sql' not in archive.getnames()
+            assert gzip.decompress(archive.extractfile('database.sql.gz').read()).startswith(b'CREATE TABLE')
+            assert archive.extractfile('app/state.json').read()==b'{"fixture":true}'
+
+
+@pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
+@pytest.mark.parametrize('healthy,maintenance', [(True,False), (False,False), (False,True)])
+def test_storage_guard_stops_only_app_and_latches_without_deleting_data(tmp_path, healthy, maintenance):
+    root=tmp_path/'repo'; root.mkdir(); etc=tmp_path/'etc'; etc.mkdir()
+    if maintenance: (etc/'maintenance').touch()
+    calls=tmp_path/'calls'; bindir=tmp_path/'bin'; bindir.mkdir()
+    executable(bindir/'docker','echo "$*" >> "$CALLS"\nif [[ "$*" == *"--services app"* ]]; then echo app; fi\n')
+    executable(bindir/'python3',f'exit {0 if healthy else 1}\n')
+    script=tmp_path/'guard.sh'; script.write_text((DEPLOY/'storage_guard.sh').read_text().replace(
+        '/opt/sessionquant',str(root)).replace('/etc/sessionquant',str(etc)))
+    result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
+        'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
+    stopped=not healthy and not maintenance
+    assert result.returncode==int(stopped)
+    assert (etc/'storage-blocked').exists()==stopped
+    log=calls.read_text() if calls.exists() else ''
+    assert ('stop -t 180 app' in log)==stopped
+    assert 'down' not in log and 'stop -t 180 db' not in log
+
+
+@pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
+@pytest.mark.parametrize('condition', ['maintenance', 'storage-blocked', 'backup-failed', 'low-space'])
+def test_start_never_starts_app_when_maintenance_or_storage_recovery_is_needed(tmp_path,condition):
+    root=tmp_path/'repo'; root.mkdir(); etc=tmp_path/'etc'; etc.mkdir()
+    if condition in ('maintenance', 'storage-blocked'): (etc/condition).touch()
+    if condition=='backup-failed': (etc/'backup-status').write_text('FAILED fixture\n')
+    calls=tmp_path/'calls'; bindir=tmp_path/'bin'; bindir.mkdir()
+    executable(bindir/'docker','echo "docker $*" >> "$CALLS"\nif [[ "$1" == run ]]; then echo 3600; fi\n')
+    executable(bindir/'systemctl','if [[ "$1" == is-active ]]; then exit 3; fi\n')
+    executable(bindir/'systemd-run','echo timer >> "$CALLS"\n')
+    executable(bindir/'python3',f'exit {int(condition=="low-space")}\n')
+    script=tmp_path/'start.sh'; script.write_text((DEPLOY/'start.sh').read_text().replace(
+        '/opt/sessionquant',str(root)).replace('/etc/sessionquant',str(etc)))
+    result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
+        'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
+    assert result.returncode == (0 if condition=='maintenance' else 1)
+    log=calls.read_text() if calls.exists() else ''
+    assert 'up -d' not in log
+    assert ('timer' in log) == (condition!='maintenance')
+
+
+@pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
+@pytest.mark.parametrize('operating_status', ['TERMINATED', 'RUNNING'])
+def test_cloudshell_preparation_snapshots_before_disk_changes_and_never_starts_vm(tmp_path,operating_status):
+    bindir=tmp_path/'bin'; bindir.mkdir(); calls=tmp_path/'calls'
+    executable(bindir/'gcloud', '''echo "$*" >> "$CALLS"
+case "$*" in
+  *"snapshots describe"*) echo READY ;;
+  *"describe sessionquant-paper"*"value(status)"*) echo "$OPERATING_STATUS" ;;
+  *"describe sessionquant-recovery"*"value(status)"*) echo RUNNING ;;
+  *"describe sessionquant-paper"*"json(disks)"*) echo '{"disks":[{"boot":true,"source":"disks/sessionquant-ubuntu-boot"}]}' ;;
+  *"describe sessionquant-recovery"*"disks.deviceName"*) echo 'persistent-disk-0;sq-recovery;sq-postclose' ;;
+esac
+''')
+    result=subprocess.run(['bash',str(DEPLOY/'cloudshell_prepare_storage.sh')],env={**os.environ,
+        'PATH':str(bindir)+':'+os.environ['PATH'],'CALLS':str(calls),'OPERATING_STATUS':operating_status},
+        capture_output=True,text=True,timeout=10)
+    log=calls.read_text()
+    assert 'instances start' not in log and ' delete ' not in log
+    if operating_status=='RUNNING':
+        assert result.returncode!=0 and 'detach-disk' not in log
+    else:
+        assert result.returncode==0, result.stderr
+        assert log.index('snapshots describe') < log.index('detach-disk')
+        assert log.index('detach-disk sessionquant-paper') < log.index('device-name=sq-operating')
+        assert log.index('sq-offline-maintenance.sh" /mnt/sq-operating') < log.index('attach-disk sessionquant-paper')
+        assert '--boot --device-name=sessionquant-ubuntu-boot' in log
+        assert 'set-disk-auto-delete sessionquant-paper' in log and '--no-auto-delete' in log
+
+
+@pytest.mark.skipif(os.name=='nt' or not hasattr(os,'geteuid') or os.geteuid()!=0, reason='Linux offline root fixture')
+@pytest.mark.parametrize('writable', [True, False])
+def test_offline_maintenance_masks_units_and_preserves_old_unit_without_touching_db(tmp_path,writable):
+    root=tmp_path/'disk'; (root/'etc/sessionquant').mkdir(parents=True)
+    units=root/'etc/systemd/system'; units.mkdir(parents=True)
+    unit=units/'sessionquant.service'; unit.write_text('original unit')
+    deploy=root/'opt/sessionquant/deploy/gcp'; deploy.mkdir(parents=True); (deploy/'compose.yaml').touch()
+    data=root/'var/lib/sessionquant/mysql'; data.mkdir(parents=True); (data/'fixture.ibd').write_bytes(b'preserved')
+    bindir=tmp_path/'bin'; bindir.mkdir()
+    executable(bindir/'mountpoint', 'exit 0\n')
+    executable(bindir/'sync', 'exit 0\n')
+    executable(bindir/'findmnt', '''if [[ "$*" == *OPTIONS* ]]; then echo "$OPTIONS";
+elif [[ "$*" == *--mountpoint* ]]; then echo /dev/sdz1; else echo /dev/sda1; fi
+''')
+    executable(bindir/'readlink', '''if [[ "$*" == *google-sq-operating-part1* ]]; then echo /dev/sdz1;
+else exec /usr/bin/readlink "$@"; fi
+''')
+    result=subprocess.run(['bash',str(DEPLOY/'offline_maintenance.sh'),str(root)],env={**os.environ,
+        'PATH':str(bindir)+':'+os.environ['PATH'],'OPTIONS':'rw,relatime' if writable else 'ro,relatime'},
+        capture_output=True,text=True,timeout=10)
+    assert (result.returncode==0)==writable, result.stderr
+    assert (data/'fixture.ibd').read_bytes()==b'preserved'
+    assert (root/'etc/sessionquant/maintenance').exists()==writable
+    if writable:
+        assert unit.is_symlink() and os.readlink(unit)=='/dev/null'
+        assert (root/'etc/sessionquant/units-before-storage-repair/sessionquant.service').read_text()=='original unit'
+    else:
+        assert unit.read_text()=='original unit'

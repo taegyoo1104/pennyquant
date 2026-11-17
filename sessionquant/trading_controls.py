@@ -119,10 +119,11 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     from .dashboard.labels import label
     status=label(state.get('status','UNKNOWN')) if active else '연결 확인 필요 · 조회만 가능'
     if compact:
-        if active:status={'WAITING':'매매 대기','RUNNING':'매매 중'}.get(state.get('status'),status)
+        if active:status={'WAITING':'자동매매 꺼짐','RUNNING':'자동매매 켜짐'}.get(state.get('status'),status)
         columns=st.columns([2,1,1])
         columns[0].markdown('**'+status+'**')
         if state.get('status')=='WAITING' and active:columns[0].caption('매매 시작 버튼 대기')
+        if state.get('status')=='RUNNING' and active:columns[0].caption('조건이 맞을 때만 모의 주문을 냅니다.')
     else:st.write('**실행 상태 · '+status+'**')
     run=state['run_id']
     requests=[r for r in repo.recent('order_intents',200) if r.get('kind')=='dashboard_command' and r.get('run_id')==run]

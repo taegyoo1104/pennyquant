@@ -45,6 +45,12 @@ def render_watchlist(state, candidates):
     st.caption('선정 정책 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
     cols[3].metric('현재 집중 분석', f"{len(focus)} / {state.get('focus_limit',20)}")
     cols[4].metric('현재 진입 신호', str(len(signals)))
+    if active and not focus:
+        from collections import Counter
+        reasons=Counter(row.get('focus_reason') or '선정 자료 확인 중'
+            for row in items if row.get('operating'))
+        if reasons:
+            st.info('집중 대기 · '+' / '.join(f'{reason} ({count}개)' for reason,count in reasons.most_common(3)))
     history = state.get('history_selection') or {}
     if history.get('preparing'):
         st.info('시작 자료를 준비 중입니다. 보충 검사가 끝나면 운영 종목을 정합니다.')

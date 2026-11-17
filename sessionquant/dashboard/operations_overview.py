@@ -36,7 +36,16 @@ def operation_cards(data, view, now=None):
     elif phase in {'READY','PARTIAL'}:
         if status == 'VALID' and current:
             count = warmup.get('history_ready_count')
-            selection.update(value=f'{_count(count)}개 준비', detail=f"분봉 부족 {_count(warmup.get('history_excluded_count'))}개 제외",
+            from ..models import utc
+            items=data.watchlist_state.get('items')
+            focused=None
+            if isinstance(items,list):
+                focused=0
+                for row in items:
+                    try:
+                        if row.get('focused') and utc(row['focus_valid_until']) >= now:focused+=1
+                    except (ValueError,TypeError,KeyError,AttributeError):pass
+            selection.update(value=f'{_count(count)}개 준비', detail=f"집중 {_count(focused)}개 · 분봉 부족 {_count(warmup.get('history_excluded_count'))}개 제외",
                              warning=not isinstance(count,int) or isinstance(count,bool) or count <= 0)
         else:
             selection.update(value='목록 확인 필요', detail='목록이 만료됐거나 최신 상태를 확인할 수 없습니다.', warning=True)
@@ -125,6 +134,12 @@ def render_operations(data, view, path):
     summary[1].metric('매수 가능 금액',usd(cash-reserved) if cash is not None and reserved is not None else '—')
     st.subheader('보유 종목')
     _table([{k:r[k] for k in ('종목','평가액','평가 손익')} for r in view['positions']], '보유 종목이 없습니다.')
+    fills=data.tables.get('executions',[])
+    if fills:
+        latest=max(fills,key=lambda r:str(r.get('timestamp') or r.get('filled_at') or ''))
+        st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
+    else:
+        st.caption('조회 범위에 모의 체결 기록이 없습니다.')
     from .labels import label
     strategy = data.context.get('strategy') or data.state.get('strategy')
     if strategy:

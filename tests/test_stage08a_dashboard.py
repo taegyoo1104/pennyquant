@@ -75,7 +75,7 @@ def test_reference_badge_never_upgrades_latency_and_stale_numbers_disappear(qual
     row=reference_rows({'items':{'IEF':item}},NOW)[1]
     assert row['지연 구분']==latency
     stale=reference_rows({'items':{'IEF':item}},NOW+timedelta(seconds=2))[1]
-    assert stale['가격']=='—'
+    assert stale['관측 가격']=='—'  # No source observation/timestamp to display.
 
 
 @pytest.mark.parametrize('environment',['LIVE_LOCAL','DEMO','LIVE_READONLY'])
