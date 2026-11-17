@@ -771,3 +771,26 @@ def test_mysql_actual_llm_requests_are_not_hidden_by_prechecks(mysql_repositorie
     assert [r['id'] for r in repo.recent_llm_attempts(limit=1)]==['failure']
     assert [r['id'] for r in other.recent_llm_attempts()]==['other-account']
     assert not repo.all('orders')
+
+
+@pytest.mark.parametrize('scenario', [
+    'test_quote_checkpoint_bytes_drop_and_restart_retains_full_state',
+    'test_version2_migrates_without_rewriting_bars_and_missing_overlay_fails',
+    'test_corrected_bar_checkpoint_preserves_versions_and_receipts',
+    'test_failed_manifest_write_rolls_back_split_checkpoint_and_poison_engine',
+])
+def test_mysql_split_market_checkpoint_recovery(mysql_repositories, tmp_path, monkeypatch, scenario):
+    """Run the same recovery/rollback contract on real MySQL, not only SQLite."""
+    import test_engine_checkpoint_performance as checks
+    def repository(*args, **kwargs):
+        repo = mysql_repositories()
+        # The shared checks close their repository. Keep it open until the fixture
+        # has deleted its isolated namespace; monkeypatch restores close first.
+        monkeypatch.setattr(repo, 'close', lambda: None)
+        return repo
+    monkeypatch.setattr(checks, 'Repository', repository)
+    check = getattr(checks, scenario)
+    if scenario == 'test_corrected_bar_checkpoint_preserves_versions_and_receipts':
+        check(tmp_path)
+    else:
+        check(tmp_path, monkeypatch)
