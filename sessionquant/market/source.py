@@ -133,6 +133,7 @@ class TossSessionSource:
         import asyncio
         now = utc(now or self.clock())
         started = monotonic()
+        optional_deadline = started + self.max_cycle_seconds
         manager, batch = self.watchlist, MarketBatch()
         state = manager.state
         budget = ReadCallBudget(self.max_api_calls)
@@ -141,17 +142,24 @@ class TossSessionSource:
         measurements = []
         updated_history = set()
 
+        def skipped(source, symbol, optional, reason):
+            measurements.append({'source':source,'symbol':symbol,'priority':not optional,'status':reason,
+                'read_attempts':0,'duration_seconds':0.0,'observed_at':utc(self.clock()).isoformat()})
+
         async def call(source, method, *args, symbol='*', optional=False, **kwargs):
             budget.reserved = 0
             group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
             until = state.get('reference_backoff_groups',{}).get(group)
             if until and utc(self.clock()) < utc(until):
+                skipped(source,symbol,optional,'provider_group_backoff')
                 return None
             if state.get('backoff_until') and utc(self.clock()) < utc(state['backoff_until']):
+                skipped(source,symbol,optional,'provider_backoff')
                 return None
-            remaining = self.max_cycle_seconds-(monotonic()-started)
+            remaining = optional_deadline-monotonic()
             if optional and remaining <= 0:
                 state['optional_deadline_reached'] = True
+                skipped(source,symbol,optional,'deadline_skipped')
                 return None
             before, began = budget.used, monotonic()
             status = 'UNKNOWN'
@@ -225,13 +233,13 @@ class TossSessionSource:
                 if symbol not in {'SPY','QQQ'}:
                     batch.eligibility.append(evidence)
 
-        async def deliver():
+        async def deliver(*, priority=True):
             if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars):
                 batch.observed_at = utc(self.clock())
                 self.on_priority_batch(batch)
                 batch.bars, batch.quotes, batch.eligibility = [], [], []
                 batch.cached_bars = []
-                state['priority_delivered_at'] = utc(self.clock()).isoformat()
+                state['priority_delivered_at' if priority else 'candidate_delivered_at'] = utc(self.clock()).isoformat()
 
         def accept(symbol,bars, *, cached=False):
             if self.history_store is not None and bars and not cached:
@@ -280,6 +288,9 @@ class TossSessionSource:
 
         try:
             state['budget_exhausted'] = False
+            state['optional_deadline_reached'] = False
+            state['pre_focus_phase_seconds'] = None
+            state['focus_phase_seconds'] = None
             # 100개 관찰·공급자 갱신보다 먼저 위험 호가를 전달한다. 청산 시계는 별도 실행된다.
             await metadata(priority)
             quote_attempts = state.setdefault('last_priority_quote_attempt',{})
@@ -313,6 +324,46 @@ class TossSessionSource:
                 if not self.warmup.control.get('data_ready'):
                     batch.observed_at = utc(self.clock())
                     return batch
+            # Risk delivery and startup work may include slow synchronous DB writes.
+            # Give ready candidates one bounded window of their own, without resetting
+            # the shared request/retry count or bypassing provider Retry-After.
+            focus_started = monotonic()
+            state['pre_focus_phase_seconds'] = round(focus_started-started,3)
+            optional_deadline = focus_started + self.max_cycle_seconds
+            pool = manager.light_symbols(utc(self.clock()))
+            current = utc(self.clock())
+            if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
+                before = budget.used
+                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,'SPY','QQQ'])),optional=True)
+                if budget.used > before:
+                    state['last_light_attempt_at'] = utc(self.clock()).isoformat()
+                if rows is not None:
+                    try:
+                        manager.observe_prices(rows,utc(self.clock())); state['last_light_at'] = utc(self.clock()).isoformat()
+                    except (ValueError,TypeError,KeyError):
+                        batch.errors.append({'source':'toss_prices','symbol':'*','error_type':'DataQualityError','message':'현재가 배치 검증 실패'})
+            if pool and (not state.get('last_ranking_attempt_at') or (current-utc(state['last_ranking_attempt_at'])).total_seconds() >= self.ranking_refresh_seconds):
+                before = budget.used
+                rows = await call('toss_rankings',self.client.rankings,ranking_type='MARKET_TRADING_AMOUNT',count=100,optional=True)
+                if budget.used > before:
+                    state['last_ranking_attempt_at'] = utc(self.clock()).isoformat()
+                if rows is not None:
+                    try:
+                        manager.observe_rankings(rows,utc(self.clock())); state['last_ranking_at'] = utc(self.clock()).isoformat()
+                    except (ValueError,TypeError,KeyError):
+                        state['rankings'] = {}
+                        batch.errors.append({'source':'toss_rankings','symbol':'*','error_type':'DataQualityError','message':'거래대금 랭킹 검증 실패'})
+            focus = manager.focus(utc(self.clock()))
+            chosen = manager.scheduler.choose([s for s in focus if s not in priority],self.candidates_per_cycle)
+            await metadata(chosen,optional=True)
+            # Fresh candidate quotes reach the engine before slow candle persistence
+            # or non-candidate ETF reference collection can consume the window.
+            await quotes(chosen,optional=True)
+            await deliver(priority=False)
+            for symbol in chosen:
+                await candles(symbol,optional=True)
+            await deliver(priority=False)
+            state['focus_phase_seconds'] = round(monotonic()-focus_started,3)
             if self.reference_monitor is not None:
                 async def reference_read(stream,symbol):
                     from ..market_reference.contracts import REFERENCES
@@ -329,44 +380,15 @@ class TossSessionSource:
                         last_error = batch.errors[-1] if len(batch.errors)>before_errors else {}
                         error = 'http_'+str(last_error['http_status']) if last_error.get('http_status') else last_error.get('error_type','budget_or_backoff_or_deadline')
                     return {'data':value,'error':error,'received_at':utc(self.clock()).isoformat()}
-                # 참고군은 위험 자료보다 뒤이며, 예산이 부족하면 후보 슬롯을 남기고 축소한다.
+                # 후보 전달 후 남은 예산으로 참고군을 수집하며 배경 분봉 슬롯도 남긴다.
                 allowance = max(0,budget.limit-budget.used-(self.candidates_per_cycle*2+1))
                 await self.reference_monitor.poll(reference_read,limit=allowance)
-            pool = manager.light_symbols(utc(self.clock()))
-            current = utc(self.clock())
-            if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
-                state['last_light_attempt_at'] = current.isoformat()
-                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,'SPY','QQQ'])),optional=True)
-                if rows is not None:
-                    try:
-                        manager.observe_prices(rows,utc(self.clock())); state['last_light_at'] = utc(self.clock()).isoformat()
-                    except (ValueError,TypeError,KeyError):
-                        batch.errors.append({'source':'toss_prices','symbol':'*','error_type':'DataQualityError','message':'현재가 배치 검증 실패'})
-            if pool and (not state.get('last_ranking_attempt_at') or (current-utc(state['last_ranking_attempt_at'])).total_seconds() >= self.ranking_refresh_seconds):
-                state['last_ranking_attempt_at'] = current.isoformat()
-                rows = await call('toss_rankings',self.client.rankings,ranking_type='MARKET_TRADING_AMOUNT',count=100,optional=True)
-                if rows is not None:
-                    try:
-                        manager.observe_rankings(rows,utc(self.clock())); state['last_ranking_at'] = utc(self.clock()).isoformat()
-                    except (ValueError,TypeError,KeyError):
-                        state['rankings'] = {}
-                        batch.errors.append({'source':'toss_rankings','symbol':'*','error_type':'DataQualityError','message':'거래대금 랭킹 검증 실패'})
-            focus = manager.focus(utc(self.clock()))
-            chosen = manager.scheduler.choose([s for s in focus if s not in priority],self.candidates_per_cycle)
-            await metadata(chosen,optional=True)
-            for symbol in chosen:
-                # 최신 호가 슬롯을 남겨 상세 봉이 후보 순환을 독점하지 않게 한다.
-                if budget.limit-budget.used > len(chosen):
-                    await candles(symbol,optional=True)
-                else:
-                    state['budget_exhausted'] = True
-            await quotes(chosen,optional=True)
             if self.history_store is not None:
                 attempts = state.setdefault('last_watchlist_candle_attempt',{})
                 remaining_symbols = [s for s in pool if s not in priority and s not in chosen]
                 remaining_symbols.sort(key=lambda s:(attempts.get(s,''),s))
                 for symbol in remaining_symbols[:self.watchlist_candles_per_cycle]:
-                    if budget.used >= budget.limit or monotonic()-started >= self.max_cycle_seconds:
+                    if budget.used >= budget.limit or monotonic() >= optional_deadline:
                         break
                     before = budget.used
                     await candles(symbol,optional=True)

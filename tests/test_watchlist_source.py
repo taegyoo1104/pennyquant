@@ -148,3 +148,97 @@ async def test_unknown_market_caps_never_fall_back_to_first100_alphabetically(tm
         assert manager.entry_blockers('T400',NOW)==['watchlist_unknown']
         assert repo.get_control('watchlist_dashboard_v1')['status']=='UNKNOWN'
     finally:repo.close()
+
+
+async def test_slow_priority_delivery_and_reference_work_cannot_starve_focus_inputs(tmp_path, monkeypatch):
+    """A slow DB/engine callback must not erase every candidate request's deadline."""
+    import sessionquant.market.source as source_module
+    repo,universe,_,_,manager=context(tmp_path)
+    elapsed=SimpleNamespace(seconds=0.0)
+    clock=lambda: NOW+timedelta(seconds=elapsed.seconds)
+    monkeypatch.setattr(source_module,'monotonic',lambda:elapsed.seconds)
+    delivered=[]; order=[]
+    from sessionquant.session_engine import SessionEngine, event_time
+    from sessionquant.session_runtime import batch_events
+    engine=SessionEngine(repo,universe,synthetic=True,strict_market_data=True,watchlist_policy=manager)
+    def deliver(batch):
+        events=[row for row in batch_events(batch) if engine.last_time is None or event_time(row)>=engine.last_time]
+        engine.apply_batch(events,clock())
+        names=[q.symbol for q in batch.quotes]
+        delivered.extend(names)
+        if 'T001' in names:
+            order.append('risk_delivered')
+            elapsed.seconds+=16  # Slower than the old whole-cycle 15s deadline.
+    class References:
+        async def poll(self,read,*,limit):
+            order.append('references')
+            elapsed.seconds+=16
+            if limit: await read('prices','*')
+    class Client(Market):
+        async def orderbook(self,symbol): return {}
+        async def reference_candles(self,symbol,**kwargs): return {'candles':[]}
+        async def prices(self,names):
+            order.append('prices')
+            return await super().prices(names)
+        async def rankings(self,**kwargs):
+            order.append('rankings')
+            return await super().rankings(**kwargs)
+    try:
+        await manager.refresh(NOW)
+        client=Client(clock)
+        source=TossSessionSource(client,clock=clock,watchlist=manager,
+            on_priority_batch=deliver,reference_monitor=References())
+        await source.poll([],priority_symbols=['T001'])
+        assert any(method=='prices' for method,_ in client.calls)
+        assert any(method=='rankings' for method,_ in client.calls)
+        assert order.index('risk_delivered')<order.index('prices')<order.index('references')
+        assert manager.focus(clock())==[]  # One observation cannot establish a return.
+        elapsed.seconds+=30
+        client.calls.clear()
+        await source.poll([],priority_symbols=['T001'])
+        assert len(manager.focus(clock()))==20
+        assert {'T400','T401'} <= set(delivered)
+        assert {'T400','T401'} <= {row['symbol'] for row in repo.all('candidates')}
+        assert {'T400','T401'} <= set(engine.market.bars)
+        assert len(client.calls)<=source.max_api_calls
+        assert repo.all('orders')==[]
+    finally:repo.close()
+
+
+async def test_budget_skipped_ranking_is_not_recorded_as_an_attempt(tmp_path):
+    repo,_,_,_,manager=context(tmp_path)
+    try:
+        await manager.refresh(NOW)
+        client=Market(lambda:NOW)
+        source=TossSessionSource(client,clock=lambda:NOW,watchlist=manager,max_api_calls=8)
+        await source.poll([],priority_symbols=['T001'])
+        assert not any(method=='rankings' for method,_ in client.calls)
+        assert 'last_ranking_attempt_at' not in manager.state
+        assert any(r['source']=='toss_rankings' and r['read_attempts']==0
+                   and r['status']=='budget_exhausted' for r in manager.state['read_measurements'])
+    finally:repo.close()
+
+
+async def test_deadline_skipped_ranking_retries_next_cycle_without_waiting_a_minute(tmp_path,monkeypatch):
+    import sessionquant.market.source as source_module
+    repo,_,_,_,manager=context(tmp_path)
+    elapsed=SimpleNamespace(seconds=0.0)
+    clock=lambda:NOW+timedelta(seconds=elapsed.seconds)
+    monkeypatch.setattr(source_module,'monotonic',lambda:elapsed.seconds)
+    class SlowPrices(Market):
+        async def prices(self,symbols):
+            elapsed.seconds+=16
+            return await super().prices(symbols)
+    try:
+        await manager.refresh(NOW)
+        client=SlowPrices(clock)
+        source=TossSessionSource(client,clock=clock,watchlist=manager)
+        await source.poll([])
+        assert 'last_ranking_attempt_at' not in manager.state
+        assert any(r['source']=='toss_rankings' and r['status']=='deadline_skipped'
+                   and r['read_attempts']==0 for r in manager.state['read_measurements'])
+        elapsed.seconds+=1
+        await source.poll([])
+        assert sum(method=='rankings' for method,_ in client.calls)==1
+        assert manager.state['last_ranking_attempt_at']==clock().isoformat()
+    finally:repo.close()

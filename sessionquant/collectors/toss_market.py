@@ -144,7 +144,7 @@ class TossMarketClient:
 
     def _observe_read(self,path,response,started):
         """시장 조회 계측만 보존한다. 인증·계좌·임의 응답 헤더는 저장하지 않는다."""
-        if path not in {'/api/v1/prices','/api/v1/stocks','/api/v1/candles','/api/v1/orderbook','/api/v1/sectors'} and not re.fullmatch(r'/api/v1/sectors/[A-Za-z0-9_-]{1,40}/stocks',path):
+        if path not in {'/api/v1/prices','/api/v1/rankings','/api/v1/stocks','/api/v1/candles','/api/v1/orderbook','/api/v1/sectors'} and not re.fullmatch(r'/api/v1/sectors/[A-Za-z0-9_-]{1,40}/stocks',path):
             return
         limits = {}
         for key in ('ratelimit-limit','ratelimit-remaining','ratelimit-reset',
