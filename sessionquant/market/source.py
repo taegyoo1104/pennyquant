@@ -244,9 +244,18 @@ class TossSessionSource:
                     batch.eligibility.append(evidence)
 
         async def deliver(*, priority=True):
+            nonlocal optional_deadline
             if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars):
                 batch.observed_at = utc(self.clock())
+                began = monotonic()
                 self.on_priority_batch(batch)
+                if not priority:
+                    # Preserve only the unused request window across synchronous
+                    # engine/DB work. Do not reset HTTP time, call budgets or backoff.
+                    elapsed = monotonic()-began
+                    optional_deadline += elapsed
+                    state['candidate_delivery_seconds'] = round(
+                        state.get('candidate_delivery_seconds',0)+elapsed,3)
                 batch.bars, batch.quotes, batch.eligibility = [], [], []
                 batch.cached_bars = []
                 state['priority_delivered_at' if priority else 'candidate_delivered_at'] = utc(self.clock()).isoformat()
@@ -301,6 +310,7 @@ class TossSessionSource:
             state['optional_deadline_reached'] = False
             state['pre_focus_phase_seconds'] = None
             state['focus_phase_seconds'] = None
+            state['candidate_delivery_seconds'] = 0.0
             # 100개 관찰·공급자 갱신보다 먼저 위험 호가를 전달한다. 청산 시계는 별도 실행된다.
             await metadata(priority)
             quote_attempts = state.setdefault('last_priority_quote_attempt',{})
