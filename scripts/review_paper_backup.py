@@ -194,6 +194,16 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
+def json_query(expression, source):
+    # Send ASCII hex over the mysql CLI pipe, independent of locale/client decoding.
+    # Conversion before HEX preserves Korean, accented text, and four-byte Unicode.
+    return f'SELECT HEX(CONVERT({expression} USING utf8mb4)) FROM {source};'
+
+
+def decode_row(line):
+    return json.loads(bytes.fromhex(line.decode('ascii').strip()).decode('utf-8'))
+
+
 def review_backup(backup, since, until):
     name = 'sq-review-' + uuid4().hex[:12]
     created = False
@@ -208,7 +218,7 @@ def review_backup(backup, since, until):
                               "df -Pk /var/lib/mysql | awk 'NR==2 {print $4}'", timeout=30).stdout.strip())
             if free_kib < 2*1024*1024: raise RuntimeError('temporary_disk_needs_2GiB_free')
             mysql = ['docker', 'exec', '-i', name, 'sh', '-c',
-                     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -u root --batch --raw --skip-column-names sessionquant']
+                     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -u root --default-character-set=utf8mb4 --batch --raw --skip-column-names sessionquant']
             deadline = time.monotonic()+180
             while True:
                 try:
@@ -233,7 +243,7 @@ def review_backup(backup, since, until):
                         if proc.wait(timeout=600): raise RuntimeError('backup_import_failed')
                     finally:
                         if proc.poll() is None: proc.kill(); proc.wait()
-            tables = run(*mysql, input=b'SHOW TABLES;', timeout=30).stdout.decode().splitlines()
+            tables = run(*mysql, input=b'SHOW TABLES;', timeout=30).stdout.decode('utf-8').splitlines()
             review = Review(since, until, tables)
             queries = []
             for kind in TABLES:
@@ -242,17 +252,17 @@ def review_backup(backup, since, until):
                 payload = 'payload'
                 if kind == 'research_events':
                     payload = "JSON_OBJECT('kind',payload->'$.kind','available_at',payload->'$.available_at','data',JSON_OBJECT('control_state',payload->'$.data.control_state','decision_count',JSON_LENGTH(payload->'$.data.decisions'),'scope_blockers',payload->'$.data.scope_blockers'))"
-                queries.append(f"SELECT JSON_OBJECT('kind','{kind}','namespace',namespace,'captured_at',captured_at,'data',{payload}) FROM {table} ORDER BY seq;")
+                queries.append(json_query(f"JSON_OBJECT('kind','{kind}','namespace',namespace,'captured_at',captured_at,'data',{payload})", f'{table} ORDER BY seq'))
             if 'pq_controls' in tables:
                 names = ','.join("'"+key+"'" for key in CONTROLS)
-                queries.append(f"SELECT JSON_OBJECT('kind','controls','name',name,'namespace',namespace,'captured_at',updated_at,'data',payload) FROM pq_controls WHERE name IN ({names});")
-            sql_path = Path(directory)/'review.sql'; sql_path.write_text('\n'.join(queries))
+                queries.append(json_query("JSON_OBJECT('kind','controls','name',name,'namespace',namespace,'captured_at',updated_at,'data',payload)", f'pq_controls WHERE name IN ({names})'))
+            sql_path = Path(directory)/'review.sql'; sql_path.write_text('\n'.join(queries), encoding='utf-8')
             print('기록 요약 중…', flush=True)
             with sql_path.open('rb') as source, tempfile.TemporaryFile() as errors:
-                proc = subprocess.Popen(mysql, stdin=source, stdout=subprocess.PIPE, stderr=errors, text=True)
+                proc = subprocess.Popen(mysql, stdin=source, stdout=subprocess.PIPE, stderr=errors)
                 try:
                     for line in proc.stdout:
-                        if line.strip(): review.consume(json.loads(line))
+                        if line.strip(): review.consume(decode_row(line))
                     if proc.wait(timeout=60): raise RuntimeError('backup_read_failed')
                 finally:
                     if proc.poll() is None: proc.kill(); proc.wait()
