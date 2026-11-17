@@ -96,13 +96,15 @@ def frame(engine, events, now, *, manual_halt):
     normalized = [{**raw,'timing':{
         'event_at':time_or_none(raw['data'].get('timestamp') or raw['data'].get('published_at')),
         'published_at':time_or_none(raw['data'].get('published_at')),
-        'received_at':utc(raw['data']['received_at']) if 'restored_at' in raw else event_time(raw),
+        'received_at':utc(raw['data']['checked_at'] if raw['kind']=='eligibility' else raw['data']['received_at'])
+            if 'restored_at' in raw or 'delivered_at' in raw else event_time(raw),
         'available_at':now,'source':raw['data'].get('source','UNKNOWN')}} for raw in events]
     append(engine.repo, 'engine_batch', {'decision_at': now, 'events': normalized,
         'candidate_scope_symbols':engine._batch_candidate_scope,'portfolio_selection':engine.selection_frame,
         'news_contexts': engine._batch_news_contexts, 'scope_blockers': engine._batch_scope_blockers,
         'decisions': engine._batch_decisions,
-        'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars')}
+        'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars',
+                         'strategy_bars','strategy_rvol','strategy_rvol_status','collection_warnings')}
                          for symbol,row in engine.market.quality_rows.items() if symbol in {item['symbol'] for item in engine._batch_decisions}],
         'manual_halt': manual_halt, 'control_state': {key: engine.control_state[key]
             for key in ('running', 'draining') if key in (engine.control_state or {})},

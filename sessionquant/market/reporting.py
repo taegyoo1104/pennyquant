@@ -22,6 +22,9 @@ def current_report(report, now=None):
             if row.get('paper_eligibility'):
                 row['paper_eligibility'].update(allowed=False,status='STALE')
             row['bars'] = {**row['bars'],'status':'STALE','five_coverage':None,'fifteen_coverage':None}
+            if row.get('strategy_bars'):
+                row['strategy_bars'] = {**row['strategy_bars'],'status':'STALE',
+                                        'five_coverage':None,'fifteen_coverage':None}
             row['rvol'] = {**row['rvol'],'value':None,'calculated_value':None,'status':'UNKNOWN','calculation_status':'UNKNOWN'}
             row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'quality_observation_stale']))
         else:
@@ -30,7 +33,21 @@ def current_report(report, now=None):
                 elapsed = max(0,int((min(now,utc(bars['session_close']))-utc(bars['session_open'])).total_seconds()//60))
                 if elapsed > bars.get('expected_minutes',0):
                     row['bars'] = {**bars,'status':'STALE','five_coverage':None,'fifteen_coverage':None}
-                    row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'new_closed_minute_not_evaluated']))
+                    # The next one-minute collection window is separate from
+                    # the closed five-minute inputs actually used to decide.
+                    key = 'collection_warnings' if row.get('strategy_bars') else 'blockers'
+                    row[key] = list(dict.fromkeys([*row.get(key,[]),'new_closed_minute_not_evaluated']))
+            strategy_bars = row.get('strategy_bars')
+            if strategy_bars:
+                try:
+                    age = (now-utc(strategy_bars['last_closed_at'])).total_seconds()
+                    cutoff_age = (now-utc(strategy_bars['cutoff_at'])).total_seconds()
+                    current = 0 <= age <= 90 and 0 <= cutoff_age <= 330
+                except (ValueError,TypeError,KeyError,AttributeError):
+                    current = False
+                if not current:
+                    row['strategy_bars'] = {**strategy_bars,'status':'STALE'}
+                    row['blockers'] = list(dict.fromkeys([*row.get('blockers',[]),'minute_history_incomplete_or_stale']))
             quote_at = row.get('quote_at')
             if not quote_at or (now-utc(quote_at)).total_seconds() > 30:
                 row['quote_fresh'] = False
@@ -59,7 +76,8 @@ def current_report(report, now=None):
                 row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
             if row['rvol'].get('calculated_valid_until') and utc(row['rvol']['calculated_valid_until']) < now:
                 row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
-            if row.get('strategy_rvol') is not None and (row['bars']['status']!='COMPLETE' or not row['quote_fresh']):
+            if row.get('strategy_rvol') is not None and (row.get('strategy_bars',row['bars'])['status']!='COMPLETE'
+                                                       or not row['quote_fresh']):
                 row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')
     refreshed = quality_summary(rows, now, source_state=report.get('source_state'),synthetic=report.get('synthetic',False))
     refreshed['captured_at'] = report.get('observed_at')

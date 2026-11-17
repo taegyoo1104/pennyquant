@@ -92,3 +92,31 @@ def test_incomplete_rvol_does_not_invent_a_ratio_from_partial_cumulative_volume(
         {'symbol':'KO','reasons':['symbol_not_yet_collected']}]},now)
     assert all(r['마지막 계산값·참고'] is None and r['RVOL 계산값'] is None for r in rows)
     assert rows[0]['현재성']=='계산 자료 부족'
+
+
+def test_entry_explanation_distinguishes_pattern_wait_from_stale_approval():
+    from sessionquant.dashboard.selection_panel import entry_rows, selection_view
+    now=datetime(2026,11,17,17,0,tzinfo=timezone.utc)
+    frame={'evaluated_at':now.isoformat(),'valid_until':(now+timedelta(seconds=10)).isoformat(),
+        'rows':[{'symbol':'AAPL','evaluated_at':now.isoformat(),'regime':'BULLISH',
+            'portfolio_status':'BLOCKED','blockers':['technical_signal_absent'],
+            'indicators':{'relative_volume':1.4,'strategy_status':'WAITING',
+                'strategy_diagnostics':['strategy_rebound_volume_missing']}}]}
+    row=entry_rows(selection_view(frame,now))[0]
+    assert row['전략 판단']=='전략 조건 대기' and row['전략 RVOL']==1.4
+    assert 'technical_signal_absent' not in row['대기·차단 이유']
+    assert row['현재성']=='현재 평가'
+    translated,_=display_rows([row])
+    assert '상세 확인 필요' not in translated[0]['대기·차단 이유']
+    old=entry_rows(selection_view(frame,now+timedelta(seconds=11)))[0]
+    assert old['현재성']=='이전 평가 · 갱신 대기'
+
+
+def test_etf_search_progress_does_not_claim_coverage_verified():
+    from sessionquant.dashboard.market_quality_panel import history_progress_rows
+    rows=history_progress_rows({'SPY':{'status':'SESSION_WINDOW_REACHED','pages':186,
+        'cursor':'2026-11-17T14:29:00+00:00','done':True}})
+    assert rows[0]['보충 상태']=='당일 조회 범위 도달'
+    assert rows[0]['추가 조회 횟수']==186
+    assert rows[0]['다음 조회 기준']!='—'
+    assert not display_rows(rows)[1]

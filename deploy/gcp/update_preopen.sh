@@ -76,6 +76,6 @@ systemctl start sessionquant-cost-guard.timer
 systemctl start sessionquant.service
 systemctl is-active --quiet sessionquant-market-close.timer
 systemctl is-active --quiet sessionquant-storage-guard.timer
-systemctl list-timers --all 'sessionquant-*'
+systemctl list-timers --all 'sessionquant-*' --no-pager
 "${compose[@]}" ps
 echo '업데이트·연결 점검·자동 종료 예약 확인 완료. 대시보드에서 자료 준비 후 매매 시작을 직접 누르세요.'

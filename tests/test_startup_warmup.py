@@ -357,10 +357,7 @@ async def test_source_delivers_caught_up_minutes_to_actual_engine(tmp_path,cache
                     pytest.fail('complete cached current session must not be downloaded again')
                 return await provider.fetch(symbol,kwargs.get('before') or stamp.replace(second=0))
         def receive(batch):
-            from sessionquant.session_engine import event_time
-            # Match the real runtime: old receipts alone would be silently dropped.
-            events=[row for row in batch_events(batch)
-                    if engine.last_time is None or event_time(row)>=engine.last_time]
+            events=batch_events(batch,delivered_at=stamp,last_time=engine.last_time)
             engine.apply_batch(events,stamp)
         source=TossSessionSource(Client(lambda:stamp),watchlist=manager,clock=lambda:stamp,
             history_store=store,warmup=worker,

@@ -35,7 +35,12 @@ def event_time(raw: dict) -> datetime:
         restored = utc(raw['restored_at'])
         if raw['kind'] != 'bar' or restored < received:
             raise ValueError('저장 분봉 복원 시각은 원본 수신 이후여야 합니다.')
-        return restored
+        received = restored
+    if 'delivered_at' in raw:
+        delivered = utc(raw['delivered_at'])
+        if raw['kind'] not in {'bar', 'eligibility'} or delivered < received:
+            raise ValueError('지연 자료 전달 시각은 원본 수신·복원 이후여야 합니다.')
+        received = delivered
     return received
 
 
@@ -380,8 +385,16 @@ class SessionEngine:
                 decisions = []
                 from .market_reference.contracts import REFERENCE_SYMBOLS
                 symbols={q.symbol for q in quotes}-REFERENCE_SYMBOLS
+                # Candles and cached listing evidence can arrive after quotes.
+                # Re-evaluate with the original quote timestamps; freshness,
+                # entry-window and portfolio gates still apply without changes.
+                symbols.update(raw['data']['symbol'] for raw in events
+                    if raw['kind'] in {'bar','eligibility'}
+                    and raw['data']['symbol'] in self.market.quotes
+                    and raw['data']['symbol'] not in REFERENCE_SYMBOLS
+                    and self.broker.quote_is_fresh(self.market.quotes[raw['data']['symbol']], now))
                 selection_enabled=self.candidate_selector.settings.enabled
-                # 위험 시계만의 tick은 계속 가볍게 처리한다. 새 후보 호가가 오면 전체 집중 범위를 같은 now로 평가한다.
+                # 위험 시계만의 tick은 계속 가볍게 처리한다. 후보 입력이 오면 전체 집중 범위를 같은 now로 평가한다.
                 if selection_enabled and symbols:
                     scope=self.watchlist_policy
                     if scope is not None and hasattr(scope,'candidate_symbols'):symbols=set(scope.candidate_symbols(now))|symbols

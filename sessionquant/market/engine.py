@@ -139,7 +139,8 @@ class MarketEngine:
             bars = self.bars.get(symbol, [])
             if self.history_provider is not None:
                 bars = [*self.history_provider(symbol,now),*bars]
-            volume = rvol_report(bars,symbol,data.five[-1].timestamp if data.five else None,now,
+            cutoff = data.five[-1].timestamp if data.five else None
+            volume = rvol_report(bars,symbol,cutoff,now,
                                  evidence=eligibility.volume_evidence if eligibility else None)
             rvol = volume['value']
             if (experimental and rvol is None and volume['calculation_status']=='CALCULATED'
@@ -150,7 +151,12 @@ class MarketEngine:
                 and eligibility.valid_until and eligibility.valid_until >= now and
                 all(field_verified(eligibility,name,expected,now) and getattr(eligibility,name) is expected
                     for name,expected in [('tradable',True),('fractional',True),('halted',False),('corporate_action',False)]))
-            quality = {'symbol':symbol,'observed_at':now.isoformat(), 'bars':bar_quality(bars,symbol,now),
+            current_quality = bar_quality(bars,symbol,now)
+            strategy_quality = (bar_quality(bars,symbol,now,through=cutoff) if cutoff is not None else
+                {**current_quality,'status':'UNKNOWN','reasons':['current_closed_interval_missing']})
+            quality = {'symbol':symbol,'observed_at':now.isoformat(), 'bars':current_quality,
+                'strategy_bars':strategy_quality,
+                'collection_warnings':list(current_quality['reasons']),
                 'rvol':volume, 'eligibility_verified':valid_eligibility,
                 'paper_data_policy':self.paper_data_policy, 'paper_eligibility':paper,
                 'strategy_rvol':rvol, 'strategy_rvol_status':('EXPERIMENTAL_UNVERIFIED' if rvol is not None and volume['status']!='VERIFIED'
@@ -174,7 +180,7 @@ class MarketEngine:
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         if symbol in REFERENCE_SYMBOLS:
             blockers.append('market_reference_not_trading_candidate')
-        if quality and quality['bars']['status'] != 'COMPLETE':
+        if quality and quality['strategy_bars']['status'] != 'COMPLETE':
             blockers.append('minute_history_incomplete_or_stale')
         if self.use_market_filter and (regime.state in {"BEARISH", "UNKNOWN"}
                                        or (regime.state == "NEUTRAL" and not self.allow_neutral)):
@@ -185,12 +191,16 @@ class MarketEngine:
         sector_value = sector[0] if sector and sector[1] <= now and (now - sector[1]).total_seconds() <= 330 else None
         score, components = score_candidate(data, quote, regime.state, rvol, sector_strength=sector_value,
                                              news_score=news_score, max_spread_pct=self.max_spread_pct)
+        strategy_diagnostics = []
         signal = technical_signal(symbol, self.strategy, data, regime.state if self.use_market_filter else "BULLISH", now,
-                                  allow_neutral=self.allow_neutral) if not blockers else None
+                                  allow_neutral=self.allow_neutral,
+                                  diagnostics=strategy_diagnostics) if not blockers else None
         indicator_values = data.to_dict() | {"relative_volume": rvol, "score_components": components,
                                             'paper_data_policy':self.paper_data_policy, 'paper_eligibility':paper,
                                             "sector_strength_known": sector_value is not None,
-                                            "market_filter_enabled": self.use_market_filter}
+                                            "market_filter_enabled": self.use_market_filter,
+                                            'strategy_diagnostics':strategy_diagnostics,
+                                            'strategy_status':'BLOCKED' if blockers else 'SIGNAL' if signal else 'WAITING'}
         if quality is not None:
             quality['blockers'] = list(dict.fromkeys(blockers))
             self.quality_rows[symbol] = quality

@@ -158,11 +158,11 @@ async def test_slow_priority_delivery_and_reference_work_cannot_starve_focus_inp
     clock=lambda: NOW+timedelta(seconds=elapsed.seconds)
     monkeypatch.setattr(source_module,'monotonic',lambda:elapsed.seconds)
     delivered=[]; order=[]
-    from sessionquant.session_engine import SessionEngine, event_time
+    from sessionquant.session_engine import SessionEngine
     from sessionquant.session_runtime import batch_events
     engine=SessionEngine(repo,universe,synthetic=True,strict_market_data=True,watchlist_policy=manager)
     def deliver(batch):
-        events=[row for row in batch_events(batch) if engine.last_time is None or event_time(row)>=engine.last_time]
+        events=batch_events(batch,delivered_at=clock(),last_time=engine.last_time)
         engine.apply_batch(events,clock())
         names=[q.symbol for q in batch.quotes]
         delivered.extend(names)
@@ -220,7 +220,7 @@ async def test_budget_skipped_ranking_is_not_recorded_as_an_attempt(tmp_path):
 
 
 @pytest.mark.parametrize('slow_stage', ['delivery', 'http'])
-async def test_candidate_delivery_preserves_unused_candle_window(tmp_path,monkeypatch,slow_stage):
+async def test_candidate_delivery_preserves_unused_request_window(tmp_path,monkeypatch,slow_stage):
     """Local DB delay must not skip candles; spent HTTP time must stay spent."""
     import sessionquant.market.source as source_module
     repo,_,_,_,manager=context(tmp_path)
@@ -249,7 +249,12 @@ async def test_candidate_delivery_preserves_unused_candle_window(tmp_path,monkey
             assert {'T400','T401'} <= set(delivered)
             assert manager.state['candidate_delivery_seconds']==20
         else:
-            assert candidates==set()
+            # Candles now precede the quotes. A slow first quote still spends the
+            # request deadline, so the second quote cannot bypass that bound.
+            assert candidates=={'T400','T401'}
+            assert 'T400' in delivered and 'T401' not in delivered
+            assert any(r['symbol']=='T401' and r['source']=='toss_orderbook'
+                       and r['status']=='deadline_skipped' for r in manager.state['read_measurements'])
             assert manager.state['candidate_delivery_seconds']==0
         assert len(client.calls)<=source.max_api_calls
         assert repo.all('orders')==[]

@@ -88,6 +88,73 @@ def test_strict_policy_still_blocks_same_inputs(observed):
     assert 'relative_volume_unknown_or_low' in decision.blockers
 
 
+def delayed_candle_decision(value, *, seconds=61, missing=None, future=False):
+    """Closed 75-minute signal arrives before the next poll crosses a minute."""
+    stamp = NOW+timedelta(seconds=seconds)
+    rows = []
+    for row in value.rows:
+        if event_time(row) > NOW+timedelta(seconds=1):
+            continue
+        row = {**row,'data':dict(row['data'])}
+        if row['kind']=='quote':
+            row['data'].update(timestamp=stamp.isoformat(),received_at=stamp.isoformat())
+        if row['kind']=='bar' and row['data']['symbol']=='AAPL':
+            if row['data']['timestamp']==missing:
+                continue
+            if future:
+                row['data']['received_at']=(stamp+timedelta(seconds=1)).isoformat()
+        rows.append(row)
+    value.engine.apply_batch(sorted(rows,key=event_time),stamp)
+    return value.engine.market.evaluate('AAPL',stamp)
+
+
+def test_next_minute_publication_wait_does_not_block_complete_five_minute_paper_signal(observed):
+    decision = delayed_candle_decision(observed)
+    quality = decision.indicators['data_quality']
+    assert quality['bars']['status']=='INCOMPLETE'
+    assert quality['bars']['missing_minutes']==1
+    assert quality['strategy_bars']['status']=='COMPLETE'
+    assert quality['strategy_bars']['cutoff_at']==NOW.isoformat()
+    assert quality['rvol']['cutoff_at']==quality['strategy_bars']['cutoff_at']
+    assert quality['strategy_bars']['age_seconds']==61
+    assert decision.eligible and decision.signal
+    assert decision.indicators['strategy_status']=='SIGNAL'
+    assert len(observed.repo.all('order_intents'))==1
+    report = current_report(quality_summary([quality],NOW+timedelta(seconds=61)),NOW+timedelta(seconds=90))
+    assert report['items'][0]['strategy_rvol']==quality['strategy_rvol']
+    assert report['items'][0]['strategy_bars']['status']=='COMPLETE'
+    expired = current_report(quality_summary([quality],NOW+timedelta(seconds=61)),NOW+timedelta(seconds=91))
+    assert expired['items'][0]['strategy_rvol'] is None
+    assert expired['items'][0]['strategy_bars']['status']=='STALE'
+
+
+def test_dashboard_new_minute_warning_does_not_erase_still_valid_signal_inputs(observed):
+    decision = delayed_candle_decision(observed,seconds=59)
+    quality = decision.indicators['data_quality']
+    assert quality['bars']['status']=='COMPLETE'
+    refreshed = current_report(quality_summary([quality],NOW+timedelta(seconds=59)),NOW+timedelta(seconds=61))['items'][0]
+    assert refreshed['bars']['status']=='STALE'
+    assert 'new_closed_minute_not_evaluated' in refreshed['collection_warnings']
+    assert 'new_closed_minute_not_evaluated' not in refreshed['blockers']
+    assert refreshed['strategy_rvol']==quality['strategy_rvol']
+
+
+@pytest.mark.parametrize('fault',['gap_in_signal','stale_minutes','unreceived_minutes'])
+def test_closed_signal_cutoff_keeps_gap_freshness_and_receipt_guards(observed,fault):
+    if fault=='unreceived_minutes':
+        with pytest.raises(ValueError,match='미래 자료'):
+            delayed_candle_decision(observed,future=True)
+        assert observed.repo.all('order_intents')==[]
+        return
+    decision = delayed_candle_decision(observed,
+        seconds=91 if fault=='stale_minutes' else 61,
+        missing=(OPEN+timedelta(minutes=70)).isoformat() if fault=='gap_in_signal' else None,
+        future=fault=='unreceived_minutes')
+    assert not decision.eligible and decision.signal is None
+    assert 'minute_history_incomplete_or_stale' in decision.blockers
+    assert observed.repo.all('order_intents')==[]
+
+
 @pytest.mark.parametrize('field,value', [('tradable',False),('fractional',False),('halted',True),('corporate_action',True)])
 def test_explicit_restrictions_are_not_relaxed(field,value):
     result=paper_eligibility(replace(listing(),**{field:value}),NOW)

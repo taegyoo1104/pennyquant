@@ -19,7 +19,7 @@ class History:
         return False
 
 
-async def test_slow_optional_references_do_not_starve_background_and_candles_deliver_together(tmp_path, monkeypatch):
+async def test_slow_optional_references_do_not_starve_background_or_delay_candidate_delivery(tmp_path, monkeypatch):
     import sessionquant.market.source as module
     repo,_,_,_,manager=context(tmp_path,size=25)
     seconds=SimpleNamespace(value=60.0)
@@ -46,7 +46,11 @@ async def test_slow_optional_references_do_not_starve_background_and_candles_del
         candles=[s for kind,s in events[:reference] if kind=='candle' and s.startswith('T')]
         assert len(candles)==6  # Two focus + four distinct background slots.
         deliveries=[s for kind,s in events if kind=='delivery' and any(x.startswith('T') for x in s)]
-        assert len(deliveries)==1 and deliveries[0]==set(candles)
+        assert len(deliveries)==2
+        assert deliveries[0]==set(candles[:2]) and deliveries[1]==set(candles[2:])
+        # Focused inputs reach the engine before any background candle request.
+        focused_at=events.index(('delivery',deliveries[0]))
+        assert focused_at < events.index(('candle',candles[2])) < reference
         assert manager.state['last_cycle_calls']<=24
     finally:repo.close()
 
@@ -112,7 +116,10 @@ async def test_paced_full_sweep_includes_nonfocus_and_preserves_reference_slot(t
         record_property('sweep_cycles',_+1)
         record_property('sweep_symbols',len(seen))
         assert seen==symbols
-        assert seconds.value-began<120
+        # This scenario includes up to four 4-second DB deliveries per cycle.
+        # Candidate quote fairness is independent from candle visits now; the
+        # resulting sweep is 125s, not a promise that 25 symbols stay minute-fresh.
+        assert seconds.value-began <= (_+1)*(source.max_api_calls+4*4)
         assert reference_calls  # Background work cannot take every request slot.
         assert repo.all('orders')==[]
     finally:repo.close()

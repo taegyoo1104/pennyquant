@@ -14,6 +14,26 @@ def selection_view(frame,now=None):
         'approved_add':frame.get('approved_add_count',0) if active else None}
 
 
+def entry_rows(view):
+    """Show why each saved candidate stopped, without turning old approval into a live state."""
+    from .session_app import timestamp
+    statuses={'BLOCKED':'입력·시장 조건 미충족','SIGNAL':'전략 신호 있음','WAITING':'전략 조건 대기'}
+    result=[]
+    for row in view['rows']:
+        indicators=row.get('indicators') or {}
+        reasons=list(dict.fromkeys([*row.get('blockers',[]),
+            *indicators.get('strategy_diagnostics',[]),
+            *([row['allocation_reason']] if row.get('allocation_reason') else [])]))
+        if indicators.get('strategy_diagnostics'):
+            reasons=[reason for reason in reasons if reason!='technical_signal_absent']
+        result.append({'종목':row.get('symbol'),'기록 시각':timestamp(row.get('evaluated_at')),
+            '현재성':'현재 평가' if view['active'] else '이전 평가 · 갱신 대기',
+            '시장 방향':row.get('regime','UNKNOWN'),'전략 RVOL':indicators.get('relative_volume'),
+            '전략 판단':statuses.get(indicators.get('strategy_status'),'이전 버전 · 상세 기록 확인'),
+            '주문 판단':row.get('portfolio_status','UNKNOWN'),'대기·차단 이유':', '.join(reasons) or '—'})
+    return result
+
+
 def render_selection(frame):
     import streamlit as st
     from .session_app import _table,timestamp
@@ -28,6 +48,7 @@ def render_selection(frame):
         ' · 공통 확정봉: '+timestamp(frame.get('common_closed_bar_at'))+' · 순위 만료: '+timestamp(frame.get('valid_until')))
     if not view['active']:st.caption('현재 순위는 미확인입니다. 아래 내용은 마지막 저장된 선정 이력입니다.')
     if frame.get('synthetic'):st.caption('합성 후보 선정 검사 자료이며 실제 종목 순위·매매 성과가 아닙니다.')
+    _table(entry_rows(view),'집중 후보의 매수 판단 기록이 없습니다.')
     rows=[]
     for row in view['rows']:
         news=row.get('news_score_signal') or {};sector=row.get('sector_strength') or {}
@@ -41,7 +62,8 @@ def render_selection(frame):
             '포트폴리오 결과':row.get('portfolio_status'),'차단·거절':', '.join([*row.get('blockers',[]),*([row['allocation_reason']] if row.get('allocation_reason') else [])]),
             '호가 발생':timestamp(row.get('quote_at')),'확정봉':timestamp(row.get('indicators',{}).get('last_closed_at')),
             '주문 의도':row.get('order_intent_id')})
-    _table(rows,'집중 후보의 동일 시점 선정 기록이 없습니다.')
+    with st.expander('후보 점수·뉴스·업종 상세'):
+        _table(rows,'집중 후보의 동일 시점 선정 기록이 없습니다.')
     st.caption('미확인 뉴스·업종은 가점 0이며 검증된 중립과 구분합니다. 시장 참고 ETF와 거시 LLM 해설은 종목 가점에 포함하지 않습니다.')
     if frame:
         with st.expander('선택 근거·뉴스/업종 입력·시장 위험 상세'):

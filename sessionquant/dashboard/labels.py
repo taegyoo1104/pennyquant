@@ -2,6 +2,34 @@
 import re
 
 LABELS = {
+    'strategy_outside_regular_session':'정규장 시작 대기·종료',
+    'strategy_market_direction_blocked':'전략에 맞는 시장 방향 대기',
+    'strategy_bar_identity_or_time_invalid':'분봉 종목·확정 시각 불일치',
+    'strategy_indicator_cutoff_mismatch':'지표 계산 기준 시각 불일치',
+    'strategy_indicators_unavailable':'VWAP·이동평균·변동폭·거래량 지표 부족',
+    'strategy_five_minute_history_incomplete':'연속된 5분봉 15개 확보 대기',
+    'strategy_closed_bar_stale':'확정 5분봉 갱신 대기',
+    'strategy_price_extended_or_invalid':'가격 과열·유효 가격 확인 필요',
+    'strategy_recent_volume_below_minimum':'최근 5분 거래량 부족',
+    'strategy_fifteen_minute_uptrend_missing':'15분봉 상승 추세 대기',
+    'strategy_price_above_support_missing':'VWAP·이동평균 위로 상승 대기',
+    'strategy_recent_high_breakout_missing':'최근 고점 돌파 대기',
+    'strategy_breakout_volume_missing':'돌파 거래량 증가 대기',
+    'strategy_first_pullback_missing':'첫 번째 조정봉 대기',
+    'strategy_second_pullback_missing':'두 번째 조정봉 대기',
+    'strategy_pullback_support_missing':'VWAP·이동평균 부근 지지 대기',
+    'strategy_pullback_depth_invalid':'조정 폭 조건 미충족',
+    'strategy_rebound_high_breakout_missing':'직전 봉 고점 돌파 대기',
+    'strategy_rebound_above_vwap_missing':'반등 가격의 VWAP 회복 대기',
+    'strategy_rebound_volume_missing':'반등 거래량 증가 대기',
+    'strategy_opening_range_incomplete':'개장 구간 분봉 부족',
+    'strategy_opening_range_not_finished':'개장 구간 확정 대기',
+    'strategy_opening_range_breakout_missing':'개장 구간 고점 돌파 대기',
+    'strategy_price_above_vwap_missing':'VWAP 위로 상승 대기',
+    'strategy_previous_vwap_unavailable':'직전 봉 기준 VWAP 부족',
+    'strategy_vwap_reclaim_missing':'VWAP 재돌파 대기',
+    'strategy_price_above_ema_missing':'이동평균 위로 상승 대기',
+    'strategy_stop_price_invalid':'유효한 손절 가격 계산 불가',
     'rvol_observation_stale_or_incomplete':'현재 분까지 계산 결과 미갱신·자료 부족',
     'current_closed_interval_missing':'정규장 확정 분봉 대기',
     'symbol_not_yet_collected':'아직 분봉 미수집',
@@ -110,6 +138,7 @@ LABELS = {
 }
 
 COLUMNS = {
+    'strategy_status':'전략 판단','strategy_diagnostics':'전략 대기 이유',
     'read_attempts':'실제 조회 시도 수','focus_missing_inputs':'집중 선정 부족 자료',
     'retry_deferred':'재조회 대기','retry_after':'다음 조회 가능 시각',
     'session':'거래일','current_session':'당일 자료','engine_minutes_missing':'전략에 전달할 분봉 수',
