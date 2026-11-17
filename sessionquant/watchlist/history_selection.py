@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from ..models import utc
 from ..market.history import HistoryStore, history_plan, session_quality
+from ..market.bars import session_bounds
 from ..scanners.relative_volume import NEW_YORK, _calendar
 
 CONTROL = 'watchlist_history_selection_v1'
@@ -82,6 +83,14 @@ class DailyHistorySelection:
 
     def ensure(self, symbols, now):
         now = utc(now)
+        bounds = session_bounds(now)
+        frame = self.frame
+        if (not self.startup_pending and bounds and now >= bounds[1]
+                and frame.get('frozen') and frame.get('session') == str(now.astimezone(NEW_YORK).date())
+                and utc(frame['checked_at']) <= now):
+            # Keep today's frozen operating selection during shutdown grace.
+            # Explicit history/backfill commands still use the next session plan.
+            return frame
         day, opened, _ = operating_session(now)
         if self.startup_pending:
             return {'session':day,'session_open':opened.isoformat(),'checked_at':now.isoformat(),

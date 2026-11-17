@@ -242,3 +242,19 @@ async def test_deadline_skipped_ranking_retries_next_cycle_without_waiting_a_min
         assert sum(method=='rankings' for method,_ in client.calls)==1
         assert manager.state['last_ranking_attempt_at']==clock().isoformat()
     finally:repo.close()
+
+
+async def test_postclose_keeps_risk_quotes_without_background_reads(tmp_path):
+    from sessionquant.market.bars import session_bounds
+    repo,_,_,_,manager=context(tmp_path)
+    try:
+        await manager.refresh(NOW)
+        now=session_bounds(NOW)[1]+timedelta(seconds=1)
+        client=Market(lambda:now)
+        source=TossSessionSource(client,clock=lambda:now,watchlist=manager)
+        batch=await source.poll([],priority_symbols=['T001'])
+        assert {'T001','SPY','QQQ'}=={q.symbol for q in batch.quotes}
+        assert not any(name in {'prices','rankings','candles'} for name,_ in client.calls)
+        timing=repo.get_control('market_performance_v1')
+        assert timing['latest']['elapsed_seconds']>=0 and len(timing['slowest_this_process'])==1
+    finally:repo.close()

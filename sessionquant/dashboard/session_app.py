@@ -45,6 +45,7 @@ class DashboardData:
     account_status: dict = field(default_factory=dict)
     watchlist_state: dict = field(default_factory=dict)
     market_quality: dict = field(default_factory=dict)
+    market_performance: dict = field(default_factory=dict)
     watchlist_rvol: dict = field(default_factory=dict)
     history_backfill: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
@@ -115,6 +116,7 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
             result.state = repository.load_state() or {}
             result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
             result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
+            result.market_performance=repository.get_control('market_performance_v1',{}) or {}
             result.watchlist_rvol=repository.get_control('watchlist_rvol_v1',{}) or {}
             result.history_backfill=repository.get_control('watchlist_history_backfill_v1',{}) or {}
             result.portfolio_selection=repository.get_control('portfolio_selection_v1',{}) or {}
@@ -317,7 +319,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     if page == '시장·종목':
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
-            render_quality(data.market_quality)
+            render_quality(data.market_quality,performance=data.market_performance)
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
             render_watchlist_rvol(data.watchlist_rvol,data.history_backfill)
         from sessionquant.dashboard.watchlist_panel import render_watchlist

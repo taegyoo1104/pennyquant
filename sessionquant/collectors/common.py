@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 from time import monotonic
 
 import httpx
+from ..performance import measure
 
 
 class CapabilityUnavailable(RuntimeError):
@@ -60,13 +61,16 @@ async def get_readonly(client: httpx.AsyncClient, url: str, *, limiter: RateLimi
             budget = retry_budget.get()
             if budget is not None:
                 budget.take()
-        await limiter.wait()
+        with measure('api_pacing'):
+            await limiter.wait()
         try:
-            response = await client.get(url, **kwargs)
+            with measure('api_http'):
+                response = await client.get(url, **kwargs)
         except (httpx.TimeoutException, httpx.NetworkError):
             if attempt + 1 == attempts:
                 raise
-            await asyncio.sleep(0.25 * 2**attempt)
+            with measure('api_retry_wait'):
+                await asyncio.sleep(0.25 * 2**attempt)
             continue
         if response.status_code == 429:
             from ..watchlist.budget import retry_budget
@@ -74,7 +78,8 @@ async def get_readonly(client: httpx.AsyncClient, url: str, *, limiter: RateLimi
                 # 관리형 감시 수집기는 전체 주기를 대기시킨다. 같은 주기에서 재호출하지 않는다.
                 response.raise_for_status()
         if response.status_code in {429, 500, 502, 503, 504} and attempt + 1 < attempts:
-            await asyncio.sleep(retry_after(response.headers.get("Retry-After"), 0.25 * 2**attempt))
+            with measure('api_retry_wait'):
+                await asyncio.sleep(retry_after(response.headers.get("Retry-After"), 0.25 * 2**attempt))
             continue
         if response.status_code==304 and allow_not_modified:return response
         response.raise_for_status()

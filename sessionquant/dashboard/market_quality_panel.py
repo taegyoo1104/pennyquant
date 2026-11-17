@@ -2,7 +2,7 @@
 from ..market.reporting import current_report
 
 
-def render_quality(state):
+def render_quality(state, *, performance=None):
     import streamlit as st
     from .session_app import _table, timestamp
     report = current_report(state)
@@ -41,7 +41,27 @@ def render_quality(state):
         _table(source.get('read_measurements',[]),'수집 주기 계측 자료가 없습니다.')
         _table([{'종목':s,**row} for s,row in source.get('history_progress',{}).items()],'과거 봉 보충 이력이 없습니다.')
         _table([{'종목':s,**row} for s,row in report.get('market_reference_quality',{}).items()])
+    with st.expander('처리 속도 확인'):
+        latest = (performance or {}).get('latest',{})
+        st.caption('마지막 수집: '+timestamp(latest.get('observed_at'))+
+            f" · 전체 {latest.get('elapsed_seconds','—')}초 · 프로세스 CPU {latest.get('process_cpu_seconds','—')}초")
+        _table(performance_rows(latest),'새 버전으로 수집을 실행하면 측정 결과가 나옵니다.')
+        st.caption('아래 작업 시간은 서로 포함될 수 있어 합산하지 않습니다. API 시간에는 호출 간격·재시도를 분리하며, HTTP 응답 대기 중 다른 작업에 밀린 시간은 포함될 수 있습니다. DB 요청 시간은 MySQL에서 측정합니다. CPU 시간은 같은 프로세스의 뉴스 작업 등도 포함합니다.')
+        slow = (performance or {}).get('slowest_this_process',[])
+        _table([{'확인 시각':timestamp(r.get('observed_at')),'전체 시간(초)':r['elapsed_seconds'],
+            '프로세스 CPU(초)':r['process_cpu_seconds']} for r in slow], '느린 수집 기록이 없습니다.')
     st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. observed_paper_v1에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
+
+
+def performance_rows(snapshot):
+    labels = {'api_pacing':'API 호출 간격 대기','api_http':'API 응답 대기','api_retry_wait':'API 재시도 대기',
+        'db_query':'DB 요청·응답','db_commit':'DB 저장 확정','json_encode':'DB 자료 변환',
+        'engine_batch':'엔진 판단·저장 전체','engine_persist':'엔진 상태 저장','history_save':'분봉 합치기·저장',
+        'history_load':'과거 분봉 읽기·기록','indicators':'매매 지표 계산','rvol':'RVOL 계산',
+        'bar_quality':'분봉 품질 검사','warmup':'예열 전체','watchlist_publish':'감시 목록 저장'}
+    return [{'작업':labels.get(row['phase'],'기타 작업'),'횟수':row['calls'],
+             '누적 시간(초)':row['seconds'],'최장 시간(초)':row['max_seconds']}
+            for row in snapshot.get('phases',[])]
 
 
 def render_watchlist_rvol(view, backfill):

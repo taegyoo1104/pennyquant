@@ -22,6 +22,7 @@ from .portfolio.manager import PortfolioManager
 from .portfolio.models import PortfolioSettings, serialize
 from .portfolio.session import SessionExitManager
 from .portfolio.exit_policy import ExitPolicy
+from .performance import timed
 
 
 def event_time(raw: dict) -> datetime:
@@ -210,6 +211,7 @@ class SessionEngine:
             self.repo.record(kind, payload)
             self._journal_hashes[key] = digest
 
+    @timed('engine_persist')
     def _persist(self, now: datetime, session_status: dict):
         risk_snapshot = self.manager.risk_snapshot(now)
         session_status['alerts'] = list(self.broker.alerts)
@@ -271,6 +273,7 @@ class SessionEngine:
         self._last_summary = {k:v for k,v in broker_state.items() if k != 'last_event_at'}
         self._last_persist_at = now
 
+    @timed('engine_batch')
     def apply_batch(self, events: list[dict], now: datetime, *, cursor: int | None = None, controls: dict | None = None):
         if self.failed:
             raise RuntimeError("저장 또는 처리 실패 후에는 재시작과 장부 확인이 필요합니다.")

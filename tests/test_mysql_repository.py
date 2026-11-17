@@ -14,6 +14,18 @@ class DriverError(Exception):
     pass
 
 
+def test_mysql_timing_records_counts_without_sql_or_credentials(connection):
+    from sessionquant.performance import capture
+    repo=repository(connection)
+    try:
+        with capture() as timings:
+            with repo.transaction():repo.set_control('PRIVATE',{'secret':'PRIVATE'})
+        rows={row['phase']:row for row in timings.snapshot()['phases']}
+        assert rows['db_query']['calls']>=2 and rows['db_commit']['calls']==1
+        assert rows['json_encode']['calls']>=1 and 'PRIVATE' not in str(rows)
+    finally:repo.close()
+
+
 class FakeConnection:
     def __init__(self):
         self.version = "8.0.46"

@@ -1,7 +1,7 @@
 """Shared domain objects. All event/receipt times must be timezone-aware UTC."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from enum import StrEnum
 from decimal import Decimal
@@ -216,7 +216,11 @@ class RiskDecision:
 
 def jsonable(value: Any) -> Any:
     if hasattr(value, "__dataclass_fields__"):
-        return jsonable(asdict(value))
+        if isinstance(value, type):
+            raise TypeError('jsonable requires a dataclass instance')
+        # Convert immutable domain fields directly; asdict first deep-copies every
+        # datetime/ZoneInfo before the same recursive JSON traversal.
+        return {f.name: jsonable(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, Decimal):
         if not value.is_finite():
             raise ValueError("금액과 수량은 유한한 Decimal이어야 합니다")

@@ -15,6 +15,7 @@ from ..collectors.toss_market import TossMarketClient
 from ..models import Bar, Quote, utc
 from .bars import session_bounds
 from .scanner import InstrumentEligibility
+from ..performance import capture, measure
 
 
 @dataclass
@@ -63,6 +64,7 @@ class TossSessionSource:
             raise ValueError('주기별 시세 조회 예산은 8~100회여야 합니다.')
         self._metadata = {}
         self._metadata_at = {}
+        self._slow_cycles = []
         self._seen: dict[str, set[tuple]] = {}
 
     async def _legacy_poll(self, symbols: list[str], now: datetime | None = None, *,
@@ -120,7 +122,15 @@ class TossSessionSource:
     async def poll(self, symbols, now=None, *, priority_symbols=()):
         if self.watchlist is None:
             return await self._legacy_poll(symbols, now, priority_symbols=priority_symbols)
-        return await self._managed_poll(now, priority_symbols=priority_symbols)
+        with capture() as timings:
+            batch = await self._managed_poll(now, priority_symbols=priority_symbols)
+            latest = {'observed_at':utc(self.clock()).isoformat(), **timings.snapshot()}
+        self._slow_cycles = sorted([*self._slow_cycles,latest],
+            key=lambda row:row['elapsed_seconds'],reverse=True)[:3]
+        self.watchlist.repo.set_control('market_performance_v1',{
+            'scope':'collector_task','backend':self.watchlist.repo.backend,
+            'latest':latest,'slowest_this_process':self._slow_cycles})
+        return batch
 
     def restore_seen(self, bars):
         """재시작해도 이미 보존한 분봉의 최초 수신 시각을 유지한다."""
@@ -297,6 +307,13 @@ class TossSessionSource:
             priority_order = sorted(priority,key=lambda s:(quote_attempts.get(s,''),priority.index(s)))
             await quotes(priority_order)
             await deliver()
+            bounds = session_bounds(utc(self.clock()))
+            if bounds and utc(self.clock()) >= bounds[1]:
+                # Keep risk quotes/exits alive, but do not start tomorrow's warmup
+                # or perform background history/ETF work during shutdown grace.
+                batch.observed_at = utc(self.clock())
+                state['priority_phase_seconds'] = round(monotonic()-started,3)
+                return batch
             for symbol in manager.scheduler.choose(priority,len(priority)):
                 await candles(symbol)
             await deliver()
@@ -317,9 +334,10 @@ class TossSessionSource:
                 async def warmup_read(symbol,cursor):
                     return await call('toss_startup_backfill',self.client.candles,symbol,count=200,
                                       before=cursor,symbol=symbol,optional=True)
-                await self.warmup.advance(manager,warmup_read,accept,
-                    lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols,
-                    hydrate=lambda symbol,bars:accept(symbol,bars,cached=True))
+                with measure('warmup'):
+                    await self.warmup.advance(manager,warmup_read,accept,
+                        lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols,
+                        hydrate=lambda symbol,bars:accept(symbol,bars,cached=True))
                 await deliver()
                 if not self.warmup.control.get('data_ready'):
                     batch.observed_at = utc(self.clock())
@@ -433,7 +451,8 @@ class TossSessionSource:
                 auth_calls_in_budget=False,read_measurements=measurements,
                 provider_read_observations=getattr(self.client,'read_observations',{}),
                 candle_observations=getattr(self.client,'candle_observations',{}))
-            manager.publish(utc(self.clock()),priority_symbols=priority_symbols)
+            with measure('watchlist_publish'):
+                manager.publish(utc(self.clock()),priority_symbols=priority_symbols)
 
     async def aclose(self):
         if self.owns_client:

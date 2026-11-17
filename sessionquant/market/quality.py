@@ -4,12 +4,14 @@ from datetime import timedelta
 import math
 
 from ..models import utc
+from ..performance import timed
 from ..scanners.relative_volume import NEW_YORK, _calendar
-from .bars import aggregate_bars, available_minutes, calendar, session_bounds
+from .bars import _aggregate_available, available_minutes, calendar, session_bounds
 
 QUALITY_KEY = 'market_data_quality_v1'
 
 
+@timed('bar_quality')
 def bar_quality(bars, symbol, now):
     now = utc(now)
     bounds = session_bounds(now)
@@ -38,7 +40,7 @@ def bar_quality(bars, symbol, now):
         versions[b.timestamp].add((b.open,b.high,b.low,b.close,b.volume))
     conflicts = sum(len(values)>1 for values in versions.values())
     last = max(valid.values(), key=lambda b:b.timestamp) if valid else None
-    five, fifteen = aggregate_bars(bars,5,now,symbol=symbol), aggregate_bars(bars,15,now,symbol=symbol)
+    five, fifteen = _aggregate_available(available,5,now,bounds), _aggregate_available(available,15,now,bounds)
     reasons = (['minute_gaps'] if missing else [])+(['bar_revisions_unresolved'] if conflicts else [])
     if not count:
         reasons.append('no_completed_regular_minute')
@@ -77,6 +79,7 @@ def volume_evidence_valid(evidence, bars, start, through, now):
         return False
 
 
+@timed('rvol')
 def rvol_report(bars, symbol, through, now, *, evidence=None, legacy_comparable=False, min_sessions=20):
     """최신 20개 비교 가능 거래일의 정확한 동일 경과 분을 검사한다. 더 오래된 날로 채우지 않는다."""
     if type(min_sessions) is not int or min_sessions < 1:
