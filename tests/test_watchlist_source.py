@@ -219,6 +219,43 @@ async def test_budget_skipped_ranking_is_not_recorded_as_an_attempt(tmp_path):
     finally:repo.close()
 
 
+@pytest.mark.parametrize('slow_stage', ['delivery', 'http'])
+async def test_candidate_delivery_preserves_unused_candle_window(tmp_path,monkeypatch,slow_stage):
+    """Local DB delay must not skip candles; spent HTTP time must stay spent."""
+    import sessionquant.market.source as source_module
+    repo,_,_,_,manager=context(tmp_path)
+    elapsed=SimpleNamespace(seconds=60.0)
+    clock=lambda:NOW+timedelta(seconds=elapsed.seconds)
+    monkeypatch.setattr(source_module,'monotonic',lambda:elapsed.seconds)
+    delivered=[]
+    def deliver(batch):
+        delivered.extend(q.symbol for q in batch.quotes)
+        if slow_stage=='delivery' and any(q.symbol.startswith('T4') for q in batch.quotes):
+            elapsed.seconds+=20
+    class Client(Market):
+        async def quote(self,symbol,**kwargs):
+            result=await super().quote(symbol,**kwargs)
+            if slow_stage=='http' and symbol.startswith('T4'):
+                elapsed.seconds+=20
+            return result
+    try:
+        await manager.refresh(NOW);observe(manager)
+        client=Client(clock)
+        source=TossSessionSource(client,clock=clock,watchlist=manager,on_priority_batch=deliver)
+        await source.poll([])
+        candidates={s for method,s in client.calls if method=='candles' and s.startswith('T4')}
+        if slow_stage=='delivery':
+            assert candidates=={'T400','T401'}
+            assert {'T400','T401'} <= set(delivered)
+            assert manager.state['candidate_delivery_seconds']==20
+        else:
+            assert candidates==set()
+            assert manager.state['candidate_delivery_seconds']==0
+        assert len(client.calls)<=source.max_api_calls
+        assert repo.all('orders')==[]
+    finally:repo.close()
+
+
 async def test_deadline_skipped_ranking_retries_next_cycle_without_waiting_a_minute(tmp_path,monkeypatch):
     import sessionquant.market.source as source_module
     repo,_,_,_,manager=context(tmp_path)
