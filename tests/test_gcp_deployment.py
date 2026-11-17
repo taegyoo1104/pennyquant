@@ -285,3 +285,48 @@ else exec /usr/bin/readlink "$@"; fi
         assert (root/'etc/sessionquant/units-before-storage-repair/sessionquant.service').read_text()=='original unit'
     else:
         assert unit.read_text()=='original unit'
+
+
+def test_start_deadlines_cover_database_and_application_health_startup():
+    import re
+    import yaml
+    compose=yaml.safe_load((DEPLOY/'compose.yaml').read_text())
+    app=compose['services']['app']['healthcheck'];db=compose['services']['db']['healthcheck']
+    seconds=lambda value:int(str(value).removesuffix('s'))
+    probe_budget=lambda cfg:(seconds(cfg['interval'])+seconds(cfg['timeout']))*cfg['retries']
+    wait=int(re.search(r'up -d --wait --wait-timeout (\d+)',(DEPLOY/'start.sh').read_text())[1])
+    outer=int(re.search(r'TimeoutStartSec=(\d+)',(DEPLOY/'sessionquant.service').read_text())[1])
+    assert seconds(app['start_period'])+probe_budget(app)<wait<outer
+    assert seconds(db['interval'])*db['retries']+seconds(app['start_period'])+probe_budget(app)<wait
+    assert '/_stcore/health' in app['test'][-1] and app['test'][0]=='CMD'
+
+
+@pytest.mark.skipif(os.getenv('SQ_TEST_GCP_STARTUP')!='1',reason='requires disposable local Docker health fixture')
+@pytest.mark.parametrize('grace',[False,True])
+def test_docker_grace_allows_slow_listener_without_hiding_probe_failures(tmp_path,grace):
+    import uuid
+    import yaml
+    name='sq-startup-'+uuid.uuid4().hex[:12]
+    health=yaml.safe_load((DEPLOY/'compose.yaml').read_text())['services']['app']['healthcheck']
+    # Same HTTP probe, accelerated time scale. No host ports, mounts, or network.
+    health.update(start_period='8s' if grace else '0s',interval='1s',timeout='1s',retries=2)
+    server='''import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200 if self.path == '/_stcore/health' else 404)
+        self.end_headers()
+time.sleep(4)
+HTTPServer(('127.0.0.1',8501),Handler).serve_forever()
+'''
+    compose=tmp_path/'compose.yaml'
+    compose.write_text(yaml.safe_dump({'name':name,'services':{'app':{
+        'image':os.getenv('SQ_STARTUP_TEST_IMAGE','sessionquant:gcp-review'),
+        'network_mode':'none','command':['python','-c',server],'healthcheck':health}}}))
+    args=['docker','compose','-f',str(compose)]
+    try:
+        result=subprocess.run([*args,'up','-d','--wait','--wait-timeout','20'],capture_output=True,text=True,timeout=40)
+        assert (result.returncode==0)==grace,result.stderr
+        if not grace:assert 'unhealthy' in result.stderr
+    finally:
+        subprocess.run([*args,'down','--timeout','2'],capture_output=True,timeout=20,check=True)

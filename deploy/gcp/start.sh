@@ -36,5 +36,7 @@ if [[ -f /etc/sessionquant/backup-status ]] && ! grep -q '^UPLOADED ' /etc/sessi
     exit 1
 fi
 systemctl start sessionquant-storage-guard.timer
-"${compose[@]}" up -d --wait --wait-timeout 180
+# Allow DB startup plus application grace/probes within the service deadline.
+# Compose returns immediately once both services become healthy.
+"${compose[@]}" up -d --wait --wait-timeout 480
 echo '예열 후 SSH 터널로 대시보드에 접속해 매매 시작을 누르세요.'
