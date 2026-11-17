@@ -1,0 +1,5 @@
+# Temporary override ONLY for purging existing binary logs with the app stopped.
+# Start with: docker compose -f deploy/gcp/compose.yaml -f deploy/gcp/compose.maintenance.yaml up -d db
+services:
+  db:
+    command: ["--log-bin=binlog", "--binlog-expire-logs-seconds=0", "--max-allowed-packet=64M", "--innodb-buffer-pool-size=128M", "--max-connections=30", "--performance-schema=OFF"]

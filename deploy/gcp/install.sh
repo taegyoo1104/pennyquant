@@ -8,14 +8,18 @@ set -Eeuo pipefail
 sq_machine=$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)
 [[ "$sq_machine" == 'Google Compute Engine' ]] || { echo 'GCE VM에서만 설치할 수 있습니다.' >&2; exit 1; }
 . /etc/os-release
-[[ "$ID" == debian && "$VERSION_ID" == 12 ]] || { echo 'Debian 12 전용 설치입니다.' >&2; exit 1; }
+case "$ID:$VERSION_ID" in
+    debian:12) sq_docker_os=debian; sq_docker_suite=bookworm ;;
+    ubuntu:24.04) sq_docker_os=ubuntu; sq_docker_suite=noble ;;
+    *) echo 'Debian 12 또는 Ubuntu 24.04 전용 설치입니다.' >&2; exit 1 ;;
+esac
 apt-get update
 apt-get install -y ca-certificates curl git python3
 install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+curl -fsSL "https://download.docker.com/linux/$sq_docker_os/gpg" -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
-printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable\n' \
-    "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/docker.list
+printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+    "$(dpkg --print-architecture)" "$sq_docker_os" "$sq_docker_suite" > /etc/apt/sources.list.d/docker.list
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker

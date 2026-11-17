@@ -2,6 +2,10 @@
 set -Eeuo pipefail
 cd /opt/sessionquant
 compose=(docker compose -f deploy/gcp/compose.yaml)
+if [[ -e /etc/sessionquant/maintenance ]]; then
+    echo '점검 모드: 프로그램·장 마감 타이머를 시작하지 않습니다.'
+    exit 0
+fi
 if systemctl is-active --quiet sessionquant-market-close.service || systemctl is-active --quiet sessionquant-cost-guard.service; then
     echo '마감 저장·백업이 진행 중입니다.' >&2
     exit 1
@@ -22,5 +26,15 @@ if ((delay == 0)); then
     echo '휴장일 또는 오늘 종료 시각 이후입니다. 새 수집 없이 1분 후 VM을 종료합니다.'
     exit 0
 fi
+if [[ -e /etc/sessionquant/storage-blocked ]]; then
+    echo '저장 공간 점검이 필요합니다. 복구·백업 확인 후 storage-blocked 표시를 해제하세요.' >&2
+    exit 1
+fi
+python3 deploy/gcp/storage_check.py --minimum-mib 2048
+if [[ -f /etc/sessionquant/backup-status ]] && ! grep -q '^UPLOADED ' /etc/sessionquant/backup-status; then
+    echo '이전 백업이 완료되지 않았습니다. DB만 켜서 backup.sh를 성공시킨 후 재시작하세요.' >&2
+    exit 1
+fi
+systemctl start sessionquant-storage-guard.timer
 "${compose[@]}" up -d --wait --wait-timeout 180
 echo '예열 후 SSH 터널로 대시보드에 접속해 매매 시작을 누르세요.'

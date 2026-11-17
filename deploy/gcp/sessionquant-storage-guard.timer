@@ -1,0 +1,11 @@
+[Unit]
+Description=Check SessionQuant disk reserve every minute
+
+[Timer]
+OnActiveSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=sessionquant-storage-guard.service
+
+[Install]
+WantedBy=timers.target

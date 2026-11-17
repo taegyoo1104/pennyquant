@@ -3,7 +3,8 @@ services:
   db:
     image: mysql:8.4
     env_file: /etc/sessionquant/db.env
-    command: ["--innodb-buffer-pool-size=128M", "--max-connections=30", "--performance-schema=OFF"]
+    # Single-server Paper: logical backups, no replication or point-in-time recovery.
+    command: ["--skip-log-bin", "--max-allowed-packet=64M", "--innodb-buffer-pool-size=128M", "--max-connections=30", "--performance-schema=OFF"]
     ports: ["127.0.0.1:3306:3306"]
     volumes: ["/var/lib/sessionquant/mysql:/var/lib/mysql"]
     restart: "no"
