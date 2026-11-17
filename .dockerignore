@@ -10,3 +10,5 @@ data
 *.egg-info
 examples
 tests
+cloud-migration.sql
+sessionquant-*.tar.gz

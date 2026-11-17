@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
+import logging
 from pathlib import Path
 import re
 from threading import RLock
@@ -20,6 +21,24 @@ from .serialization import dumps, exact_jsonable, record_identity
 from .config import MySQLConfig, namespace_for
 
 PRUNABLE_KINDS = ("price_samples", "quote_snapshots", "market_bars", "system_logs")
+
+
+def mysql_failure_message(error, operation):
+    """드라이버 원문·접속값·SQL·매개변수 없이 숫자 오류 코드만 보존한다."""
+    code = error.args[0] if error.args else None
+    code = code if type(code) is int and 0 <= code <= 65535 else None
+    action = operation if operation in {'CONNECT','SELECT','INSERT','UPDATE','DELETE','CREATE','ALTER','SET','START'} else 'QUERY'
+    hints = {
+        1044:'DB 접근 권한을 확인하세요.', 1045:'DB 계정·비밀번호·접속 허용 대상을 확인하세요.',
+        1142:'해당 DB 작업의 테이블 권한을 확인하세요.', 1143:'해당 DB 작업의 열 권한을 확인하세요.',
+        1146:'필요한 DB 테이블이 없습니다.', 1153:'DB의 최대 전송 크기를 초과했습니다.',
+        1205:'다른 DB 작업의 잠금이 풀리기를 기다리다 제한 시간을 넘겼습니다.',
+        1213:'동시 DB 작업 사이에 교착 상태가 발생했습니다.',
+        2006:'DB 연결이 끊겼습니다. 서버 재시작·대기 시간·전송 크기를 확인하세요.',
+        2013:'DB 처리 도중 연결이 끊겼습니다. 서버 상태·응답 시간 제한을 확인하세요.',
+    }
+    stage = '연결' if action=='CONNECT' else '처리'
+    return f"MySQL {stage} 실패 (코드 {code if code is not None else '미확인'} · 작업 {action}): "+hints.get(code,'DB 상태·연결·권한을 확인하세요.')
 
 
 class MySQLRepository:
@@ -46,8 +65,8 @@ class MySQLRepository:
                 password=self.config.password, database=self.config.database, charset="utf8mb4",
                 autocommit=True, connect_timeout=self.config.connect_timeout, read_timeout=self.config.read_timeout,
                 write_timeout=self.config.write_timeout, binary_prefix=True)
-        except Exception:
-            raise RuntimeError("MySQL 연결 실패: 로컬 서버·DB·사용자·환경변수를 확인하세요") from None
+        except Exception as exc:
+            raise RuntimeError(mysql_failure_message(exc,'CONNECT')) from None
         try:
             row = self._execute("SELECT VERSION()", fetch="one")
             version = str(row[0]) if row else ""
@@ -70,8 +89,11 @@ class MySQLRepository:
                     if fetch == "all":
                         return cursor.fetchall()
                     return cursor.rowcount
-            except self._driver_errors:
-                raise RuntimeError("MySQL 처리 실패: DB 연결과 SessionQuant 테이블 권한을 확인하세요") from None
+            except self._driver_errors as exc:
+                message = mysql_failure_message(exc,sql.lstrip().split(None,1)[0].upper() if sql.strip() else 'QUERY')
+                # 종료 중 후속 오류가 발생해도 최초 실패 번호를 확인할 수 있게 한다.
+                logging.getLogger(__name__).warning('%s',message)
+                raise RuntimeError(message) from None
 
     def _create_tables(self):
         for kind in self.kinds:
@@ -349,6 +371,15 @@ class MySQLRepository:
             self._execute("DELETE FROM sq_financial_ledger WHERE namespace=%s AND kind=%s", (self.namespace, "positions"))
             for value in positions.values():
                 self.record("positions", value)
+
+    def recent_llm_attempts(self, limit=500):
+        """Keep namespace isolation and filter prechecks before the display limit."""
+        if type(limit) is not int or not 1 <= limit <= 10000:
+            raise ValueError('요청 조회 개수는 1~10000 정수여야 합니다.')
+        rows = self._execute("SELECT payload FROM pq_llm_calls WHERE namespace=%s "
+            "AND JSON_EXTRACT(payload,'$.network_attempted')=CAST('true' AS JSON) "
+            "ORDER BY seq DESC LIMIT %s",(self.namespace,limit),fetch='all')
+        return [self._decode(row[0]) for row in reversed(rows)]
 
     def save_state(self, state: dict) -> None:
         payload = self._json(state)

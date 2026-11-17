@@ -1,0 +1,9 @@
+[Unit]
+Description=Stop unattended Paper VM no later than 20 hours after boot
+
+[Timer]
+OnBootSec=20h
+Unit=sessionquant-cost-guard.service
+
+[Install]
+WantedBy=timers.target

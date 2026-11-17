@@ -68,6 +68,28 @@ def test_repeated_news_status_preserves_records_and_reports_cached_requests_hone
     finally:repo.close()
 
 
+def test_skipped_articles_do_not_push_real_llm_requests_out_of_report(tmp_path):
+    repo=Repository(tmp_path/'requests.db',backend='sqlite')
+    try:
+        repo.record('llm_calls',call('success'))
+        repo.record('llm_calls',call('failure','EVIDENCE_MISMATCH',validation_error_code='EVIDENCE_QUOTE_MISMATCH',
+                                     failed_field='events.evidence'))
+        for i in range(510):
+            repo.record('llm_calls',call(f'skip-{i}','SKIPPED_PRECHECK',network_attempted=False,
+                                        llm_call_id=None,recorded_at=NOW.isoformat()))
+        report=read_news_status(repo,NOW)
+        assert report['counts']['llm_request_attempts']==2
+        assert report['counts']['validated_responses']==report['counts']['failed_or_rejected']==1
+        assert report['audit_status_counts']=={'SKIPPED_PRECHECK':500,'SUCCEEDED':1,'EVIDENCE_MISMATCH':1}
+        assert report['scope']['may_be_truncated'] and not report['scope']['requests_may_be_truncated']
+        assert next(r for r in report['latest_calls'] if r['status']=='EVIDENCE_MISMATCH')['failed_field']=='events.evidence'
+        assert not repo.all('orders')
+        assert [row['id'] for row in repo.recent_llm_attempts(1)]==['failure']
+        for bad in (0,True,10001):
+            with pytest.raises(ValueError):repo.recent_llm_attempts(bad)
+    finally:repo.close()
+
+
 def test_human_labels_preserve_numbers_originals_tickers_and_evidence():
     original=[{'symbol':'AAPL','status':'SUCCEEDED','code':'stale_article','count':3,
         '원문 근거':'The report states UNKNOWN_FIELD exactly.',
@@ -140,9 +162,10 @@ def test_main_and_news_show_simple_labels_and_pipeline_counts(tmp_path,monkeypat
     monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setenv('SQ_ENVIRONMENT','PAPER_LOCAL')
     monkeypatch.setattr('sys.argv',['session_app.py','--db',str(path)])
     app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30).run()
-    assert not app.exception and len(app.metric)==4
+    assert not app.exception and len(app.metric)==6
     assert any(m.label=='모의 총자산' for m in app.metric)
-    assert any('AI 요청 **1건**' in r.value for r in app.markdown)
+    assert next(m for m in app.metric if m.label=='AI 분석').value=='1건 완료'
+    assert any('요청 1건' in r.value for r in app.caption)
     assert not any('PAPER_LOCAL' in r.value or 'observed_paper_v1' in r.value for r in app.caption)
     app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert not app.exception

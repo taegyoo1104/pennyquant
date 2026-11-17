@@ -255,3 +255,26 @@ async def test_slow_provider_times_out_without_replacing_known_snapshot(tmp_path
         assert result['snapshot']['known_at'] == NOW.isoformat()
     finally:
         repo.close()
+
+
+async def test_focus_diagnostics_distinguish_missing_inputs_and_keep_quality_gates(tmp_path):
+    repo,_,_,_,manager=context(tmp_path)
+    try:
+        await manager.refresh(NOW)
+        manager.publish(NOW)
+        row=next(r for r in repo.get_control('watchlist_dashboard_v1')['items'] if r['ticker']=='T400')
+        assert set(row['focus_missing_inputs'])=={'symbol_prices_missing','spy_prices_missing','turnover_missing'}
+        now=observe(manager)
+        original=deepcopy(manager.state)
+        manager.state['prices']['T400'].pop()
+        assert manager._metric('T400',now)['missing_inputs']==['symbol_second_price_missing']
+        manager.state=deepcopy(original)
+        manager.state['rankings'].pop('T400')
+        assert manager._metric('T400',now)['missing_inputs']==['turnover_missing']
+        assert 'T400' not in manager.focus(now)
+        manager.state=deepcopy(original)
+        assert manager._metric('T400',now+timedelta(seconds=121))['missing_inputs']==['observation_stale_or_future']
+        manager.state['prices']['T400'][0]['known_at']=(now-timedelta(seconds=2)).isoformat()
+        assert manager._metric('T400',now)['missing_inputs']==['observation_window_mismatch']
+        assert 'T400' not in manager.focus(now)
+    finally:repo.close()

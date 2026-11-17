@@ -17,8 +17,9 @@ def test_empty_dashboard_does_not_invent_account(tmp_path, monkeypatch):
     app = AppTest.from_file(APP, default_timeout=30).run()
     assert not app.exception
     assert app.title[0].value == "SessionQuant"
-    assert app.metric[0].value == "—"
-    assert len(app.metric)==4
+    assert next(m for m in app.metric if m.label=='모의 총자산').value == '—'
+    assert next(m for m in app.metric if m.label=='시세').value == '연결 미확인'
+    assert len(app.metric)==6
     assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     assert not any("실거래 활성화" == button.label for button in app.button)
     assert not (tmp_path / "absent.db").exists()
@@ -75,6 +76,8 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
         def recent(self, name, limit):
             calls.append((name, limit))
             return []
+        def recent_llm_attempts(self, limit):
+            return []
         def close(self):
             calls.append("closed")
 
@@ -115,7 +118,8 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
             'profitLoss': {'amount': '1.23456'}}],
         'summary': {'marketValue': {'amount': {'usd': '1200.50', 'krw': '350000'}}},
         'buying_power': {'USD': '321.45', 'KRW': None}, 'issues': []})
-    repo.set_control('session_llm_budget_v1', {'2026-11': {'spent': '0.20001'}})
+    repo.set_control('session_llm_budget_v1', {datetime.now(timezone.utc).strftime('%Y-%m'): {'spent': '0.20001'}})
+    repo.set_control('session_llm_limits_v1', {'monthly_hard_budget_usd': '3'})
     repo.set_control('openai_funding_note', {'total_usd': '10'})
     repo.set_control('llm_provider_health', {'code': 'NO_CREDIT', 'message': '잔액 부족: 차트·청산 관리 계속'})
     repo.close()
@@ -126,6 +130,9 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     assert not app.exception and not app.error
     assert any('실제 계좌' in row.value for row in app.caption)
     assert [metric.value for metric in app.metric][:3] == ['$1,200.50', '$321.45', '—']
+    assert app.metric[3].label == '이번 달 AI 비용 / 월 한도액'
+    assert app.metric[3].value == '$0.20 / $3.00'
+    assert any(row.value == '총 충전액(수동 입력): $10.00' for row in app.caption)
     assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert any(metric.label == '프로그램 누적 비용 · 추정' and metric.value == '$0.20' for metric in app.metric)
@@ -137,6 +144,9 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     app.text_input(key='openai-deposit').set_value('0')
     app.button(key='save-openai-deposit').click().run()
     assert not app.exception
+    app.radio(key='dashboard_page').set_value('대시보드').run()
+    assert app.metric[3].value == '$0.20 / $3.00'
+    assert any(row.value == '총 충전액(수동 입력): $0.00' for row in app.caption)
     repo = Repository(path, backend='sqlite')
     assert repo.get_control('openai_funding_note')['total_usd'] == '0'
     assert repo.get_control('llm_provider_health')['code'] == 'NO_CREDIT'

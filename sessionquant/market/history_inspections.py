@@ -7,6 +7,7 @@ from .history import KIND, record_id, decode_history, session_quality
 CONTROL = 'completed_history_inspections_v1'
 # Bump whenever coverage/source/availability validation rules change.
 VERSION = 1
+INCOMPLETE_RETRY_DELAY = timedelta(hours=6)
 
 
 class HistoryInspections:
@@ -15,6 +16,10 @@ class HistoryInspections:
         saved = repo.get_control(CONTROL,{}) or {}
         self.entries = (dict(saved['entries']) if isinstance(saved,dict) and saved.get('version') == VERSION
                         and isinstance(saved.get('entries'),dict) else {})
+        self.deferred_entries = (dict(saved['deferred_entries']) if isinstance(saved,dict)
+                                 and saved.get('version') == VERSION
+                                 and isinstance(saved.get('deferred_entries'),dict) else {})
+        self.last_incomplete_checks = {}
         self.fingerprints = {}
         self.dirty = False
 
@@ -39,11 +44,45 @@ class HistoryInspections:
             pass
         return None
 
+    def deferred(self, symbol, day, opened, closed, now):
+        """Recently exhausted history stays incomplete; this only defers API work."""
+        key = record_id(symbol,day)
+        entry = self.deferred_entries.get(key)
+        fingerprint = self.fingerprints.get(key,{}).get('fingerprint')
+        try:
+            quality = entry['quality']
+            checked = utc(entry['checked_at'])
+            if (fingerprint and entry['fingerprint'] == fingerprint
+                    and entry['opened'] == opened.isoformat() and entry['closed'] == closed.isoformat()
+                    and closed <= checked <= utc(now) < utc(entry['retry_after'])
+                    and utc(entry['retry_after']) <= checked+INCOMPLETE_RETRY_DELAY
+                    and quality.get('complete') is False
+                    and entry['reason'] == 'history_minutes_missing_or_conflicting'):
+                return {**entry,'quality':dict(quality)}
+        except (KeyError,TypeError,ValueError,AttributeError):
+            pass
+        return None
+
+    def defer_retry(self, symbol, day):
+        # Only the last atomic payload/digest inspection can be reused. Callers
+        # invoke this after reaching the end of a successful backfill, never on
+        # HTTP errors, budget waits, stalled cursors or a page-limit cutoff.
+        key = record_id(symbol,day)
+        entry = self.last_incomplete_checks.get(key)
+        if entry is None:
+            return
+        self.deferred_entries[key] = {**entry,
+            'retry_after':(utc(entry['checked_at'])+INCOMPLETE_RETRY_DELAY).isoformat()}
+        self.dirty = True
+
     def inspect(self, store, symbol, day, opened, closed, now):
         now = utc(now)
         reused = self.reusable(symbol,day,opened,closed,now)
         if reused is not None:
             return reused, None
+        deferred = self.deferred(symbol,day,opened,closed,now)
+        if deferred is not None:
+            return deferred['quality'], deferred['reason']
         key = record_id(symbol,day)
         # Read payload and digest in the same SELECT. Never sign a different row
         # if another writer changed it between a quality check and hashing.
@@ -52,6 +91,10 @@ class HistoryInspections:
         if key in self.entries:
             self.entries.pop(key)
             self.dirty = True
+        if key in self.deferred_entries:
+            self.deferred_entries.pop(key)
+            self.dirty = True
+        self.last_incomplete_checks.pop(key,None)
         self.fingerprints[key] = {'fingerprint':found.get('fingerprint')}
         bars = decode_history(symbol,row)
         store.cache.pop(key,None)
@@ -70,6 +113,11 @@ class HistoryInspections:
             self.entries[key] = {'fingerprint':found['fingerprint'],'opened':opened.isoformat(),
                 'closed':closed.isoformat(),'checked_at':now.isoformat(),'quality':quality}
             self.dirty = True
+        elif (row and reason == 'history_minutes_missing_or_conflicting'
+              and closed <= now and all(bar.received_at <= now for bar in bars)):
+            self.last_incomplete_checks[key] = {'fingerprint':found['fingerprint'],
+                'opened':opened.isoformat(),'closed':closed.isoformat(),'checked_at':now.isoformat(),
+                'quality':dict(quality),'reason':reason}
         return quality, reason
 
     def flush(self, now):
@@ -79,5 +127,9 @@ class HistoryInspections:
         entries = {key:value for key,value in self.entries.items() if key.rsplit(':',1)[-1] >= cutoff}
         # Bound cache size across changing watchlists; eviction only causes rechecking.
         self.entries = dict(sorted(entries.items(),key=lambda row:row[0].rsplit(':',1)[-1])[-5000:])
-        self.repo.set_control(CONTROL,{'version':VERSION,'entries':self.entries})
+        deferred = {key:value for key,value in self.deferred_entries.items()
+                    if key.rsplit(':',1)[-1] >= cutoff}
+        self.deferred_entries = dict(sorted(deferred.items(),key=lambda row:row[0].rsplit(':',1)[-1])[-5000:])
+        self.repo.set_control(CONTROL,{'version':VERSION,'entries':self.entries,
+                                     'deferred_entries':self.deferred_entries})
         self.dirty = False

@@ -226,7 +226,11 @@ async def test_mock_http_official_stock_fields_rate_headers_and_no_order_methods
         telemetry = client.read_observations['/api/v1/stocks']
         assert telemetry['rate_headers']=={'x-ratelimit-remaining':'5'} and telemetry['cost_usd'] is None
         assert 'PRIVATE' not in str(telemetry)
-    assert calls==[('GET','/api/v1/stocks')]
+        await client.rankings(ranking_type='MARKET_TRADING_AMOUNT',count=100)
+        ranking_telemetry=client.read_observations['/api/v1/rankings']
+        assert ranking_telemetry['rate_headers']=={'x-ratelimit-remaining':'5'}
+        assert 'PRIVATE' not in str(ranking_telemetry)
+    assert calls==[('GET','/api/v1/stocks'),('GET','/api/v1/rankings')]
 
 
 async def test_priority_quotes_delivered_before_slow_discovery_and_history_budget_is_bounded(tmp_path):

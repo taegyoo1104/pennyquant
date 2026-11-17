@@ -132,6 +132,35 @@ def test_real_mysql_prepare_paper_preserves_history_and_does_not_copy_trades(mys
     with pytest.raises(ValueError,match='이미'):prepare_paper(source,target)
 
 
+async def test_mysql_incomplete_history_retry_survives_reconnect_and_detects_changes(mysql_repositories,monkeypatch):
+    from sessionquant.market.history import KIND,record_id
+    from sessionquant.market.history_inspections import CONTROL
+    from test_history_inspection_cache import missing_history,worker,SUNDAY
+    from test_startup_warmup import finish
+    repo=mysql_repositories();other=mysql_repositories()
+    day,_,closed=await missing_history(repo)
+    reopened=mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    with monkeypatch.context() as patch:
+        def no_decode(*_):pytest.fail('recent incomplete MySQL history must not be downloaded/parsed again')
+        patch.setattr('sessionquant.market.history_inspections.decode_history',no_decode)
+        second,manager,provider=worker(reopened,now=SUNDAY+timedelta(minutes=1))
+        await finish(second,manager,provider)
+        assert second.report['deferred_history_tasks']==1 and not provider.calls
+        assert second.report['status']=='PARTIAL' and second.report['history_ready_count']==0
+    assert other.get_control(CONTROL) is None
+    key=record_id('AAPL',day)
+    before=reopened.record_fingerprints(KIND,[key])
+    with repo.db.cursor() as cursor:
+        cursor.execute("UPDATE pq_market_history_sessions SET payload=JSON_REMOVE(payload,'$.bars[10]') WHERE namespace=%s AND record_id=%s",(repo.namespace,key))
+    assert reopened.record_fingerprints(KIND,[key])!=before
+    third,manager,provider=worker(reopened,now=SUNDAY+timedelta(minutes=2))
+    await finish(third,manager,provider)
+    assert third.report['deferred_history_tasks']==0
+    assert provider.calls and provider.calls[0]==('AAPL',closed)
+    assert third.report['status']=='READY'
+    assert not repo.all('orders')
+
+
 @pytest.fixture
 def mysql_repositories():
     from sessionquant.database.config import MySQLConfig
@@ -700,3 +729,24 @@ async def test_missing_cap_subset_metadata_and_policy_survive_mysql_restart(mysq
     strict=WatchlistManager(reopened,universe,replace(config,watchlist_missing_cap_policy='block'),
                             provider=provider,allow_synthetic=True)
     assert strict.entry_blockers('T007',NOW)==['watchlist_partial']
+
+
+def test_mysql_actual_llm_requests_are_not_hidden_by_prechecks(mysql_repositories):
+    from test_news_visibility import call,NOW
+    from sessionquant.news.diagnostics import read_news_status
+    repo,other=mysql_repositories(),mysql_repositories()
+    repo.record('llm_calls',call('success'))
+    repo.record('llm_calls',call('failure','EVIDENCE_MISMATCH'))
+    with repo.transaction():
+        for i in range(510):
+            repo.record('llm_calls',call(f'skip-{i}','SKIPPED_PRECHECK',network_attempted=False,
+                                        llm_call_id=None,recorded_at=NOW.isoformat()))
+    # A string containing "true" is not the verified boolean flag.
+    repo.record('llm_calls',call('string-flag',network_attempted='true'))
+    other.record('llm_calls',call('other-account'))
+    report=read_news_status(repo,NOW)
+    assert report['counts']['llm_request_attempts']==2
+    assert report['counts']['validated_responses']==report['counts']['failed_or_rejected']==1
+    assert [r['id'] for r in repo.recent_llm_attempts(limit=1)]==['failure']
+    assert [r['id'] for r in other.recent_llm_attempts()]==['other-account']
+    assert not repo.all('orders')

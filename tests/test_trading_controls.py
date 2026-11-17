@@ -125,3 +125,31 @@ repo.close()
     assert [x['action'] for x in repo.all('order_intents')]==['start','stop_all']
     assert not repo.all('orders') and not repo.all('executions')
     repo.close()
+
+
+def test_completed_manual_sell_does_not_disable_sell_for_reentered_position(tmp_path):
+    from streamlit.testing.v1 import AppTest
+    from sessionquant.trading_controls import request_command
+    now=datetime.now(timezone.utc);path=tmp_path/'reentry.db'
+    repo=Repository(path,backend='sqlite');state=begin_session(repo,mode='paper',now=now)
+    repo.save_state({'broker':{'positions':{'AAPL':{'qty':'0.1'}},'exit_intents':{}}})
+    repo.record('order_intents',{'id':'old-sell','kind':'dashboard_command','action':'sell_symbol',
+        'symbol':'AAPL','run_id':state['run_id'],'status':'accepted'})
+    source=f"""
+from sessionquant.database.repository import Repository
+from sessionquant.trading_controls import render_controls
+repo=Repository({str(path)!r},backend='sqlite')
+render_controls(repo,positions=[{{'symbol':'AAPL','qty':'0.1'}}])
+repo.close()
+"""
+    app=AppTest.from_string(source).run(timeout=10)
+    app.checkbox(key='confirm-sell-AAPL-'+state['run_id']).check().run()
+    assert not app.exception and not app.button(key='sell-AAPL').disabled
+    # An accepted exit that is still active must remain blocked, even without an order yet.
+    repo.save_state({'broker':{'positions':{'AAPL':{'qty':'0.1'}},'exit_intents':{'AAPL':{}}}})
+    app.run()
+    assert app.button(key='sell-AAPL').disabled
+    with pytest.raises(ValueError,match='매도 처리 중'):
+        request_command(repo,'sell_symbol',symbol='AAPL',run_id=state['run_id'],environment='PAPER_LOCAL',now=now)
+    assert len(repo.all('order_intents'))==1 and not repo.all('orders')
+    repo.close()

@@ -212,6 +212,7 @@ def test_example_and_empty_report_do_not_claim_trading_success(tmp_path):
 
 def test_prepare_rejects_mysql_namespace_override_aliases_before_opening(tmp_path,monkeypatch):
     monkeypatch.setenv('SQ_DB_NAMESPACE','same-namespace')
+    monkeypatch.setenv('SQ_MYSQL_PASSWORD','offline-test-placeholder')
     source=SessionConfig(db_path=tmp_path/'source.db')
     target=replace(source,db_path=tmp_path/'target.db',paper_data_policy=OBSERVED)
     with pytest.raises(ValueError,match='네임스페이스'):prepare_paper(source,target)

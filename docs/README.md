@@ -6,6 +6,7 @@
 | --- | --- |
 | 설치·데모·PyCharm 실행 | [시작 안내](GETTING_STARTED.md) |
 | 실제 데이터 모의매매·예열·뉴스 확인·종료 후 분석 | [운영 안내](REALTIME_PAPER.md) |
+| GCP 서버 한 대·클라우드 DB 이전·자동 종료·백업 | [저비용 GCP 안내](GCP_PAPER.md) |
 | 코드 구조·설정·테스트·현재 남은 검증 | [개발 안내](DEVELOPMENT.md) |
 | 다음 Codex 작업에서 이어받을 현재 상태 | [HANDOFF](../HANDOFF.md) |
 

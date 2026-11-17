@@ -11,12 +11,17 @@ def recent_stamp(value, now, seconds=86400):
 
 
 def summarize_news(ingestions, calls, *, schedule=None, health=None, engine=None, now=None,
-                   ingestion_limit=2000, audit_limit=500):
+                   ingestion_limit=2000, audit_limit=500, network_calls=None):
     now=utc(now or datetime.now(timezone.utc))
     schedule,health,engine=schedule or {},health or {},engine or {}
     receipts=[r for r in ingestions if recent_stamp(r.get('received_at'),now)]
     visible=[r for r in calls if recent_stamp(r.get('request_started_at') or r.get('recorded_at'),now)]
-    attempts=[r for r in visible if r.get('network_attempted') is True and r.get('llm_call_id')]
+    request_rows=visible if network_calls is None else [r for r in network_calls
+        if recent_stamp(r.get('request_started_at') or r.get('recorded_at'),now)]
+    attempts=[r for r in request_rows if r.get('network_attempted') is True and r.get('llm_call_id')]
+    # The precheck window and actual-request window are independent. Count a
+    # request only once even when it also appears in the recent audit rows.
+    audit_rows=[r for r in visible if not (r.get('network_attempted') is True and r.get('llm_call_id'))]+attempts
     success=[r for r in attempts if r.get('status')=='SUCCEEDED']
     pending=[r for r in attempts if r.get('status') in {'REQUESTED','RESPONSE_RECEIVED','OUTCOME_UNKNOWN'}]
     excluded=Counter(r.get('skip_reason') for r in receipts if r.get('skip_reason'))
@@ -45,6 +50,7 @@ def summarize_news(ingestions, calls, *, schedule=None, health=None, engine=None
             'reason':result.get('reason'),'requires_verification':result.get('requires_verification'),
             'evidence':[e.get('evidence') for e in result.get('events',[])] or ([result['evidence']] if result.get('evidence') else []),
             'error':row.get('validation_error_code') or result.get('error'),
+            'failed_field':row.get('failed_field') or result.get('failed_field'),
             'article_url':row.get('article_url')})
     if success:message='LLM 응답 검증을 통과한 기록이 있습니다. 분류 결과와 원문 근거를 대조하세요.'
     elif attempts:message='LLM 요청 시도는 있으나 조회 범위에 검증 성공이 없습니다. 호출 상태·오류를 확인하세요.'
@@ -55,6 +61,8 @@ def summarize_news(ingestions, calls, *, schedule=None, health=None, engine=None
     return {'observed_at':now.isoformat(),'message':message,
         'scope':{'since':(now-timedelta(hours=24)).isoformat(),'basis':'최근 24시간 수신/요청 기록 중 조회 범위',
                  'ingestion_limit':ingestion_limit,'audit_limit':audit_limit,
+                 'request_limit':audit_limit,
+                 'requests_may_be_truncated':len(calls if network_calls is None else network_calls)>=audit_limit,
                  'may_be_truncated':len(ingestions)>=ingestion_limit or len(calls)>=audit_limit},
         'engine':{'status':engine.get('status','NOT_STARTED'),
             'connected':bool(engine.get('armed') and recent_stamp(engine.get('heartbeat'),now,60)),
@@ -65,7 +73,7 @@ def summarize_news(ingestions, calls, *, schedule=None, health=None, engine=None
             'cache_hits':sum(r.get('status')=='CACHE_HIT' for r in visible)},
         'last_news_received_at':max((r['received_at'] for r in receipts),key=utc,default=None),
         'last_llm_request_at':max((r.get('request_started_at') or r.get('recorded_at') for r in attempts),key=utc,default=None),
-        'pre_llm_exclusions':dict(excluded),'audit_status_counts':dict(Counter(r.get('status','UNKNOWN') for r in visible)),
+        'pre_llm_exclusions':dict(excluded),'audit_status_counts':dict(Counter(r.get('status','UNKNOWN') for r in audit_rows)),
         'llm_health':{k:health.get(k) for k in ('code','message','updated_at','retry_after')},
         'providers':providers,'latest_calls':latest,
         'classification_accuracy':'NOT_MEASURED','read_only':True,'provider_calls':0,'llm_generation_calls':0,'order_writes':0}
@@ -73,5 +81,6 @@ def summarize_news(ingestions, calls, *, schedule=None, health=None, engine=None
 
 def read_news_status(repo, now=None):
     return summarize_news(repo.recent('news_ingestions',limit=2000),repo.recent('llm_calls',limit=500),
+        network_calls=repo.recent_llm_attempts(limit=500),
         schedule=repo.get_control('news_provider_schedule_v1',{}),health=repo.get_control('llm_provider_health',{}),
         engine=repo.get_control('trade_control_state',{}),now=now)

@@ -111,6 +111,13 @@ def batch_events(batch) -> list[dict]:
 
 async def run_session(config: SessionConfig, *, no_dashboard=False, port=8501, max_cycles=None,
                       desktop_notifications=True):
+    from .market_shutdown import with_graceful_sigterm
+    return await with_graceful_sigterm(lambda: _run_session(config, no_dashboard=no_dashboard,
+        port=port, max_cycles=max_cycles, desktop_notifications=desktop_notifications))
+
+
+async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, max_cycles=None,
+                       desktop_notifications=True):
     if max_cycles is not None and (type(max_cycles) is not int or max_cycles < 1):
         raise ValueError("max_cycles는 1 이상이어야 합니다.")
     if type(port) is not int or not 1024 <= port <= 65535:

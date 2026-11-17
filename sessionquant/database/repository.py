@@ -126,6 +126,15 @@ class Repository:
     def get_record(self, kind: str, record_id: str) -> dict | None:
         return self.get_records(kind, [record_id]).get(record_id)
 
+    def recent_llm_attempts(self, limit=500):
+        """Filter actual requests before limiting; prechecks must not hide requests."""
+        if type(limit) is not int or not 1 <= limit <= 10000:
+            raise ValueError('요청 조회 개수는 1~10000 정수여야 합니다.')
+        rows = self.db.execute("SELECT payload FROM llm_calls WHERE "
+            "json_type(payload,'$.network_attempted')='true' "
+            "ORDER BY seq DESC LIMIT ?",(limit,)).fetchall()
+        return [json.loads(row[0]) for row in reversed(rows)]
+
     def get_records(self, kind: str, record_ids) -> dict[str, dict]:
         if kind not in KINDS:
             raise ValueError("지원하지 않는 기록 종류입니다")

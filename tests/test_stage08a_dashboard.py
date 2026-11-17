@@ -59,12 +59,14 @@ def test_main_has_bounded_recent_trades_and_no_buy_realized_pnl():
     assert len(result)==5 and all(r['매도 순실현손익']=='—' and r['수수료']=='—' for r in result)
 
 
-def test_cost_card_uses_controls_only_and_subtracts_reservations():
+def test_cost_card_uses_controls_only_and_distinguishes_limit_from_funding():
     class ControlsOnly:
         def get_control(self,key,default):
             return {'session_llm_budget_v1':{'2026-11':{'spent':'2','reservations':{'a':{'amount':'1'}}}},
-                'session_llm_limits_v1':{'monthly_hard_budget_usd':'10'}}.get(key,default)
-    assert compact_cost(ControlsOnly(),NOW)=={'month':Decimal('2'),'program_budget_remaining_usd':Decimal('7')}
+                'session_llm_limits_v1':{'monthly_hard_budget_usd':'3'},
+                'openai_funding_note':{'total_usd':'10'}}.get(key,default)
+    assert compact_cost(ControlsOnly(),NOW)=={'month':Decimal('2'),'monthly_hard_budget_usd':Decimal('3'),
+                                             'deposited':Decimal('10')}
 
 
 @pytest.mark.parametrize('quality,latency',[('GOOD','DELAYED'),('UNKNOWN','UNKNOWN'),('GOOD','REALTIME')])
@@ -105,7 +107,8 @@ def test_all_six_pages_navigation_and_refresh_are_read_only(tmp_path,monkeypatch
     repo.save_state({'broker':{'cash':'100','reserved_cash':'0','equity':'100','positions':{}}});repo.close()
     monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setattr('sys.argv',['session_app.py','--db',str(path)])
     app=AppTest.from_file(APP,default_timeout=30).run()
-    assert len(app.metric)==4 and app.radio(key='dashboard_page').options==list(PAGES)
+    assert [m.label for m in app.metric]==['시세','종목','뉴스','AI 분석','모의 총자산','매수 가능 금액']
+    assert app.sidebar.radio(key='dashboard_page').options==list(PAGES)
     assert app.button(key='trading-start').disabled
     app.checkbox[0].check().run()
     for page in PAGES:

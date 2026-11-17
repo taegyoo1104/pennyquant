@@ -185,3 +185,23 @@ async def test_llm_call_limit_does_not_send_request():
         result = await NewsAnalyzer(api_key="key", client=client, max_calls=0).analyze(
             article(), "TEST", source_kind="rss", primary_verified=True, now=NOW)
     assert result.error == "llm_call_limit" and not result.entry_eligible
+
+
+@pytest.mark.parametrize('evidence,valid',[
+    ('Company reports clinical results',False),
+    ('임상시험에서 목표를 달성했다',False),
+    ('study met the primary endpoint',True),
+])
+async def test_body_evidence_remains_required_after_prompt_clarification(evidence,valid):
+    def handle(request):
+        prompt=json.loads(request.content)['messages'][0]['content']
+        assert 'single body paragraph' in prompt and 'not evidence' in prompt
+        value=extraction()
+        value['events'][0]['evidence']=evidence
+        return httpx.Response(200,json=response(value))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        result=await NewsAnalyzer(api_key='fixture',client=client).analyze(
+            article(),'TEST',source_kind='rss',primary_verified=True,now=NOW)
+    assert result.entry_eligible is valid
+    if valid:assert result.events[0].evidence==evidence
+    else:assert result.validation_error_code=='EVIDENCE_QUOTE_MISMATCH'

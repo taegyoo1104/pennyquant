@@ -79,6 +79,13 @@ def recent_trades(rows,now):
 
 
 def render_overview(data,view,path,usage_path=None,usage_environment=None):
+    if view['environment']=='PAPER_LOCAL':
+        from .operations_overview import render_operations
+        return render_operations(data,view,path)
+    return render_account_overview(data,view,path,usage_path,usage_environment)
+
+
+def render_account_overview(data,view,path,usage_path=None,usage_environment=None):
     import streamlit as st
     from .session_app import usd,timestamp,_table,age_seconds
     from ..database.repository import Repository
@@ -108,7 +115,9 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
             stage='당일 분봉' if warmup.get('phase')=='CURRENT_SESSION' else '과거 분봉'
             st.info(f"자료 준비 중 · {stage} 확인 · {warmup.get('completed_tasks',0)}/{warmup.get('required_tasks',0)}개 구간 확인 · 신규 매수 대기")
         if warmup.get('reused_history_tasks'):
-            st.caption(f"이전 검사 재사용 {warmup['reused_history_tasks']}개 구간 · 변경·누락 자료만 다시 확인")
+            st.caption(f"완료된 과거 검사 재사용 {warmup['reused_history_tasks']}개 구간")
+        if warmup.get('deferred_history_tasks'):
+            st.caption(f"최근 조회한 누락 구간 {warmup['deferred_history_tasks']}개 재조회 생략 · 해당 종목은 계속 제외 · 마지막 검사 후 6시간 대기")
         with st.expander('자료 준비 자세히'):
             st.caption(warmup.get('message','')+' · 마지막 확인 '+timestamp(warmup.get('updated_at')))
             st.caption('검사 기준 '+timestamp(warmup.get('cutoff_at'))+' · '+str(warmup.get('current_symbol',''))+' '+str(warmup.get('current_session','')))
@@ -139,8 +148,9 @@ def render_overview(data,view,path,usage_path=None,usage_environment=None):
     except Exception:summary={}
     finally:
         if cost_repo:cost_repo.close()
-    cols[3].metric('이번 달 AI 비용 / 남은 예산',usd(summary.get('month'))+' / '+usd(summary.get('program_budget_remaining_usd')),
-        help='프로그램의 추정 비용과 자체 예산입니다. OpenAI 실제 잔액과 다를 수 있습니다.')
+    cols[3].metric('이번 달 AI 비용 / 월 한도액',usd(summary.get('month'))+' / '+usd(summary.get('monthly_hard_budget_usd')),
+        help='이번 달 추정 사용액과 프로그램의 월 사용 한도입니다. OpenAI 실제 잔액이 아닙니다.')
+    cols[3].caption('총 충전액(수동 입력): '+usd(summary.get('deposited')))
     st.subheader('보유 종목')
     if actual:st.info('실계좌 관리 포지션 연결은 미확인입니다. 전체 계좌 보유와 자동 합산하지 않습니다.')
     else:_table([{k:r[k] for k in ('종목','보유 수량','평균 매수가','평가액','평가 손익')} for r in view['positions'][:5]],'보유 종목이 없습니다.')
@@ -185,12 +195,23 @@ def render_system(data,view):
     import streamlit as st
     from .session_app import _table,timestamp
     st.subheader('시스템·설정 · 읽기 전용')
+    from .operations_overview import render_warmup_details
+    render_warmup_details(data.warmup)
     st.caption('엔진 마지막 수신: '+view['last_event']+' · API 연결 정상 여부는 저장 기록만으로 확정하지 않습니다.')
+    st.subheader('알림')
     _table(data.tables['alerts'])
-    _table([{k:r.get(k) for k in ('kind','status','observed_at','timestamp','code')} for r in data.tables['pipeline_status']])
+    from .system_panel import pipeline_rows
+    st.subheader('처리 기록')
+    st.caption('종목 선정과 매수 검사 당시의 기록입니다. 시각은 한국시간이며 현재 연결 상태를 뜻하지 않습니다.')
+    _table(pipeline_rows(data.tables['pipeline_status']))
+    if data.tables['pipeline_status']:
+        with st.expander('처리 기록 원본 보기'):
+            st.json(data.tables['pipeline_status'])
     from .reference_panel import reference_rows
+    st.subheader('시장 참고 지표')
     _table(reference_rows(data.market_reference))
     from .news_panel import provider_rows
+    st.subheader('뉴스 수집 상태')
     _table(provider_rows(data.news_status))
     st.caption('reference/event-LLM 설정은 실행 설정에서 확인합니다. 이 화면에서 위험 한도나 실주문 권한을 변경하지 않습니다.')
     st.caption('뉴스 마지막 작업: '+timestamp(data.news_status.get('updated_at')))
@@ -203,8 +224,9 @@ def compact_cost(repo,now):
     limits=repo.get_control('session_llm_limits_v1',{}) or {}
     spent=decimal(month['spent']) if month and month.get('spent') is not None else None
     hard=decimal(limits['monthly_hard_budget_usd']) if limits.get('monthly_hard_budget_usd') is not None else None
-    reserved=sum((decimal(r['amount']) for r in (month or {}).get('reservations',{}).values()),Decimal(0))
-    return {'month':spent,'program_budget_remaining_usd':max(Decimal(0),hard-spent-reserved) if hard is not None and spent is not None else None}
+    funding=repo.get_control('openai_funding_note',{}) or {}
+    deposited=decimal(funding['total_usd'],nonnegative=True) if funding.get('total_usd') is not None else None
+    return {'month':spent,'monthly_hard_budget_usd':hard,'deposited':deposited}
 
 
 def filter_trades(data):

@@ -52,6 +52,20 @@ def test_market_amount_buy_has_no_internal_price_ceiling_even_after_gap(ask):
         assert legacy.cash==100 and legacy.get_order('buy').status=='open'
 
 
+def test_after_fractional_deadline_marks_remaining_position_without_filling():
+    broker=bought()
+    cutoff=NOW.replace(hour=20)  # 15:00 ET: order window closed, regular market still open.
+    qty=broker.positions['AAPL'].qty
+    cash=broker.cash
+    fills=len(broker.fills)
+    assert not broker.process_quote(quote(0,'80','80.1',at=cutoff))
+    assert broker.positions['AAPL'].mark_price==D('80')
+    assert broker.equity==cash+qty*D('80')
+    assert broker.halted and broker.cash==cash and len(broker.fills)==fills
+    assert not broker.process_quote(quote(0,'90','90.1',at=cutoff))
+    assert broker.positions['AAPL'].mark_price==D('80')  # Duplicate quote cannot revalue again.
+
+
 def test_market_sell_down_gap_realizes_loss_instead_of_waiting_for_rebound():
     broker = bought();qty = broker.positions['AAPL'].qty
     order = broker.submit_order(OrderIntent('sell','AAPL','sell',NOW+timedelta(seconds=2),D('99.8'),

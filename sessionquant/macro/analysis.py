@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx
 
 from ..models import NewsEvent, utc
-from ..news.analysis import NewsAnalysis, NewsAnalyzer, ExtractedEvent, event_digest
+from ..news.analysis import NewsAnalysis, NewsAnalyzer, ExtractedEvent, event_digest, PROMPT_VERSION as COMPANY_PROMPT_VERSION
 from ..news.classifier import classify
 from .models import LLMSettings, MacroArticle, stable_hash
 from .sources import official_url
@@ -80,10 +80,11 @@ class BudgetedAnalyzer:
             if utc(health["retry_after"])>utc(self._clock()):
                 raise BudgetBlocked(health.get("message","LLM 분석 일시 중단; 차트 기반 처리 계속"))
 
-    def _cache_key(self, digest, kind):
+    def _cache_key(self, digest, kind, *, prompt_version=None):
         return "session_llm_cache:" + stable_hash({"digest": digest, "kind": kind,
             "primary": self.settings.primary_model, "escalation": self.settings.escalation_model,
-            "prompt": self.settings.prompt_version,"evidence_version":"stage07-v1"})
+            "prompt": self.settings.prompt_version,"evidence_version":"stage07-v1",
+            **({'company_prompt':prompt_version} if prompt_version else {})})
 
     def metadata(self,article,**kwargs):
         metadata=article_metadata(article,**kwargs)
@@ -125,9 +126,10 @@ class BudgetedAnalyzer:
             precheck=self.record_skip(event,reason,ticker=ticker,source_kind=source_kind)
             return replace(baseline,error=reason,precheck_id=precheck)
         metadata=self.metadata(event,ticker=ticker,source_kind=source_kind,primary=primary_verified,
-                               logical_id='company-analysis:'+stable_hash([event_digest(event,ticker),ticker,self.settings.prompt_version]))
-        metadata.update(precheck_id=uuid4().hex,precheck_status='PASSED',precheck_checked_at=now.isoformat())
-        key=self._cache_key(event_digest(event,ticker),source_kind+str(primary_verified))
+                               logical_id='company-analysis:'+stable_hash([event_digest(event,ticker),ticker,self.settings.prompt_version,COMPANY_PROMPT_VERSION]))
+        metadata.update(precheck_id=uuid4().hex,precheck_status='PASSED',precheck_checked_at=now.isoformat(),
+                        prompt_version=COMPANY_PROMPT_VERSION)
+        key=self._cache_key(event_digest(event,ticker),source_kind+str(primary_verified),prompt_version=COMPANY_PROMPT_VERSION)
         lock=self._locks.setdefault(key,asyncio.Lock())
         async with lock, self._analysis_scope(metadata) as trace:
             lease=None;result=baseline
@@ -175,7 +177,7 @@ class BudgetedAnalyzer:
                     if result.error:break
                 if result.error.startswith('llm_'):
                     result=replace(result,reason='LLM 뉴스 분석은 미확인입니다. 차트 시그널·손절·청산 관리는 계속합니다.')
-                result=replace(result,prompt_version=self.settings.prompt_version,llm_call_ids=tuple(trace['call_ids']))
+                result=replace(result,llm_call_ids=tuple(trace['call_ids']))
                 if self.settings.enable_event_cache and not result.error:
                     payload=asdict(result);payload.pop('event')
                     payload['event_received_at']=utc(result.event.received_at).isoformat()

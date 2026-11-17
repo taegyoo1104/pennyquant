@@ -196,20 +196,29 @@ class WatchlistManager:
 
     def _metric(self, symbol, now):
         empty = {'ticker': symbol, 'data_status': 'UNKNOWN', 'reason': '현재가 이력·거래대금·시장 비교 자료 미확인',
+                 'missing_inputs': [],
                  'rvol': None, 'sector_strength': None, 'tradable': None, 'fractional': None}
         current = self.state['prices'].get(symbol, [])
         spy = self.state['prices'].get('SPY', [])
         ranking = self.state['rankings'].get(symbol)
         if len(current) < 2 or len(spy) < 2 or not ranking:
-            return empty
+            missing, labels = [], []
+            for values, prefix, label in ((current,'symbol','종목'),(spy,'spy','시장(SPY)')):
+                if not values:
+                    missing.append(prefix+'_prices_missing'); labels.append(label+' 현재가 미수신')
+                elif len(values) < 2:
+                    missing.append(prefix+'_second_price_missing'); labels.append(label+' 비교 가격 1회 부족')
+            if not ranking:
+                missing.append('turnover_missing'); labels.append('거래대금 미확인')
+            return {**empty, 'missing_inputs':missing, 'reason':' · '.join(labels)}
         age = self.config.watchlist_data_max_age_seconds
         points = [*current, *spy, ranking]
         if any(not 0 <= (now-utc(row['as_of_at'])).total_seconds() <= age
                or utc(row['known_at']) > now for row in points):
-            return {**empty, 'reason': '관찰 자료 지연·미래 시각'}
+            return {**empty, 'missing_inputs':['observation_stale_or_future'], 'reason': '관찰 자료 지연·미래 시각'}
         # 서로 다른 길이의 관측 구간을 같은 상대강도 지표로 합치지 않는다.
         if any(abs((utc(current[i]['known_at'])-utc(spy[i]['known_at'])).total_seconds()) > 1 for i in (0, 1)):
-            return {**empty, 'reason': '종목·시장 관측 구간 불일치'}
+            return {**empty, 'missing_inputs':['observation_window_mismatch'], 'reason': '종목·시장 관측 구간 불일치'}
         change = Decimal(current[0]['price'])/Decimal(current[1]['price'])-1
         market = Decimal(spy[0]['price'])/Decimal(spy[1]['price'])-1
         return {**empty, 'data_status': 'VERIFIED', 'reason': '관측 구간 가격·거래량·거래대금 확인',
@@ -288,6 +297,7 @@ class WatchlistManager:
             rows.append({**row, 'history_ready':symbol in included,
                 'operating':symbol in operating, 'history_selection':history_rows.get(symbol),
                 'focused': symbol in focused, 'focus_reason': focused.get(symbol, {}).get('selection_reason', metric['reason']),
+                'focus_missing_inputs':metric['missing_inputs'],
                 'last_detail_at': self.state.get('last_detail_success', {}).get(symbol),
                 'focus_valid_until':focused.get(symbol,{}).get('valid_until'),
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],

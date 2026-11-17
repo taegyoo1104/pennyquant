@@ -24,6 +24,7 @@ class FakeConnection:
         self.lock_result = 1
         self.delete_counts = []
         self.failure = None
+        self.failure_code = None
         self.commit_failure = False
 
     @contextmanager
@@ -35,6 +36,8 @@ class FakeConnection:
                 connection.calls.append((sql, params))
                 self.sql = sql
                 if connection.failure and connection.failure in sql:
+                    if connection.failure_code is not None:
+                        raise DriverError(connection.failure_code,"PRIVATE password host SQL payload")
                     raise DriverError("PRIVATE password host")
                 self.rowcount = connection.delete_counts.pop(0) if sql.startswith("DELETE") and connection.delete_counts else 1
             def fetchone(self):
@@ -133,6 +136,36 @@ def test_connection_and_operation_errors_are_sanitized(connection, monkeypatch):
     with pytest.raises(RuntimeError) as exc:
         repository(connection)
     assert "PRIVATE" not in str(exc.value)
+
+
+@pytest.mark.parametrize('code',[1142,1153,1205,1213,2006,2013])
+def test_driver_code_is_reported_without_query_or_secrets(connection,caplog,code):
+    repo=repository(connection)
+    connection.failure='INSERT INTO'
+    connection.failure_code=code
+    with pytest.raises(RuntimeError) as exc:
+        repo.save_state({'secret':'PRIVATE ledger contents'})
+    assert f'코드 {code}' in str(exc.value) and '작업 INSERT' in str(exc.value)
+    assert f'코드 {code}' in caplog.text
+    assert 'PRIVATE' not in str(exc.value)+caplog.text
+    assert 'pq_engine_state' not in str(exc.value)+caplog.text
+
+
+@pytest.mark.parametrize('code',['PRIVATE password',True,None,-1,70000])
+def test_non_numeric_or_invalid_driver_codes_are_not_echoed(code):
+    from sessionquant.database.mysql_repository import mysql_failure_message
+    message=mysql_failure_message(DriverError(code,'PRIVATE server details'),'PRIVATE SQL')
+    assert '코드 미확인' in message and '작업 QUERY' in message and 'PRIVATE' not in message
+
+
+def test_connect_code_distinguishes_authentication_failure(connection,monkeypatch):
+    def fail(**kwargs):
+        raise DriverError(1045,'PRIVATE username and password')
+    monkeypatch.setitem(sys.modules,'pymysql',SimpleNamespace(MySQLError=DriverError,connect=fail))
+    with pytest.raises(RuntimeError) as exc:
+        repository(connection)
+    assert '코드 1045' in str(exc.value) and '작업 CONNECT' in str(exc.value)
+    assert 'PRIVATE' not in str(exc.value)
 
 
 def test_server_writer_lease_blocks_competitor_and_releases_after_failure(connection):
