@@ -2,6 +2,12 @@
 import re
 
 LABELS = {
+    'rvol_observation_stale_or_incomplete':'현재 분까지 계산 결과 미갱신·자료 부족',
+    'current_closed_interval_missing':'정규장 확정 분봉 대기',
+    'symbol_not_yet_collected':'아직 분봉 미수집',
+    'rvol_calendar_unknown':'비교 거래일 확인 필요',
+    'volume_source_or_adjustment_mismatch':'거래량 출처·가격 조정 방식 불일치',
+    'invalid_or_zero_history_volume':'과거 거래량 평균이 없거나 0',
     'WARMING':'자료 준비 중','COLLECTING':'자료 수집 중','WAITING_WATCHLIST':'감시 목록 확인 중',
     'RETRY_WAIT':'다음 조회 대기','cursor_stalled':'이전 분봉 조회 중단',
     'startup_data_not_ready':'시작 자료 준비 중',

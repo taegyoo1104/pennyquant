@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -215,6 +218,32 @@ class WatchlistStore:
     def __init__(self, repo, universe, *, max_age_days=7, missing_cap_policy=None):
         self.repo, self.universe, self.max_age = repo, universe, timedelta(days=max_age_days)
         self.missing_cap_policy = missing_cap_policy
+        self._reads = ContextVar('watchlist_snapshot_reads', default=None)
+
+    @contextmanager
+    def read_scope(self):
+        """Reuse immutable cap inputs for one synchronous decision, never across awaits.
+
+        Expiry and universe membership are still checked at every requested time.
+        The next scope reads the DB again, including changes made by other processes.
+        This deliberately does not cache trading controls or any other repository data.
+        """
+        if self._reads.get() is not None:
+            yield
+            return
+        token = self._reads.set({})
+        try:
+            yield
+        finally:
+            self._reads.reset(token)
+
+    def _control(self, name, default):
+        cached = self._reads.get()
+        if cached is None:
+            return self.repo.get_control(name, default)
+        if name not in cached:
+            cached[name] = self.repo.get_control(name, default)
+        return cached[name]
 
     def add(self, snapshot):
         data = snapshot.payload if isinstance(snapshot, WatchlistSnapshot) else snapshot
@@ -222,19 +251,22 @@ class WatchlistStore:
             history = self.repo.get_control(HISTORY, [])
             if not any(row['id'] == data['id'] for row in history):
                 self.repo.set_control(HISTORY, history+[data])
+                cached = self._reads.get()
+                if cached is not None:
+                    cached.pop(HISTORY, None)
 
     def at(self, now):
         now = utc(now)
-        rows = [row for row in self.repo.get_control(HISTORY, [])
+        rows = [row for row in self._control(HISTORY, [])
                 if utc(row['known_at']) <= now and utc(row['as_of_at']) <= now]
-        return max(rows, key=lambda row: (row['known_at'], row['id'])) if rows else None
+        return deepcopy(max(rows, key=lambda row: (row['known_at'], row['id']))) if rows else None
 
     def status(self, now, *, allow_synthetic=False):
         now = utc(now)
         row = self.at(now)
         members = self.universe.members(now)
         result = {'status': 'UNKNOWN', 'items': [], 'universe_count': len(members), 'membership_status': 'VALID' if members else 'UNKNOWN',
-            'snapshot': row, 'refresh': self.repo.get_control(ATTEMPT, {}), 'live_orders_enabled': False}
+            'snapshot': row, 'refresh': deepcopy(self._control(ATTEMPT, {})), 'live_orders_enabled': False}
         if row:
             result['items'] = row['items']
             result['status'] = row['data_status']

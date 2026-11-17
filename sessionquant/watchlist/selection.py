@@ -8,12 +8,22 @@ import httpx
 import asyncio
 import json
 from hashlib import sha256
+from functools import wraps
 
 from ..portfolio.models import decimal
 from .capitalization import utc, ATTEMPT, FileMarketCapProvider, WatchlistSelector, WatchlistStore
 
 STATE = 'watchlist_scan_state_v1'
 VIEW = 'watchlist_dashboard_v1'
+
+
+def snapshot_reads(method):
+    """Share cap inputs only within a synchronous manager operation."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.read_scope():
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 class FairScheduler:
@@ -84,6 +94,9 @@ class WatchlistManager:
         self.focus_selector = FocusSelector(config.focus_size, config.watchlist_data_max_age_seconds,
                                              config.focus_min_hold_seconds)
 
+    def read_scope(self):
+        return self.store.read_scope()
+
     async def refresh(self, now=None, *, force=False):
         now = utc(now or self.clock())
         attempt = self.repo.get_control(ATTEMPT, {})
@@ -126,6 +139,7 @@ class WatchlistManager:
         self.publish(now)
         return self.store.status(now, allow_synthetic=self.allow_synthetic)
 
+    @snapshot_reads
     def base_symbols(self, now):
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         members = self.universe.members(now)
@@ -134,6 +148,7 @@ class WatchlistManager:
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         return [row['ticker'] for row in status['items'] if row['ticker'] in members and row['ticker'] not in REFERENCE_SYMBOLS][:self.config.watchlist_size]
 
+    @snapshot_reads
     def light_symbols(self, now):
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         if not status['snapshot'] or status['snapshot']['data_status'] != 'VALID':
@@ -227,6 +242,7 @@ class WatchlistManager:
             'metric_basis': 'same_observation_window_vs_SPY', **ranking,
             'valid_until': min(utc(row['as_of_at'])+timedelta(seconds=age) for row in points).isoformat()}
 
+    @snapshot_reads
     def focus(self, now):
         now = utc(now)
         if self.store.status(now, allow_synthetic=self.allow_synthetic)['status'] != 'VALID':
@@ -236,6 +252,7 @@ class WatchlistManager:
         self.state['focus'] = self.focus_selector.choose(metrics, self.state['focus'], now)
         return [row['ticker'] for row in self.state['focus']]
 
+    @snapshot_reads
     def entry_blockers(self, symbol, now):
         now = utc(now)
         from ..market_reference.contracts import REFERENCE_SYMBOLS
@@ -269,6 +286,7 @@ class WatchlistManager:
         if snapshot.get('valid_until'):expires.append(utc(snapshot['valid_until']))
         return min(expires).isoformat()
 
+    @snapshot_reads
     def news_targets(self, now, priority_symbols=()):
         """단계 06용 계약: 기업 후보 상한과 위험 우선대상, 거시 수집의 독립성을 제공한다."""
         now = utc(now)
@@ -279,6 +297,7 @@ class WatchlistManager:
         return {'company_allowlist': allowlist, 'focus_candidates': focus, 'risk_priority': risk,
                 'analysis_symbols': list(dict.fromkeys([*risk, *focus])), 'macro_independent': True}
 
+    @snapshot_reads
     def publish(self, now, *, priority_symbols=()):
         now = utc(now)
         self.focus(now)

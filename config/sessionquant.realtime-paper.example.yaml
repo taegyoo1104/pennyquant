@@ -4,6 +4,7 @@ database_backend: mysql
 db_path: ../data/sessionquant-realtime-paper-v1.db
 universe_path: ../data/sp500-universe.json
 source: toss
+poll_seconds: 2  # 수집 완료 뒤 쉬는 시간. API 호출 제한·재시도 대기는 별도로 유지.
 paper_data_policy: observed_paper_v1
 actual_account_monitor_enabled: false  # Paper 운영에 실제 계좌 조회는 필요하지 않음
 recording_enabled: true
@@ -12,7 +13,7 @@ strategy: pullback
 watchlist_enabled: true
 watchlist_size: 50
 watchlist_missing_cap_policy: exclude  # 시총 누락 종목 제외; 확인된 시총 범위에서 선정
-watchlist_candles_per_cycle: 4
+watchlist_candles_per_cycle: 10
 focus_size: 20
 market_cap_provider: auto
 company_news_refresh_seconds: 180
