@@ -275,15 +275,23 @@ class TossSessionSource:
             if bars and not cached:
                 state.setdefault('last_detail_success',{})[symbol] = utc(self.clock()).isoformat()
 
+        def candle_due(symbol):
+            last = state.get('last_bars_fetch',{}).get(symbol)
+            # One success per minute boundary, not 60 seconds after receipt.
+            # A late response in the previous minute must not defer the next bar.
+            minute = utc(self.clock()).replace(second=0,microsecond=0)
+            return not last or utc(last).replace(second=0,microsecond=0) < minute
+
         async def candles(symbol, *, optional=False):
             last = state.setdefault('last_bars_fetch',{})
             stamp = utc(self.clock())
-            if last.get(symbol) and (stamp-utc(last[symbol])).total_seconds() < 60:
+            if not candle_due(symbol):
                 return
             before = budget.used
             response = await call('toss_candles',self.client.candles,symbol,count=200,symbol=symbol,optional=optional)
             if budget.used > before:
                 manager.scheduler.mark(symbol,utc(self.clock()))
+                state.setdefault('last_candle_attempt',{})[symbol] = utc(self.clock()).isoformat()
             if response is None:
                 return
             bars, cursor = response
@@ -390,6 +398,29 @@ class TossSessionSource:
             await deliver(priority=False)
             for symbol in chosen:
                 await candles(symbol,optional=True)
+            if self.history_store is not None:
+                # Never let optional reference work consume every watchlist slot.
+                # Recent focus fetches must not occupy the limited background slots.
+                attempts = state.setdefault('last_candle_attempt',{})
+                remaining_symbols = [s for s in pool if s not in priority and s not in chosen and candle_due(s)]
+                remaining_symbols.sort(key=lambda s:(attempts.get(s,state.get('last_bars_fetch',{}).get(s,'')),s))
+                # Leave one bounded reference opportunity; never expand the cycle
+                # budget or starve reference collection with a full due queue.
+                full_deadline = optional_deadline
+                reference_reserve = int(self.reference_monitor is not None)
+                if reference_reserve:
+                    optional_deadline -= 2
+                try:
+                    for symbol in remaining_symbols[:self.watchlist_candles_per_cycle]:
+                        if budget.used >= budget.limit-reference_reserve-self.history_pages_per_cycle or monotonic() >= optional_deadline:
+                            break
+                        before = budget.used
+                        await candles(symbol,optional=True)
+                        if budget.used > before:
+                            state.setdefault('last_watchlist_candle_attempt',{})[symbol] = utc(self.clock()).isoformat()
+                finally:
+                    optional_deadline = full_deadline
+            # One engine transaction for focused and background candle updates.
             await deliver(priority=False)
             state['focus_phase_seconds'] = round(monotonic()-focus_started,3)
             if self.reference_monitor is not None:
@@ -408,20 +439,9 @@ class TossSessionSource:
                         last_error = batch.errors[-1] if len(batch.errors)>before_errors else {}
                         error = 'http_'+str(last_error['http_status']) if last_error.get('http_status') else last_error.get('error_type','budget_or_backoff_or_deadline')
                     return {'data':value,'error':error,'received_at':utc(self.clock()).isoformat()}
-                # 후보 전달 후 남은 예산으로 참고군을 수집하며 배경 분봉 슬롯도 남긴다.
-                allowance = max(0,budget.limit-budget.used-(self.candidates_per_cycle*2+1))
+                # References use remaining capacity after candidate/watchlist data.
+                allowance = max(0,budget.limit-budget.used-self.history_pages_per_cycle)
                 await self.reference_monitor.poll(reference_read,limit=allowance)
-            if self.history_store is not None:
-                attempts = state.setdefault('last_watchlist_candle_attempt',{})
-                remaining_symbols = [s for s in pool if s not in priority and s not in chosen]
-                remaining_symbols.sort(key=lambda s:(attempts.get(s,''),s))
-                for symbol in remaining_symbols[:self.watchlist_candles_per_cycle]:
-                    if budget.used >= budget.limit or monotonic() >= optional_deadline:
-                        break
-                    before = budget.used
-                    await candles(symbol,optional=True)
-                    if budget.used > before:
-                        attempts[symbol] = utc(self.clock()).isoformat()
             history = state.setdefault('history_progress',{})
             history_targets = [*priority,*focus,*(pool if self.history_store is not None else [])]
             order = sorted([s for s in dict.fromkeys(history_targets) if history.get(s,{}).get('cursor') and not history[s].get('done')],

@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from dataclasses import replace,asdict
 from hashlib import sha256
+from contextlib import nullcontext
 import json
 
 from .database.repository import Repository
@@ -78,6 +79,8 @@ class SessionEngine:
         self.exit_policy = exit_policy or ExitPolicy()
         self.consumed_signals: set[str] = set()
         self.dirty_symbols: set[str] = set()
+        self.dirty_bar_symbols: set[str] = set()
+        self._market_storage_version = 3
         self.market_symbols: set[str] = set()
         self._journal_hashes: dict[str, str] = {}
         self._last_summary = None
@@ -86,7 +89,7 @@ class SessionEngine:
         if stored is not None:
             if not restore:
                 raise ValueError("이미 저장된 상태가 있습니다. 복구 옵션 또는 별도 DB를 사용하세요.")
-            if (stored.get("schema_version") != 2 or stored.get("environment") != "PAPER_LOCAL"
+            if (stored.get("schema_version") not in (2, 3) or stored.get("environment") != "PAPER_LOCAL"
                     or (stored.get('strict_market_data',False) and not strict_market_data)
                     or stored.get("strategy") != strategy or stored.get("synthetic") != synthetic
                     or stored.get("use_news", True) != use_news
@@ -107,11 +110,18 @@ class SessionEngine:
                 raise ValueError('손절·청산 연구 정책이 저장된 실행과 다릅니다. 새 DB를 사용하세요.')
             self.risk_provider_cache = stored.get('risk_provider_cache',{})
             self.market_symbols = set(stored.get("market_symbols", []))
+            self._market_storage_version = stored['schema_version']
             merged = {"schema_version": 1, **{name: {} for name in ("bars", "quotes", "eligibility", "rvol", "sector_strength")}}
             for symbol in sorted(self.market_symbols):
                 chunk = self.repo.get_control("sq_market_" + symbol)
                 if not chunk:
                     raise ValueError("시장 복구 자료가 누락되어 신규 주문을 중단합니다.")
+                if self._market_storage_version == 3:
+                    metadata = self.repo.get_control("sq_market_meta_" + symbol)
+                    if not metadata or metadata.get('schema_version') != 1:
+                        raise ValueError("시장 메타데이터 복구 자료가 누락되어 신규 주문을 중단합니다.")
+                    chunk = {**chunk, **{name: metadata.get(name, {}) for name in
+                             ('quotes','eligibility','rvol','sector_strength')}}
                 for name in merged:
                     if name != "schema_version":
                         merged[name].update(chunk.get(name, {}))
@@ -181,6 +191,7 @@ class SessionEngine:
             if kind == "bar":
                 self.market.on_bar(value)
                 self.repo.record("market_bars", value)
+                self.dirty_bar_symbols.add(value.symbol)
             else:
                 self.market.on_quote(value)
                 self.repo.record("quote_snapshots", value)
@@ -217,15 +228,24 @@ class SessionEngine:
         session_status['alerts'] = list(self.broker.alerts)
         # 종목별 시장 상태를 분리하여 매 호가마다 전체 유니버스를 다시 저장하지 않는다.
         metadata = self.market.to_state(include_bars=False)
-        for symbol in sorted(self.dirty_symbols):
-            payload = {"schema_version": 1, "bars": {symbol: jsonable(self.market.bars.get(symbol, []))}}
+        changed_symbols = self.dirty_symbols | (self.market_symbols if self._market_storage_version == 2 else set())
+        for symbol in sorted(changed_symbols):
+            payload = {"schema_version": 1}
             for name in ("quotes", "eligibility", "rvol", "sector_strength"):
                 payload[name] = {symbol: metadata[name][symbol]} if symbol in metadata[name] else {}
-            self.repo.set_control("sq_market_" + symbol, payload)
+            # Quotes change much more often than a 20-session bar checkpoint.
+            # Both writes and the manifest commit atomically in apply_batch.
+            if symbol in self.dirty_bar_symbols or symbol not in self.market_symbols:
+                self.repo.set_control("sq_market_" + symbol,
+                    {"schema_version": 1, "bars": {symbol: jsonable(self.market.bars.get(symbol, []))}})
+            self.repo.set_control("sq_market_meta_" + symbol, payload)
             self.market_symbols.add(symbol)
         self.dirty_symbols.clear()
+        self.dirty_bar_symbols.clear()
+        self._market_storage_version = 3
         broker_state = self.broker.to_state()
-        state = {"schema_version": 2, "environment": "PAPER_LOCAL", "strategy": self.strategy,
+        # Old binaries reject version 3 rather than silently restoring stale quotes.
+        state = {"schema_version": 3, "environment": "PAPER_LOCAL", "strategy": self.strategy,
                  'candidate_selection':asdict(self.candidate_selector.settings),
                  'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_provider_cache':self.risk_provider_cache,
                  "strict_market_data":self.market.strict_data,
@@ -292,7 +312,8 @@ class SessionEngine:
         self.selection_frame=None
         self._batch_scope_blockers = {} if self.watchlist_policy is not None else None
         try:
-            with self.repo.transaction():
+            scope = getattr(self.watchlist_policy, 'read_scope', nullcontext)
+            with self.repo.transaction(), scope():
                 self.last_decision_at=now
                 for raw in events:
                     self._ingest(raw)
@@ -400,8 +421,10 @@ class SessionEngine:
                 records={row['symbol']:row for _,_,row in (ranked or [])}
                 for decision,risk in decisions:
                     self._batch_decisions.append(decision.to_dict())
-                    self.repo.record('candidates',{'id':decision.symbol,'timestamp':now,**decision.to_dict(),'news_risk':risk,
-                        **({'selection_id':frame['id'],'selection':records[decision.symbol]} if frame else {})})
+                    # Ranked candidates are saved below after allocation has supplied
+                    # their final state, in this same transaction.
+                    if frame is None:
+                        self.repo.record('candidates',{'id':decision.symbol,'timestamp':now,**decision.to_dict(),'news_risk':risk})
                 for decision, risk in sorted(decisions, key=lambda item: (-item[0].score, item[0].symbol)):
                     signal = decision.signal
                     selected=records.get(decision.symbol)

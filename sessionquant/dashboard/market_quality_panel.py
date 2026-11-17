@@ -46,6 +46,8 @@ def render_quality(state, *, performance=None):
         st.caption('마지막 수집: '+timestamp(latest.get('observed_at'))+
             f" · 전체 {latest.get('elapsed_seconds','—')}초 · 프로세스 CPU {latest.get('process_cpu_seconds','—')}초")
         _table(performance_rows(latest),'새 버전으로 수집을 실행하면 측정 결과가 나옵니다.')
+        st.caption('DB 작업별 내역 · 느린 작업부터 표시합니다. SQL 원문·접속 정보는 저장하지 않습니다.')
+        _table(database_rows(latest),'DB 작업별 측정 결과가 아직 없습니다.')
         st.caption('아래 작업 시간은 서로 포함될 수 있어 합산하지 않습니다. API 시간에는 호출 간격·재시도를 분리하며, HTTP 응답 대기 중 다른 작업에 밀린 시간은 포함될 수 있습니다. DB 요청 시간은 MySQL에서 측정합니다. CPU 시간은 같은 프로세스의 뉴스 작업 등도 포함합니다.')
         slow = (performance or {}).get('slowest_this_process',[])
         _table([{'확인 시각':timestamp(r.get('observed_at')),'전체 시간(초)':r['elapsed_seconds'],
@@ -64,19 +66,63 @@ def performance_rows(snapshot):
             for row in snapshot.get('phases',[])]
 
 
+def database_rows(snapshot):
+    operations={'SELECT':'조회','INSERT':'기록','UPDATE':'갱신','DELETE':'삭제',
+                'CREATE':'구조 준비','ALTER':'구조 변경','SET':'연결 설정','START':'저장 묶음 시작'}
+    tables={'pq_controls':'제어·감시 목록','pq_engine_state':'엔진 복구 상태',
+        'pq_market_bars':'분봉','pq_quote_snapshots':'호가','pq_market_history_sessions':'과거 분봉',
+        'pq_research_events':'재현용 입력 기록','pq_candidates':'매수 후보',
+        'pq_pipeline_status':'처리 과정','pq_news_analysis':'종목 뉴스 분석',
+        'pq_macro_analysis':'시장 뉴스 분석','pq_economic_events':'경제 일정',
+        'pq_order_intents':'주문·화면 요청','pq_orders':'주문','pq_executions':'체결',
+        'pq_positions':'보유 종목','pq_account_snapshots':'자산 기록',
+        'pq_reconciliations':'장부 확인','pq_session_state':'거래 상태',
+        'pq_daily_performance':'일별 성과','pq_market_regimes':'시장 방향',
+        'sq_financial_ledger':'금액 장부','pq_system_logs':'운영 기록'}
+    return [{'DB 작업':operations.get(r['operation'],'기타'),
+             '자료':tables.get(r['table'],'연결·기타 자료'),'횟수':r['calls'],
+             '누적 시간(초)':r['seconds'],'최장 시간(초)':r['max_seconds']}
+            for r in sorted(snapshot.get('database',[]),key=lambda r:r['seconds'],reverse=True)]
+
+
+def watchlist_rvol_rows(view, now=None):
+    """Keep stale observations visible as history; never re-enable trading values."""
+    from datetime import datetime, timezone
+    from ..models import utc
+    from ..market.history import current_view
+    from .session_app import timestamp, decimal_value
+    now=utc(now or datetime.now(timezone.utc))
+    saved={r['symbol']:r for r in (view or {}).get('items',[])}
+    result=[]
+    for row in current_view(view,now).get('items',[]):
+        original=saved.get(row['symbol'],{})
+        prior=decimal_value(original.get('calculated_value'))
+        age=None
+        try:
+            cutoff,observed=utc(row['cutoff_at']),utc(row['observed_at'])
+            if not cutoff <= observed <= now:raise ValueError('future observation')
+            age=int((now-cutoff).total_seconds())
+        except (ValueError,TypeError,KeyError):
+            prior=None
+        if prior is not None and prior < 0:prior=None
+        status=('최신' if row.get('fresh') else '이전 계산 · 갱신 대기' if prior is not None
+                else '계산 자료 부족')
+        result.append({'종목':row['symbol'],'RVOL 계산값':row.get('calculated_value'),
+            '마지막 계산값·참고':float(prior) if prior is not None else None,
+            '매매용 검증값':row.get('value'),'현재성':status,'기준 시각 경과(초)':age,
+            '계산 기준 시각':timestamp(row.get('cutoff_at')),'수신·평가 시각':timestamp(row.get('observed_at')),
+            '과거 확보 거래일':row.get('complete_sessions'),'현재 누적 거래량':row.get('current_cumulative_volume'),
+            '과거 동시간 평균':row.get('historical_mean_cumulative_volume'),
+            '확인 필요':', '.join(row.get('reasons',[]))})
+    return result
+
+
 def render_watchlist_rvol(view, backfill):
     import streamlit as st
-    from .session_app import _table, timestamp
-    from ..market.history import current_view
+    from .session_app import _table
     st.subheader('감시목록 과거 분봉·RVOL')
     st.caption(f"장전 수집: {backfill.get('status','미실행')} · 완료 종목×거래일 "
                f"{backfill.get('complete_symbol_days',0)} / {backfill.get('required_symbol_days',0)}")
-    st.caption('감시 종목은 호출 예산 안에서 순환합니다. 계산값은 비교 근거 검증과 별개이며, 오래된 값은 숨깁니다.')
-    rows = current_view(view).get('items',[])
-    _table([{'종목':r['symbol'],'RVOL 계산값':r.get('calculated_value'),'매매용 검증값':r.get('value'),
-             '현재성':'최신' if r.get('fresh') else '지연·미확인',
-             '계산 기준 시각':timestamp(r.get('cutoff_at')),'수신·평가 시각':timestamp(r.get('observed_at')),
-             '과거 확보 거래일':r.get('complete_sessions'),'현재 누적 거래량':r.get('current_cumulative_volume'),
-             '과거 동시간 평균':r.get('historical_mean_cumulative_volume'),
-             '확인 필요':', '.join(r.get('reasons',[]))} for r in rows],
+    st.caption('마지막 계산값은 해당 기준 시각의 참고 기록입니다. 오래되면 현재 계산값·매매용 검증값은 비워 두며, 전략 허용으로 사용하지 않습니다.')
+    _table(watchlist_rvol_rows(view),
            '장전 history-backfill 후 run으로 당일 분봉을 수집하세요.')

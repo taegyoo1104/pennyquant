@@ -2,7 +2,7 @@
 # Download this script at the reviewed commit and run on the operating VM, pre-open.
 set -Eeuo pipefail
 umask 077
-[[ $EUID == 0 && ${1:-} =~ ^[0-9a-f]{40}$ ]] || { echo 'sudo bash update_preopen.sh 검토한커밋SHA' >&2; exit 1; }
+[[ $EUID == 0 && ${1:-} =~ ^[0-9a-f]{40}$ && $# -le 2 && (${2:-} == '' || ${2:-} == --paused-paper) ]] || { echo 'sudo bash update_preopen.sh 검토한커밋SHA [--paused-paper]' >&2; exit 1; }
 [[ $(cat /sys/class/dmi/id/product_name 2>/dev/null) == 'Google Compute Engine' && $(hostname -s) == sessionquant-paper ]] || { echo 'sessionquant-paper VM에서 실행하세요.' >&2; exit 1; }
 cd /opt/sessionquant
 exec 9>/run/sessionquant-update.lock
@@ -12,6 +12,7 @@ for unit in sessionquant-market-close.service sessionquant-cost-guard.service; d
     if systemctl is-active --quiet "$unit"; then echo '종료·백업 중에는 업데이트할 수 없습니다.' >&2; exit 1; fi
 done
 sq_target=$1
+sq_mode=${2:-}
 git fetch origin refs/heads/main:refs/remotes/origin/main < /dev/null
 sq_stage=$(mktemp -d /var/tmp/sessionquant-update.XXXXXXXX)
 trap 'rm -rf -- "$sq_stage"' EXIT
@@ -20,6 +21,11 @@ git archive "$sq_target" | tar -x -C "$sq_stage"
 python3 "$sq_stage/deploy/gcp/prepare_update.py" --repo /opt/sessionquant --target "$sq_target"
 python3 "$sq_stage/deploy/gcp/storage_check.py" --minimum-mib 4096
 # Existing image/calendar first: do not race the after-hours automatic shutdown.
+check_window() {
+if [[ "$sq_mode" == --paused-paper ]]; then
+    docker compose -f deploy/gcp/compose.yaml run --rm --no-deps -T app \
+        python - "$@" < "$sq_stage/deploy/gcp/update_guard.py"
+else
 docker run --rm --network none sessionquant:local python -c '
 from datetime import datetime,timezone
 from sessionquant.market.bars import session_bounds
@@ -27,8 +33,16 @@ now=datetime.now(timezone.utc); bounds=session_bounds(now)
 if not bounds or now>=bounds[0]: raise SystemExit("오늘 미국 정규장 시작 전, 매매 시작 버튼을 누르기 전에 실행하세요.")
 print("장전 시간 확인 완료")
 ' < /dev/null
+fi
+}
+check_window
 sq_image="sessionquant:preopen-${sq_target:0:12}"
 docker build -t "$sq_image" "$sq_stage" < /dev/null
+# A build can take time; recheck both the session and pending shutdown.
+check_window
+for unit in sessionquant-market-close.service sessionquant-cost-guard.service; do
+    if systemctl is-active --quiet "$unit"; then echo '종료·백업 중에는 업데이트할 수 없습니다.' >&2; exit 1; fi
+done
 # Check unit masks before stopping the current application.
 for path in "$sq_stage"/deploy/gcp/sessionquant*.service "$sq_stage"/deploy/gcp/sessionquant*.timer; do
     [[ $(systemctl is-enabled "$(basename "$path")" 2>/dev/null || true) != masked ]] || { echo '서비스가 점검용으로 차단돼 있습니다.' >&2; exit 1; }
@@ -38,6 +52,7 @@ systemctl stop sessionquant.service
 compose=(docker compose -f deploy/gcp/compose.yaml)
 "${compose[@]}" stop -t 180 app < /dev/null
 "${compose[@]}" up -d --wait --wait-timeout 180 db < /dev/null
+if [[ "$sq_mode" == --paused-paper ]]; then check_window --stopped; fi
 sq_logging=$("${compose[@]}" exec -T db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -B -e "SELECT @@GLOBAL.log_bin"' < /dev/null)
 [[ "$sq_logging" == 0 ]] || { echo 'DB 변경 기록이 켜져 있습니다. 기존 저장 공간 수정을 먼저 적용하세요.' >&2; exit 1; }
 bash deploy/gcp/backup.sh < /dev/null

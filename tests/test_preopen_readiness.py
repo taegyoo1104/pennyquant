@@ -118,7 +118,8 @@ def test_prepare_check_and_update_shells_parse_and_do_not_delete_runtime_data():
 
 
 @pytest.mark.parametrize('failure',['','build','backup','check','masked'])
-def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure):
+@pytest.mark.parametrize('paused',[False,True])
+def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,paused):
     import os
     from test_gcp_deployment import executable
     repo=tmp_path/'repo';deploy=repo/'deploy/gcp';deploy.mkdir(parents=True)
@@ -132,6 +133,7 @@ def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure):
         (folder/'sessionquant-cost-guard.timer').write_text('fixture timer')
         (folder/'prepare_update.py').write_text('')
         (folder/'storage_check.py').write_text('')
+        (folder/'update_guard.py').write_text('# read-only guard fixture')
     executable(deploy/'backup.sh','echo backup >> "$CALLS"\n[[ "$FAILURE" != backup ]]\n')
     executable(deploy/'preopen_check.sh','echo check >> "$CALLS"\n[[ "$FAILURE" != check ]]\n')
     executable(binpath/'hostname','echo sessionquant-paper\n')
@@ -159,7 +161,7 @@ exit 0
         ('/run/sessionquant-update.lock',str(tmp_path/'lock')),('/sys/class/dmi/id/product_name',str(tmp_path/'product')),
         ('$EUID == 0','0 == 0')]:text=text.replace(before,after)
     script.write_text(text)
-    result=subprocess.run(['bash',str(script),'a'*40],capture_output=True,text=True,timeout=15,
+    result=subprocess.run(['bash',str(script),'a'*40,*(['--paused-paper'] if paused else [])],capture_output=True,text=True,timeout=15,
         env={**os.environ,'PATH':str(binpath)+':'+os.environ['PATH'],'CALLS':str(calls),'STAGE':str(stage),'FAILURE':failure})
     log=calls.read_text()
     assert (result.returncode==0)==(not failure),result.stderr
@@ -167,6 +169,7 @@ exit 0
     assert (etc/'app.env').read_text()=='PRIVATE' and (data/'database').read_text()=='PRESERVED'
     if failure in ('build','masked'):assert 'systemctl stop sessionquant.service' not in log
     if not failure:
+        if paused: assert log.count('run --rm --no-deps -T app python -')==3
         assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
         assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
         assert 'is-active --quiet sessionquant-market-close.timer' in log
