@@ -310,6 +310,8 @@ class SessionEngine:
                             self.control_state.update(running=False,draining=True)
                             stopped_this_cycle=True
                         elif action=='start':
+                            if self.control_state.get('completed'):
+                                acknowledge(self.repo,request,ok=False,message='완료된 실행은 재개할 수 없습니다.'); continue
                             if self.control_state.get('data_ready') is False:
                                 acknowledge(self.repo,request,ok=False,message='분봉 자료를 준비 중입니다. 완료 후 시작하세요.'); continue
                             if stopped_this_cycle or (self.control_state['draining'] and (self.broker.positions or self.broker.get_open_orders())):
