@@ -40,8 +40,9 @@ class FairScheduler:
 
 
 class FocusSelector:
-    def __init__(self, size=20, max_age_seconds=120, minimum_hold_seconds=300):
+    def __init__(self, size=20, max_age_seconds=120, minimum_hold_seconds=300, refresh_grace_seconds=120):
         self.size, self.age, self.hold = size, max_age_seconds, minimum_hold_seconds
+        self.refresh_grace = refresh_grace_seconds
 
     def choose(self, metrics, previous, now):
         """관찰 점수는 주문 허가가 아니다. RVOL·계좌 적격성을 계산하거나 대체하지 않는다."""
@@ -57,10 +58,30 @@ class FocusSelector:
             row['selection_reason'] = '확인된 거래대금·관측 구간 상대강도·가격 변동; 주문 적격성은 별도 검사'
         eligible.sort(key=lambda r: (-Decimal(r['focus_score']), r['ticker']))
         by_symbol = {row['ticker']: row for row in eligible}
+        metrics_by_symbol = {row['ticker']: row for row in metrics}
         pinned = []
         for row in previous:
             if row['ticker'] in by_symbol and 0 <= (now-utc(row['focus_since'])).total_seconds() < self.hold:
                 pinned.append({**by_symbol.pop(row['ticker']), 'focus_since': row['focus_since']})
+            elif row['ticker'] not in by_symbol and self.refresh_grace:
+                # Keep collection membership briefly while refreshing inputs.
+                # No previous score or validity interval becomes entry evidence.
+                metric = metrics_by_symbol.get(row['ticker'])
+                if not metric or metric.get('data_status') != 'UNKNOWN':
+                    continue
+                try:
+                    wait_since = utc(row.get('refresh_wait_since') or now)
+                    deadline = min(utc(row.get('refresh_wait_until') or now+timedelta(seconds=self.refresh_grace)),
+                                   utc(row['valid_until'])+timedelta(seconds=self.refresh_grace))
+                    if not utc(row['focus_since']) <= wait_since <= now < deadline:
+                        continue
+                except (TypeError, ValueError, KeyError):
+                    continue
+                pinned.append({**row, 'data_status':'UNKNOWN',
+                    'missing_inputs':metric.get('missing_inputs',[]), 'reason':metric['reason'],
+                    'selection_reason':'자료 갱신 대기 · 신규 매수 보류',
+                    'refresh_wait_since':wait_since.isoformat(),
+                    'refresh_wait_until':deadline.isoformat()})
         pinned.sort(key=lambda r: (-Decimal(r['focus_score']), r['ticker']))
         result = pinned[:self.size]
         for row in eligible:
@@ -70,6 +91,9 @@ class FocusSelector:
                 continue
             old = next((r for r in previous if r['ticker'] == row['ticker']), None)
             result.append({**row, 'focus_since': old['focus_since'] if old else now.isoformat()})
+        for row in result:
+            row['monitor_until'] = (row.get('refresh_wait_until') or
+                (utc(row['valid_until'])+timedelta(seconds=self.refresh_grace)).isoformat())
         return result
 
 
@@ -92,7 +116,7 @@ class WatchlistManager:
         self.state.setdefault('focus', [])
         self.scheduler = FairScheduler(self.state)
         self.focus_selector = FocusSelector(config.focus_size, config.watchlist_data_max_age_seconds,
-                                             config.focus_min_hold_seconds)
+                                             config.focus_min_hold_seconds, config.focus_refresh_grace_seconds)
 
     def read_scope(self):
         return self.store.read_scope()
@@ -267,6 +291,8 @@ class WatchlistManager:
         if symbol not in set(self.light_symbols(now)):
             return ['history_not_in_daily_operating_watchlist']
         row = next((r for r in self.state['focus'] if r['ticker'] == symbol), None)
+        if row and row.get('refresh_wait_until'):
+            return ['focus_refresh_pending']
         if not row or self._metric(symbol, now)['data_status'] != 'VERIFIED':
             return ['focus_unknown_or_stale']
         if self.state.get('backoff_until') and now < utc(self.state['backoff_until']):
@@ -282,6 +308,7 @@ class WatchlistManager:
         status=self.store.status(utc(now),allow_synthetic=self.allow_synthetic)
         snapshot=status.get('snapshot') or {}
         if not row or not snapshot:return None
+        if row.get('data_status') != 'VERIFIED':return utc(now).isoformat()
         expires=[utc(row['valid_until']),utc(snapshot['as_of_at'])+timedelta(days=self.config.watchlist_refresh_days)]
         if snapshot.get('valid_until'):expires.append(utc(snapshot['valid_until']))
         return min(expires).isoformat()
@@ -319,6 +346,8 @@ class WatchlistManager:
                 'focus_missing_inputs':metric['missing_inputs'],
                 'last_detail_at': self.state.get('last_detail_success', {}).get(symbol),
                 'focus_valid_until':focused.get(symbol,{}).get('valid_until'),
+                'focus_monitor_until':focused.get(symbol,{}).get('monitor_until'),
+                'focus_refresh_pending':bool(focused.get(symbol,{}).get('refresh_wait_until')),
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],
                 'last_price_at': self.state['prices'].get(symbol, [{}])[0].get('as_of_at'),
                 'entry_blockers': self.entry_blockers(symbol, now)})
@@ -329,7 +358,8 @@ class WatchlistManager:
         if (previous is None or (now-utc(previous)).total_seconds() >= 60
                 or evidence_hash != self.state.get('recorded_focus_evidence')
                 or watchlist_id != self.state.get('recorded_watchlist_id')):
-            valid_until = min((row['valid_until'] for row in self.state['focus']), default=now.isoformat())
+            valid_until = min((row['valid_until'] for row in self.state['focus']
+                               if row.get('data_status') == 'VERIFIED'), default=now.isoformat())
             self.repo.record('pipeline_status', {'id':'watchlist-focus:'+now.isoformat(), 'kind':'watchlist_focus',
                 'known_at':now.isoformat(), 'valid_until':valid_until,
                 'watchlist_id': status['snapshot']['id'] if status['snapshot'] else None,
@@ -380,4 +410,7 @@ class HistoricalWatchlistPolicy:
             return ['focus_history_unknown_or_stale']
         if symbol not in {r['ticker'] for r in frame['items']}:
             return ['outside_historical_focus']
+        row = next(r for r in frame['items'] if r['ticker'] == symbol)
+        if row.get('data_status') != 'VERIFIED' or utc(row['valid_until']) < now:
+            return ['focus_history_unknown_or_stale']
         return []

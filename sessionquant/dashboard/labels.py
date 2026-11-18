@@ -96,6 +96,7 @@ LABELS = {
     'quote_stale':'시세 갱신 지연','quote_missing':'시세 없음','eligibility_unverified':'거래 조건 미확인',
     'market_unknown':'시장 방향 미확인','market_bearish':'하락장','market_neutral':'방향성 부족',
     'outside_market_cap_watchlist':'시총 감시 대상 밖','focus_unknown_or_stale':'집중 분석 대기·만료',
+    'focus_refresh_pending':'집중 유지 · 자료 갱신 전 매수 보류',
     'watchlist_unknown':'감시 목록 미확인','watchlist_partial':'감시 자료 부족','watchlist_expired':'감시 목록 만료',
     'confirmed_news_entry_restriction':'확인된 뉴스 위험','trading_not_started_or_halted':'매매 시작 대기·중지',
     'preferred_position_target_reached':'권장 보유 수 도달','final_candidate_limit':'최종 후보 수 제한',

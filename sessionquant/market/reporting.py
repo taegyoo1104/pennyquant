@@ -12,10 +12,21 @@ def current_report(report, now=None):
     report = deepcopy(report or {})
     rows = report.get('items',[])
     for row in rows:
+        age = None
         try:
-            stale = not 0 <= (now-utc(row['observed_at'])).total_seconds() <= 30
+            age = (now-utc(row['observed_at'])).total_seconds()
+            stale = not 0 <= age <= 30
         except (TypeError,ValueError,KeyError,AttributeError):
             stale = True
+        row['evaluation_age_seconds'] = age if age is not None and age >= 0 else None
+        # Preserve a small historical observation before expiry blanks live
+        # values. Repeated dashboard refreshes must not overwrite that evidence.
+        if age is not None and age >= 0 and (row.get('last_evaluation') or {}).get('observed_at') != row['observed_at']:
+            row['last_evaluation'] = {'observed_at':row['observed_at'],
+                'five_coverage':row['bars'].get('five_coverage'),
+                'fifteen_coverage':row['bars'].get('fifteen_coverage'),
+                'rvol_calculated_value':row['rvol'].get('calculated_value'),
+                'rvol_cutoff_at':row['rvol'].get('cutoff_at')}
         if stale:
             row.update(eligibility_verified=False,quote_fresh=False)
             row.update(strategy_rvol=None,strategy_rvol_status='UNKNOWN')

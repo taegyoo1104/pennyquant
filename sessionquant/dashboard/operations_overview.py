@@ -36,14 +36,14 @@ def operation_cards(data, view, now=None):
     elif phase in {'READY','PARTIAL'}:
         if status == 'VALID' and current:
             count = warmup.get('history_ready_count')
-            from ..models import utc
+            from .watchlist_panel import focus_is_monitored
             items=data.watchlist_state.get('items')
             focused=None
             if isinstance(items,list):
                 focused=0
                 for row in items:
                     try:
-                        if row.get('focused') and utc(row['focus_valid_until']) >= now:focused+=1
+                        if focus_is_monitored(row,now):focused+=1
                     except (ValueError,TypeError,KeyError,AttributeError):pass
             selection.update(value=f'{_count(count)}개 준비', detail=f"집중 {_count(focused)}개 · 분봉 부족 {_count(warmup.get('history_excluded_count'))}개 제외",
                              warning=not isinstance(count,int) or isinstance(count,bool) or count <= 0)
