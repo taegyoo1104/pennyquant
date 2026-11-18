@@ -108,7 +108,7 @@ def render_operations(data, view, path):
     st.caption('모의매매 · '+market_hours_label(now))
     if data.connected:
         try:
-            with closing(Repository(path)) as repo:
+            with closing(Repository(path, initialize=False)) as repo:
                 positions = (data.state.get('broker') or {}).get('positions') or {}
                 render_controls(repo, positions=[{'symbol':s,**r} for s,r in positions.items()],
                                 environment=view['environment'], compact=True)

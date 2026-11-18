@@ -17,7 +17,7 @@ def load_account(path):
     repo=None
     try:
         load_local_env(database_only=True)
-        repo=Repository(path)
+        repo=Repository(path, initialize=False)
         return repo.get_control('actual_account_snapshot'),repo.get_control('account_monitor_status',{}),None
     except Exception:
         return None,{},'계좌 기록을 읽지 못했습니다. MySQL 연결과 조회 프로그램을 확인하세요.'
@@ -61,7 +61,7 @@ def render(path):
     try:
         from sessionquant.database.repository import Repository
         from sessionquant.trading_controls import render_controls
-        control_repo=Repository(path)
+        control_repo=Repository(path, initialize=False)
         render_controls(control_repo,positions=[],environment='LIVE_LOCAL',readonly=True)
     except Exception:
         st.caption('거래 제어 상태를 확인할 수 없습니다.')

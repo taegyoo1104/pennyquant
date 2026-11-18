@@ -88,6 +88,27 @@ def repository(connection, **updates):
     return MySQLRepository("data/system.db", MySQLConfig(password="PRIVATE", **updates))
 
 
+def test_existing_database_connection_skips_schema_work_but_can_submit_controls(connection):
+    repo = MySQLRepository('data/system.db', MySQLConfig(password='PRIVATE'), initialize=False)
+    assert [sql for sql, _ in connection.calls] == ['SELECT VERSION()', "SET SESSION time_zone = '+00:00'"]
+    with repo.transaction():
+        repo.get_control('trade_control_state')
+        repo.set_control('dashboard_request', {'action': 'pause'})
+    assert any(sql.startswith('INSERT INTO pq_controls') for sql, _ in connection.calls)
+    assert not any('CREATE TABLE' in sql or 'sq_schema_versions' in sql for sql, _ in connection.calls)
+    assert connection.commits == 1
+    repo.close()
+
+
+def test_repository_factory_passes_existing_schema_mode(connection, monkeypatch):
+    from sessionquant.database.repository import Repository
+    monkeypatch.setenv('PQ_MYSQL_PASSWORD', 'PRIVATE')
+    repo = Repository('data/system.db', backend='mysql', initialize=False)
+    assert isinstance(repo, MySQLRepository)
+    assert not any(sql.startswith('CREATE') for sql, _ in connection.calls)
+    repo.close()
+
+
 @pytest.mark.parametrize("version", ["5.7.44", "10.11.10-MariaDB", "unverified"])
 def test_requires_verified_mysql_eight_and_closes_failed_initialization(connection, version):
     connection.version = version

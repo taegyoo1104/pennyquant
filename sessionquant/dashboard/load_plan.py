@@ -52,7 +52,14 @@ SOURCE_LABELS = {
 }
 
 
-def read_plan(page):
+NEWS_SECTIONS = {
+    '기업 뉴스': ('news_events', 'news_analysis'),
+    '경제·정치·국제정세': ('macro_news', 'macro_analysis'),
+    'LLM 사용량': (),
+}
+
+
+def read_plan(page, *, news_section=None):
     if page is None:
         tables = {}
         for plan in PAGE_TABLES.values():
@@ -61,5 +68,11 @@ def read_plan(page):
         return tuple(CONTROLS), tables
     if page not in PAGE_TABLES:
         raise ValueError('지원하지 않는 대시보드 화면입니다.')
+    tables = PAGE_TABLES[page]
+    if page == '뉴스·LLM' and news_section is not None:
+        if news_section not in NEWS_SECTIONS:
+            raise ValueError('지원하지 않는 뉴스 화면입니다.')
+        needed = ('news_ingestions', 'news_enrichments', *NEWS_SECTIONS[news_section])
+        tables = {name: limit for name, limit in tables.items() if name in needed}
     controls = dict.fromkeys(('context', 'engine_state', 'actual_account', 'account_status', *PAGE_CONTROLS[page]))
-    return tuple(controls), PAGE_TABLES[page]
+    return tuple(controls), tables

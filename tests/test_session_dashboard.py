@@ -47,7 +47,8 @@ def test_mysql_loader_does_not_require_local_file_and_sanitizes_errors(tmp_path,
     called = []
     monkeypatch.setattr(config, "database_backend", lambda: "mysql")
 
-    def broken_repository(path):
+    def broken_repository(path, *, initialize=True):
+        assert initialize is False
         called.append(path)
         raise RuntimeError("password=PRIVATE_TEST_SECRET host=some-private-server")
 
@@ -67,8 +68,8 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
     calls = []
 
     class FakeRepository:
-        def __init__(self, path):
-            pass
+        def __init__(self, path, *, initialize=True):
+            assert initialize is False
         def load_state(self):
             return {"account": {"equity": "100"}}
         def get_control(self, name, default=None):
@@ -135,6 +136,7 @@ def test_existing_main_tabs_show_actual_holdings_and_recorded_openai_cost(tmp_pa
     assert any(row.value == '총 충전액(수동 입력): $10.00' for row in app.caption)
     assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
+    app.radio(key='news_detail').set_value('LLM 사용량').run()
     assert any(metric.label == '프로그램 누적 비용 · 추정' and metric.value == '$0.20' for metric in app.metric)
     assert any(metric.label == 'OpenAI 충전 누계 · 직접 기록' and metric.value == '$10.00' for metric in app.metric)
     assert any('잔액 부족' in row.value for row in app.warning)

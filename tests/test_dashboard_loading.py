@@ -21,7 +21,8 @@ def database(monkeypatch):
             'watchlist_dashboard_v1': {'status': 'VALID', 'operating_count': 25},
             'market_data_quality_v1': {'updated_at': '2026-11-18T05:40:00Z'},
         }
-        def __init__(self, path):
+        def __init__(self, path, *, initialize=True):
+            assert initialize is False
             self.closed = False
             self.__class__.instances.append(self)
         def load_state(self):
@@ -135,3 +136,53 @@ def test_unrecognized_page_does_not_open_database(database):
     with pytest.raises(ValueError):
         load_database('unused.db', page='invalid')
     assert not database.instances
+
+
+def render_news_fixture():
+    from sessionquant.dashboard.session_app import render_dashboard
+    render_dashboard('unused.db', selected_page='뉴스·LLM')
+
+
+def test_news_navigation_only_reads_selected_details(database, monkeypatch):
+    import sessionquant.dashboard.llm_panel as llm
+    import sessionquant.dashboard.summary_panels as summary
+    calls = []
+    monkeypatch.setattr(summary, 'open_cost_repository', lambda *a, **kw: None)
+    monkeypatch.setattr(llm, 'render_llm_details', lambda *a, **kw: calls.append('usage'))
+    app = AppTest.from_function(render_news_fixture, default_timeout=30).run()
+    assert not app.exception and not calls
+    assert ('news_events', 2000) in database.calls
+    assert ('macro_news', 2000) not in database.calls
+    database.calls.clear()
+    app.radio(key='news_detail').set_value('경제·정치·국제정세').run()
+    assert not app.exception and not calls
+    assert ('macro_news', 2000) in database.calls
+    assert ('news_events', 2000) not in database.calls
+    database.calls.clear()
+    app.radio(key='news_detail').set_value('LLM 사용량').run()
+    assert not app.exception and calls == ['usage']
+    assert ('news_events', 2000) not in database.calls and ('macro_news', 2000) not in database.calls
+    # 모든 하위 화면에서 진단 집계 범위는 동일하게 유지한다.
+    assert ('news_ingestions', 2000) in database.calls and ('llm_attempts', 500) in database.calls
+
+
+def test_existing_sqlite_dashboard_connection_never_creates_empty_database(tmp_path):
+    import sqlite3
+    from sessionquant.database.repository import Repository
+    path = tmp_path / 'missing.db'
+    with pytest.raises(sqlite3.OperationalError):
+        Repository(path, backend='sqlite', initialize=False)
+    assert not path.exists()
+    writer = Repository(path, backend='sqlite')
+    writer.set_control('trade_control_state', {'status': 'WAITING'})
+    reader = Repository(path, backend='sqlite', initialize=False)
+    try:
+        assert reader.get_control('trade_control_state')['status'] == 'WAITING'
+        writer.set_control('trade_control_state', {'status': 'STOPPED'})
+        assert reader.get_control('trade_control_state')['status'] == 'STOPPED'
+        with reader.transaction():
+            reader.set_control('dashboard_request', {'action': 'start'})
+        assert writer.get_control('dashboard_request') == {'action': 'start'}
+    finally:
+        reader.close()
+        writer.close()

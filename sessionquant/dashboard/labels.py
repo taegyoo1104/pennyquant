@@ -2,6 +2,7 @@
 import re
 
 LABELS = {
+    'toss:market_reference:v1.2.28': '토스증권',
     'strategy_outside_regular_session':'정규장 시작 대기·종료',
     'strategy_market_direction_blocked':'전략에 맞는 시장 방향 대기',
     'strategy_bar_identity_or_time_invalid':'분봉 종목·확정 시각 불일치',

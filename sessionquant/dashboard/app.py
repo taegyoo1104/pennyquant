@@ -177,7 +177,7 @@ def load_database(path: Path) -> tuple[Any, dict, dict[str, list[dict]], str | N
         from sessionquant.local_env import load_local_env
         load_local_env(database_only=True)
         from sessionquant.database.repository import KINDS, Repository
-        repo = Repository(path)
+        repo = Repository(path, initialize=False)
         state = repo.load_state() or {}
         for name in names:
             if name not in KINDS:

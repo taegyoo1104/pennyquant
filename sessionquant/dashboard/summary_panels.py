@@ -11,9 +11,9 @@ def open_cost_repository(path,*,environment=None):
     from ..database.repository import Repository
     if database_backend()=='mysql' and environment:
         from ..database.mysql_repository import MySQLRepository
-        return MySQLRepository(path,replace(MySQLConfig.from_env(),environment=environment,namespace=None))
+        return MySQLRepository(path,replace(MySQLConfig.from_env(),environment=environment,namespace=None), initialize=False)
     if database_backend()=='sqlite' and not Path(path).exists(): return None
-    return Repository(path)
+    return Repository(path, initialize=False)
 
 
 def cost_summary(repo,now=None):

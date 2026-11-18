@@ -19,7 +19,7 @@ KINDS = ("stocks", "market_bars", "quote_snapshots", "price_samples", "news_even
 
 
 class Repository:
-    def __new__(cls, path: str | Path, *, backend: str | None = None):
+    def __new__(cls, path: str | Path, *, backend: str | None = None, initialize: bool = True):
         if cls is Repository:
             from .config import database_backend
             selected = backend if backend is not None else database_backend()
@@ -27,17 +27,25 @@ class Repository:
                 raise ValueError("저장소 backend는 mysql 또는 sqlite이어야 합니다")
             if selected == "mysql":
                 from .mysql_repository import MySQLRepository
-                return MySQLRepository(path)
+                return MySQLRepository(path, initialize=initialize)
         return super().__new__(cls)
 
-    def __init__(self, path: str | Path, *, backend: str | None = None):
+    def __init__(self, path: str | Path, *, backend: str | None = None, initialize: bool = True):
         self.backend = "sqlite"
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path), timeout=10, check_same_thread=False)
-        self.db.execute("PRAGMA journal_mode=WAL")
+        if initialize:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.db = sqlite3.connect(str(path), timeout=10, check_same_thread=False)
+            self.db.execute("PRAGMA journal_mode=WAL")
+        else:
+            # 화면은 기존 DB만 연다. 제어 요청 쓰기는 계속 허용한다.
+            self.db = sqlite3.connect(self.path.resolve().as_uri()+"?mode=rw", uri=True,
+                                      timeout=10, check_same_thread=False)
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("PRAGMA busy_timeout=10000")
+        self._in_transaction = False
+        if not initialize:
+            return
         for name in KINDS:
             self.db.execute(f"CREATE TABLE IF NOT EXISTS {name} (seq INTEGER PRIMARY KEY, record_id TEXT UNIQUE, payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS engine_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
@@ -45,7 +53,6 @@ class Repository:
         if self.db.execute("PRAGMA user_version").fetchone()[0] < 7:
             self.db.execute("PRAGMA user_version=7")
         self.db.commit()
-        self._in_transaction = False
 
     @contextmanager
     def engine_lease(self):
