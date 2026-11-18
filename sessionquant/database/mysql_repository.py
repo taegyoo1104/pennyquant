@@ -42,6 +42,15 @@ def mysql_failure_message(error, operation):
     return f"MySQL {stage} 실패 (코드 {code if code is not None else '미확인'} · 작업 {action}): "+hints.get(code,'DB 상태·연결·권한을 확인하세요.')
 
 
+class MySQLRepositoryError(RuntimeError):
+    """원문 오류 없이 화면에서도 숫자 오류 코드를 확인할 수 있다."""
+
+    def __init__(self, error, operation):
+        code = error.args[0] if error.args else None
+        self.code = code if type(code) is int and 0 <= code <= 65535 else None
+        super().__init__(mysql_failure_message(error, operation))
+
+
 class MySQLRepository:
     backend = "mysql"
 
@@ -67,7 +76,7 @@ class MySQLRepository:
                 autocommit=True, connect_timeout=self.config.connect_timeout, read_timeout=self.config.read_timeout,
                 write_timeout=self.config.write_timeout, binary_prefix=True)
         except Exception as exc:
-            raise RuntimeError(mysql_failure_message(exc,'CONNECT')) from None
+            raise MySQLRepositoryError(exc, 'CONNECT') from None
         try:
             row = self._execute("SELECT VERSION()", fetch="one")
             version = str(row[0]) if row else ""
@@ -92,10 +101,10 @@ class MySQLRepository:
                         return cursor.fetchall()
                     return cursor.rowcount
             except self._driver_errors as exc:
-                message = mysql_failure_message(exc,sql.lstrip().split(None,1)[0].upper() if sql.strip() else 'QUERY')
+                failure = MySQLRepositoryError(exc, sql.lstrip().split(None,1)[0].upper() if sql.strip() else 'QUERY')
                 # 종료 중 후속 오류가 발생해도 최초 실패 번호를 확인할 수 있게 한다.
-                logging.getLogger(__name__).warning('%s',message)
-                raise RuntimeError(message) from None
+                logging.getLogger(__name__).warning('%s', failure)
+                raise failure from None
 
     def _create_tables(self):
         for kind in self.kinds:

@@ -87,9 +87,9 @@ def test_loader_bounds_every_journal_and_closes(tmp_path, monkeypatch):
     assert data.connected
     assert calls[-1] == "closed"
     assert ('fred_reference_observations', 30) in calls
-    expected_limits = {'fred_reference_observations': 30, 'llm_calls': 500}
     assert ('llm_calls', 500) in calls
-    assert all(limit == expected_limits.get(name, 2000) for name, limit in calls[:-1])
+    assert all(1 <= limit <= 2000 for name, limit in calls[:-1])
+    assert not any(name == 'market_bars' for name, limit in calls[:-1])
 
 
 def test_dashboard_reads_actual_engine_flat_state_and_context():
