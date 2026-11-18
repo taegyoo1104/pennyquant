@@ -11,8 +11,10 @@ import re
 
 
 def utc(value: str | datetime) -> datetime:
+    if not isinstance(value, (str, datetime)):
+        raise ValueError("timezone-aware timestamp required")
     result = datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
-    if result.tzinfo is None:
+    if result.tzinfo is None or result.utcoffset() is None:
         raise ValueError("timezone-aware timestamp required")
     return result.astimezone(timezone.utc)
 

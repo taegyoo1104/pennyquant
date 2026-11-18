@@ -191,13 +191,15 @@ def current_view(view, now=None):
     from copy import deepcopy
     view = deepcopy(view or {})
     now = utc(now or datetime.now(timezone.utc))
+    bounds = session_bounds(now)
+    expected = min(now.replace(second=0,microsecond=0),bounds[1]) if bounds and now > bounds[0] else None
     for row in view.get('items',[]):
-        cutoff = row.get('cutoff_at')
-        bounds = session_bounds(now)
-        expected = min(now.replace(second=0,microsecond=0),bounds[1]) if bounds and now > bounds[0] else None
-        valid = row.get('calculated_valid_until')
-        fresh = bool(valid and utc(row['observed_at']) <= now <= utc(valid)
-                     and cutoff and expected and utc(cutoff) == expected)
+        try:
+            cutoff, observed = utc(row.get('cutoff_at')), utc(row.get('observed_at'))
+            valid = utc(row.get('calculated_valid_until'))
+            fresh = bool(expected and cutoff == expected and cutoff <= observed <= now <= valid)
+        except (ValueError, TypeError, OverflowError):
+            fresh = False
         row['fresh'] = fresh
         if not fresh:
             row.update(value=None,calculated_value=None,status='UNKNOWN',calculation_status='UNKNOWN')

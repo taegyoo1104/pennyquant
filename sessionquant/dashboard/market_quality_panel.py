@@ -114,14 +114,16 @@ def watchlist_rvol_rows(view, now=None):
         original=saved.get(row['symbol'],{})
         prior=decimal_value(original.get('calculated_value'))
         age=None
+        time_known=True
         try:
             cutoff,observed=utc(row['cutoff_at']),utc(row['observed_at'])
             if not cutoff <= observed <= now:raise ValueError('future observation')
             age=int((now-cutoff).total_seconds())
-        except (ValueError,TypeError,KeyError):
+        except (ValueError,TypeError,KeyError,OverflowError):
             prior=None
+            time_known=False
         if prior is not None and prior < 0:prior=None
-        status=('최신' if row.get('fresh') else '이전 계산 · 갱신 대기' if prior is not None
+        status=('시각 미확인' if not time_known else '최신' if row.get('fresh') else '이전 계산 · 갱신 대기' if prior is not None
                 else '계산 자료 부족')
         result.append({'종목':row['symbol'],'RVOL 계산값':row.get('calculated_value'),
             '마지막 계산값·참고':float(prior) if prior is not None else None,
@@ -137,8 +139,11 @@ def render_watchlist_rvol(view, backfill):
     import streamlit as st
     from .session_app import _table
     st.subheader('감시목록 과거 분봉·RVOL')
-    st.caption(f"장전 수집: {backfill.get('status','미실행')} · 완료 종목×거래일 "
-               f"{backfill.get('complete_symbol_days',0)} / {backfill.get('required_symbol_days',0)}")
+    if backfill:
+        st.caption(f"일괄 수집: {backfill.get('status','미확인')} · 완료 종목×거래일 "
+                   f"{backfill.get('complete_symbol_days','—')} / {backfill.get('required_symbol_days','—')}")
+    else:
+        st.caption('별도 일괄 수집 기록 없음 · 저장된 분봉이 없다는 뜻은 아닙니다. 시작 시 자료 준비는 시스템·설정에서 확인하세요.')
     st.caption('마지막 계산값은 해당 기준 시각의 참고 기록입니다. 오래되면 현재 계산값·매매용 검증값은 비워 두며, 전략 허용으로 사용하지 않습니다.')
     _table(watchlist_rvol_rows(view),
            '장전 history-backfill 후 run으로 당일 분봉을 수집하세요.')
