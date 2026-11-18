@@ -74,7 +74,7 @@ def test_stale_rvol_history_stays_visible_but_current_and_trading_values_stay_em
     assert fresh['현재성']=='최신' and fresh['RVOL 계산값']==1.25
     stale=watchlist_rvol_rows(source,cutoff+timedelta(minutes=3))[0]
     assert stale['마지막 계산값·참고']==1.25
-    assert stale['RVOL 계산값'] is None and stale['매매용 검증값'] is None
+    assert stale['RVOL 계산값'] is None and stale['비교 근거 검증값'] is None
     assert stale['기준 시각 경과(초)']==180
     assert stale['현재성']=='이전 계산 · 갱신 대기'
     translated,unknown=display_rows([stale])
