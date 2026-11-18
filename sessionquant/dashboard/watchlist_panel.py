@@ -33,7 +33,7 @@ def render_watchlist(state, candidates):
     items = state.get('items', [])
     focus = {row['ticker'] for row in items if row.get('focused') and row.get('focus_valid_until')
              and utc(row['focus_valid_until']) >= now} if active and status == 'VALID' else set()
-    signals = [row for row in candidates if row.get('symbol') in focus and row.get('eligible') and row.get('signal')
+    signals = [row for row in candidates or [] if row.get('symbol') in focus and row.get('eligible') and row.get('signal')
                and row.get('timestamp') and 0 <= (now-utc(row['timestamp'])).total_seconds() <= 120]
     st.subheader(f"시총 후보 최대 {state.get('watchlist_limit',50)} → 분봉 준비 종목 운영 → 집중 분석 최대 {state.get('focus_limit',20)}")
     cols = st.columns(5)
@@ -44,7 +44,9 @@ def render_watchlist(state, candidates):
     cols[2].metric('만료 / 미확인 상한', f'{expired} / {unknown}')
     st.caption('선정 정책 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
     cols[3].metric('현재 집중 분석', f"{len(focus)} / {state.get('focus_limit',20)}")
-    cols[4].metric('현재 진입 신호', str(len(signals)))
+    cols[4].metric('현재 진입 신호', str(len(signals)) if candidates is not None else '—')
+    if candidates is None:
+        st.caption('진입 신호 기록 조회 미완료 · 신호가 0개라는 뜻은 아닙니다.')
     if active and not focus:
         from collections import Counter
         reasons=Counter(row.get('focus_reason') or '선정 자료 확인 중'

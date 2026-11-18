@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import os
+import logging
 from pathlib import Path
 import sys
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -40,6 +42,7 @@ class DashboardData:
     tables: dict[str, list[dict]] = field(default_factory=lambda: {name: [] for name in TABLES})
     backend: str = "sqlite"
     error: str | None = None
+    unavailable: set[str] = field(default_factory=set)
     connected: bool = False
     actual_account: dict | None = None
     account_status: dict = field(default_factory=dict)
@@ -98,9 +101,30 @@ def age_seconds(value: Any, now: datetime) -> float | None:
 
 
 def load_database(path: str | Path, *, page=None) -> DashboardData:
-    """최근 기록만 읽고 연결은 즉시 닫는다. MySQL은 로컬 파일 존재 여부와 무관하다."""
+    """선택한 화면의 기록만 읽는다. 중간 실패는 이미 읽은 자료를 지우지 않는다."""
+    from sessionquant.dashboard.load_plan import CONTROLS, SOURCE_LABELS, read_plan
+    controls, tables = read_plan(page)
+    include_fred = page is None or page == '시장·종목'
+    include_news = page is None or page in {'뉴스·LLM', '대시보드'}
+    pending = {'state', *controls, *tables}
+    if include_fred:
+        pending.add('fred_references')
+    if 'news_status' in controls:
+        pending.add('news_schedule')
+    if include_news:
+        pending.add('news_flow')
     result = DashboardData()
     repository = None
+    source = 'connection'
+    started = monotonic()
+
+    def read(name, operation):
+        nonlocal source, started
+        source, started = name, monotonic()
+        value = operation()
+        pending.discard(name)
+        return value
+
     try:
         from sessionquant.local_env import load_local_env
         load_local_env(database_only=True)
@@ -113,44 +137,45 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
         repository = Repository(path)
         from contextlib import nullcontext
         with repository.transaction() if hasattr(repository,'transaction') else nullcontext():
-            result.state = repository.load_state() or {}
-            result.watchlist_state=repository.get_control("watchlist_dashboard_v1",{}) or {}
-            result.market_quality=repository.get_control('market_data_quality_v1',{}) or {}
-            result.market_performance=repository.get_control('market_performance_v1',{}) or {}
-            result.watchlist_rvol=repository.get_control('watchlist_rvol_v1',{}) or {}
-            result.history_backfill=repository.get_control('watchlist_history_backfill_v1',{}) or {}
-            result.portfolio_selection=repository.get_control('portfolio_selection_v1',{}) or {}
-            result.market_reference=repository.get_control('market_reference_view_v1',{}) or {}
-            result.fred_references=repository.recent('fred_reference_observations',limit=30)
-            result.news_status=repository.get_control('session_news_status',{}) or {}
-            result.warmup=repository.get_control('startup_data_warmup_v1',{}) or {}
-            result.engine_state=repository.get_control('trade_control_state',{}) or {}
-            result.news_status['schedule']=repository.get_control('news_provider_schedule_v1',{}) or {}
-            result.actual_account=repository.get_control("actual_account_snapshot")
-            result.account_status=repository.get_control("account_monitor_status",{}) or {}
-            result.context = repository.get_control("sessionquant_context", {}) or {}
-            broker_status = (repository.get_control("broker_state", {}) or {}) if not result.context else {}
+            result.state = read('state', repository.load_state) or {}
+            for name in controls:
+                key, _ = CONTROLS[name]
+                value = read(name, lambda: repository.get_control(key))
+                setattr(result, name, value if name == 'actual_account' else value or {})
+            broker_status = (read('broker_status', lambda: repository.get_control('broker_state', {})) or {}) if not result.context else {}
             if broker_status.get("mode") == "live" and not result.context:
                 result.context={"environment":"LIVE_LOCAL","mode":"live","synthetic":False,
                     "updated_at":broker_status.get("observed_at"),"source_label":"실계좌 주문·체결 기록"}
             if result.actual_account and not result.context:
                 result.context={"environment":"LIVE_LOCAL","mode":"account_readonly","synthetic":False,
                     "updated_at":result.actual_account.get("received_at"),"source_label":"토스 실제 계좌 조회"}
-            for name in TABLES:
+            if 'news_status' in controls:
+                result.news_status['schedule'] = read('news_schedule', lambda: repository.get_control('news_provider_schedule_v1', {})) or {}
+            for name, limit in tables.items():
                 if name in KINDS:
-                    result.tables[name] = repository.recent(name, limit=2000) if page is None or page!='대시보드' else (repository.recent(name,limit=300) if name in {'executions','news_events','news_analysis','quote_snapshots','news_ingestions'} else [])
-            result.connected = True
-            if page is None or page in {'뉴스·LLM','대시보드'}:
+                    result.tables[name] = read(name, lambda: repository.recent(name, limit=limit))
+            if include_fred:
+                result.fred_references = read('fred_references', lambda: repository.recent('fred_reference_observations', limit=30))
+            if include_news:
                 from sessionquant.news.diagnostics import summarize_news
                 limit=300 if page=='대시보드' else 500
-                result.news_flow=summarize_news(result.tables['news_ingestions'],repository.recent('llm_calls',limit=limit),
+                result.news_flow=read('news_flow', lambda: summarize_news(result.tables['news_ingestions'],repository.recent('llm_calls',limit=limit),
                     network_calls=repository.recent_llm_attempts(limit=limit),
                     schedule=result.news_status.get('schedule',{}),health=repository.get_control('llm_provider_health',{}),
                     engine=result.engine_state,
-                    ingestion_limit=300 if page=='대시보드' else 2000,audit_limit=limit)
-    except Exception:
-        # 드라이버의 원문 오류에는 접속 주소나 인증 정보가 포함될 수 있다.
-        result = DashboardData(backend=result.backend, error="DB 기록을 읽을 수 없습니다. 연결 설정과 서버 상태를 확인하세요.")
+                    ingestion_limit=tables['news_ingestions'],audit_limit=limit))
+            source, started = 'transaction', monotonic()
+        result.connected = True
+    except Exception as exc:
+        # 끊긴 연결로 후속 조회를 반복하지 않는다. 숫자 코드·고정 항목명만 남긴다.
+        from sessionquant.database.mysql_repository import MySQLRepositoryError
+        code = exc.code if isinstance(exc, MySQLRepositoryError) else None
+        result.unavailable = pending | {source}
+        suffix = f' (DB 오류 {code})' if code is not None else ''
+        result.error = f"{SOURCE_LABELS[source]} 기록을 읽지 못했습니다{suffix}. 조회가 끝난 자료만 표시하며, 나머지는 다음 갱신 때 다시 확인합니다."
+        logging.getLogger(__name__).warning(
+            'dashboard_read_failed page=%s source=%s elapsed_seconds=%.3f error_type=%s mysql_code=%s',
+            page or 'all', source, monotonic()-started, type(exc).__name__, code)
     finally:
         if repository is not None:
             try:
@@ -279,8 +304,20 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     from sessionquant.dashboard.labels import label
     if page != '대시보드' or view['environment']!='PAPER_LOCAL':
         st.caption(f"{label(view['environment'])} · 마지막 시세 {view['last_event']}")
-    if data.error: st.error(data.error)
-    if not data.connected: st.info('저장된 실행 기록이 없습니다. 계좌·연결 상태는 미확인입니다.')
+    if data.error:
+        st.error(data.error)
+        # 미완료 조회를 빈 장부·보유 없음으로 표시하거나 거래 제어에 쓰지 않는다.
+        if page != '시장·종목':
+            return
+    elif not data.connected:
+        st.info('저장된 실행 기록이 없습니다. 계좌·연결 상태는 미확인입니다.')
+
+    def available(*sources):
+        from sessionquant.dashboard.load_plan import SOURCE_LABELS
+        missing = [SOURCE_LABELS[name] for name in sources if name in data.unavailable]
+        if missing:
+            st.info(' · '.join(missing)+' · 조회 미완료')
+        return not missing
     if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
     if data.context.get('paper_data_policy')=='observed_paper_v1':
         if page != '대시보드':
@@ -291,7 +328,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         render_overview(data,view,path,usage_path,usage_environment)
     elif page=='전략·백테스트': render_strategies(data,view)
     elif page=='시스템·설정': render_system(data,view)
-    if page == '시장·종목':
+    if page == '시장·종목' and available('market_regimes', 'quote_snapshots'):
         st.subheader("시장 방향과 데이터 상태")
         st.write(f"**{view['regime_label']}**")
         reason = view["regime_detail"].get("reason", view["regime_detail"].get("reasons", ""))
@@ -308,28 +345,38 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                                     "제공 시각": timestamp(quote.get("timestamp")), "수집 시각": timestamp(quote.get("received_at"))})
         _table(market_rows, "SPY·QQQ의 최신 확정봉과 호가를 기다리고 있습니다.")
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
-        from sessionquant.dashboard.reference_panel import render_references
-        render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,quotes=view['quotes'])
-        from sessionquant.dashboard.news_panel import calendar_rows
-        schedule = calendar_rows(data.tables['economic_events'])
-        if schedule:
-            _table(schedule)
-        else:
-            st.caption("중요 경제 일정: 미확인. 일정이 없다는 뜻은 아닙니다.")
+    if page == '시장·종목':
+        if available('market_reference'):
+            from sessionquant.dashboard.reference_panel import render_references
+            render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,
+                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable)
+        if available('economic_events'):
+            from sessionquant.dashboard.news_panel import calendar_rows
+            schedule = calendar_rows(data.tables['economic_events'])
+            if schedule:
+                _table(schedule)
+            else:
+                st.caption("중요 경제 일정: 미확인. 일정이 없다는 뜻은 아닙니다.")
     if page == '시장·종목':
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
-            render_quality(data.market_quality,performance=data.market_performance)
+            if available('market_quality', 'market_performance'):
+                render_quality(data.market_quality,performance=data.market_performance)
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
-            render_watchlist_rvol(data.watchlist_rvol,data.history_backfill)
+            if available('watchlist_rvol', 'history_backfill'):
+                render_watchlist_rvol(data.watchlist_rvol,data.history_backfill)
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
-            render_watchlist(data.watchlist_state, data.tables['candidates'])
+            if available('watchlist_state'):
+                render_watchlist(data.watchlist_state, None if 'candidates' in data.unavailable else data.tables['candidates'])
             from sessionquant.dashboard.selection_panel import render_selection
-            render_selection(data.portfolio_selection)
+            if available('portfolio_selection'):
+                render_selection(data.portfolio_selection)
         else:
             st.caption('시총 감시·집중 분석 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
         st.subheader("기술 분석 이력과 진입 근거")
+        if not available('candidates'):
+            return
         st.caption('아래 표는 과거 분석 기록을 포함합니다. 현재 감시·집중 여부는 위 목록에서 확인하세요.')
         rows = []
         for row in latest_by_symbol(data.tables["candidates"]).values():

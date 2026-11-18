@@ -72,7 +72,7 @@ def reference_rows(view, now=None, *, quotes=None):
     return rows
 
 
-def render_references(view, risk=None, fred=None, *, quotes=None):
+def render_references(view, risk=None, fred=None, *, quotes=None, fred_available=True):
     import streamlit as st
     from .session_app import _table
     st.subheader('시장 참고 ETF · 거래 후보 제외')
@@ -84,7 +84,9 @@ def render_references(view, risk=None, fred=None, *, quotes=None):
         st.caption(f"참고 위험 관찰: {risk.get('status','UNKNOWN')} · 평가 시각: {timestamp(risk.get('observed_at'))} · 가설: {risk.get('threshold_version','UNKNOWN')}")
         st.caption('저장된 과거 위험 평가입니다. 현재 단계는 관찰 전용이며 매매에 적용하지 않습니다. UNKNOWN은 안전하다는 뜻이 아닙니다.')
     st.caption('FRED 공식 일별 기준 · 장중 ETF와 수집 주기·단위가 다릅니다.')
-    if fred:
+    if not fred_available:
+        st.info('일별 참고 지표 · 조회 미완료')
+    elif fred:
         from .session_app import timestamp
         latest = {}
         for row in fred: latest[row.get('series')] = row

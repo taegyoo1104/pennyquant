@@ -211,6 +211,42 @@ def mysql_repositories():
             repo.close()
 
 
+def test_mysql_market_dashboard_keeps_data_after_connection_loss_and_recovers(mysql_repositories, monkeypatch):
+    from sessionquant.dashboard.session_app import load_database
+    import sessionquant.database.repository as module
+    import sessionquant.database.config as config
+
+    writer = mysql_repositories()
+    writer.save_state({'broker': {'cash': '100', 'positions': {}}})
+    writer.set_control('sessionquant_context', {'environment': 'PAPER_LOCAL', 'updated_at': '2026-11-18T05:40:00Z'})
+    writer.set_control('watchlist_dashboard_v1', {'status': 'VALID', 'operating_count': 25})
+    writer.record('quote_snapshots', {'id': 'q', 'symbol': 'SPY', 'bid': '500', 'ask': '501'})
+    writer.record('candidates', {'id': 'c', 'symbol': 'AAPL', 'score': 80})
+    reader = mysql_repositories(writer.config.namespace)
+    original_recent = reader.recent
+
+    def disconnected_recent(kind, limit):
+        if kind == 'candidates':
+            writer._execute('KILL CONNECTION %s', (reader.db.thread_id(),))
+        return original_recent(kind, limit)
+
+    monkeypatch.setattr(reader, 'recent', disconnected_recent)
+    monkeypatch.setattr(config, 'database_backend', lambda: 'mysql')
+    monkeypatch.setattr(module, 'Repository', lambda path: reader)
+    failed = load_database('unused.db', page='시장·종목')
+    assert not failed.connected and '2013' in failed.error
+    assert reader._closed
+    assert failed.watchlist_state['operating_count'] == 25
+    assert failed.tables['quote_snapshots'][0]['symbol'] == 'SPY'
+    assert 'candidates' in failed.unavailable
+    reopened = mysql_repositories(writer.config.namespace)
+    monkeypatch.setattr(module, 'Repository', lambda path: reopened)
+    refreshed = load_database('unused.db', page='시장·종목')
+    assert refreshed.connected and not refreshed.error and reopened._closed
+    assert refreshed.tables['candidates'][0]['symbol'] == 'AAPL'
+    assert not writer.all('orders')
+
+
 def test_real_mysql_unicode_upserts_and_anonymous_journal_rows(mysql_repositories):
     repo = mysql_repositories()
     repo.record("orders", {"id": "주문-" + "가" * 400, "symbol": "TEST", "qty": 1, "reason": "첫 접수"})
