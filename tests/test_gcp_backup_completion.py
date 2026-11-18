@@ -60,10 +60,11 @@ def test_shutdown_deadline_covers_backup_and_container_stop_budgets():
     kill_after, backup = map(int, re.search(r"timeout --kill-after=(\d+) (\d+)", stop).groups())
     app_stop = int(re.search(r"stop -t (\d+) app", stop)[1])
     db_stop = int(re.search(r"down --timeout (\d+)", stop)[1])
+    cleanup_kill, cleanup = map(int, re.findall(r"timeout --kill-after=(\d+) (\d+)", stop)[1])
     outer = [int(n) for n in re.findall(r"TimeoutStartSec=(\d+)", start)]
     outer.append(int(re.search(r"TimeoutStartSec=(\d+)", (DEPLOY / "sessionquant-cost-guard.service").read_text())[1]))
     assert backup > 480
-    assert len(outer) == 3 and all(limit > app_stop + backup + kill_after + db_stop + 60 for limit in outer)
+    assert len(outer) == 3 and all(limit > app_stop + backup + kill_after + cleanup + cleanup_kill + db_stop + 60 for limit in outer)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="GCE Linux shell scripts")
@@ -97,6 +98,7 @@ wait
     else:
         body = 'printf "UPLOADED new complete.tar.gz\\n" > "$BACKUP_STATUS"\n'
     executable(deploy / "backup.sh", body)
+    executable(deploy / "retention.sh", 'echo retention >> "$CALLS"\n')
     script = tmp_path / "stop.sh"
     script.write_text(
         (DEPLOY / "stop.sh")
