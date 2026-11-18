@@ -242,3 +242,29 @@ python -m scripts.benchmark_market_pipeline --cycles 5 --output performance-chec
 - **시장 참고 ETF의 관측 가격**: 받은 현재가·확정 분봉 종가·호가 중간값을 종류와 시각으로 구분한다. 오래된 값은 과거 기록으로 표시한다. **분석 상태**는 별도이며, 가격만 받았다고 권한·신선도·비교 가능성 검증을 통과한 것으로 바꾸지 않는다. 확인되지 않은 등락률은 비워 둔다.
 
 장중에는 처리 속도 확인에서 후보 조회가 생략되는지, API·DB·지표 계산 중 어디에 시간이 걸리는지 함께 확인한다. 신규 매수는 여전히 미국 동부시간 10:45~13:30이며 이번 장전 수정으로 전략의 자료 요건을 완화하지 않았다.
+
+## CSV 대신 약 5분간 연속 진단
+
+서로 다른 시각에 내려받은 표만으로 지연 원인을 비교하기 어려울 때 사용한다. `scripts/check_market_freshness.py`는 엔진 상태·집중 목록·호가 시각·분봉 누락·RVOL·후보 차단 사유·처리 시간을 한 번의 읽기 전용 SQL 조회로 함께 기록한다. 각 자료가 만들어진 원래 시각도 보존한다. 한 번에 조회했다고 모든 자료가 동시에 갱신된 것은 아니다.
+
+최신 진단 파일이 있는 **운영 VM의 별도 SSH 또는 tmux 터미널**에서 실행한다. 이 파일은 표준입력으로 실행되므로 앱 이미지 재빌드나 엔진 재시작이 필요 없다.
+
+```bash
+umask 077
+SQ_DIAG=$(mktemp "$HOME/sessionquant-diagnostic.XXXXXX.jsonl")
+sudo -n docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml exec -T app \
+  python - --samples 31 --interval 10 \
+  < /opt/sessionquant/scripts/check_market_freshness.py > "$SQ_DIAG"
+SQ_DIAG_EXIT=$?
+printf '진단 파일: %s\n종료 코드: %s\n' "$SQ_DIAG" "$SQ_DIAG_EXIT"
+```
+
+약 10초마다 31회 읽고 종료한다. 느린 DB 조회가 있으면 더 오래 걸릴 수 있다. 파일은 한 줄에 하나의 JSON을 담은 JSONL 형식이며 나중에 전달해도 수집 당시 시각을 확인할 수 있다. `--samples`는 1~61, `--interval`은 5~60초로 제한한다. 옵션 없이 실행하면 기존처럼 JSON 하나만 출력한다.
+
+- `read_started_at`·`read_finished_at`·`db_read_seconds`: 진단 조회 자체에 걸린 시간이다. 엔진 처리 시간과 구분한다.
+- `evaluated_at`·`evaluation_age_seconds`: 해당 종목을 실제로 평가했던 시각과 경과 시간이다. `strategy_rvol_saved`와 `rvol_at_last_evaluation`은 저장 당시 참고값이며 현재 매수 허용값이 아니다.
+- `strategy_volume`·`minute_volume`: 전략의 확정 5분봉 기준 RVOL과 감시목록의 매분 RVOL이다. 각각의 `cutoff_at`과 누락 개수를 비교한다.
+- `quote_age_on_receipt_seconds`·`seconds_since_quote_received`: 오래된 시세가 도착했는지, 수신 후 갱신이 늦었는지 구분한다.
+- `performance`: 엔진이 마지막으로 저장한 회차의 단계별 시간이다. 같은 회차가 여러 번 기록될 수 있으며 중첩 단계의 시간을 합산하지 않는다.
+
+조회 실패도 `FAILED` 표본으로 남기고 다음 회차에 새 연결로 다시 읽는다. 마지막 `summary`에 성공·실패·중단 횟수를 기록한다. 종료 코드 0은 수집 완료, 1은 일부 조회 실패, 130은 사용자의 중단이다. 수집 완료가 매매 조건 통과를 뜻하지 않는다. DB 쓰기·주문·Toss 인증/조회·LLM 호출은 없으며, 계좌·인증정보·뉴스 본문·원문 SQL·오류 본문도 출력하지 않는다. 이 진단 기능은 대시보드를 외부에 공개하거나 상시 원격 접속을 제공하지 않는다.
