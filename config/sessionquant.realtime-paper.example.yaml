@@ -8,6 +8,12 @@ poll_seconds: 2  # 수집 완료 뒤 쉬는 시간. API 호출 제한·재시도
 paper_data_policy: observed_paper_v1
 actual_account_monitor_enabled: false  # Paper 운영에 실제 계좌 조회는 필요하지 않음
 recording_enabled: true
+retention:
+  enabled: true
+  diagnostics_days: 7
+  news_days: 30
+  # GCP 종료 때 새 백업 업로드 후에만 실행. 분봉·매매·재생·비용 근거는 보존.
+  max_seconds: 90
 news_enabled: true
 strategy: pullback
 watchlist_enabled: true

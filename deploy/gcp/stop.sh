@@ -10,7 +10,7 @@ echo '장 마감: 프로그램 저장·종료 후 백업합니다. 잔량이 있
 if [[ $("${compose[@]}" ps --status running --services db) == db ]]; then
     # Match the enclosing 40-minute systemd limit. A large logical dump may
     # legitimately take more than the former eight-minute budget.
-    backup_status_before=$(cat /etc/sessionquant/backup-status 2>/dev/null || true)
+    backup_status_before=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
     timeout --kill-after=30 1800 /opt/sessionquant/deploy/gcp/backup.sh
     backup_result=$?
     if ((backup_result != 0)); then
@@ -28,6 +28,17 @@ if [[ $("${compose[@]}" ps --status running --services db) == db ]]; then
             echo '백업 제한 시간 1800초 초과: 미완료 상태를 남기고 DB 디스크를 보존합니다.' >&2
         else
             echo "백업 실패: 종료 코드 $backup_result. DB 디스크는 유지됩니다." >&2
+        fi
+    else
+        # At most 120+15 seconds, inside the enclosing 40-minute service budget.
+        # A failed backup must never be followed by data deletion.
+        timeout --kill-after=15 120 bash /opt/sessionquant/deploy/gcp/retention.sh "$backup_status_before"
+        retention_result=$?
+        if ((retention_result != 0)); then
+            result=1
+            (umask 077; printf 'FAILED %s exit_code=%s\n' "$(date -u +%FT%TZ)" "$retention_result" \
+                > /etc/sessionquant/retention-status) || true
+            echo '자료 정리가 끝나지 않았습니다. 성공한 백업은 유지하고 VM을 종료합니다.' >&2
         fi
     fi
 else

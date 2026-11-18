@@ -16,6 +16,10 @@ from .legacy_cli import metadata
 def parser():
     root = argparse.ArgumentParser(prog="sessionquant", description="S&P 500 장중 전략·소수점 모의매매·MySQL·뉴스 위험 분석")
     sub = root.add_subparsers(dest="command", required=True)
+    retention = sub.add_parser("data-retention", help="오래된 뉴스·분석·계산 기록 정리; 기본은 삭제 없는 미리보기")
+    retention.add_argument("--config", type=Path, default=Path("config/sessionquant.realtime-paper.example.yaml"))
+    retention.add_argument("--apply", action="store_true", help="엔진 종료·새 클라우드 백업 확인 후 실제 정리")
+    retention.add_argument("--backup-receipt", type=Path, help="이번 종료의 UPLOADED 백업 성공 기록")
     live=sub.add_parser("live-local", help="Phase 5 소액 검증; 기본은 주문 없는 계좌 검사")
     live.add_argument("--config",type=Path,default=Path("config/live.local.yaml"))
     live.add_argument("--execute",action="store_true",help="실제 시장가 매수·매도 검증 활성화")
@@ -353,6 +357,10 @@ def main(argv=None):
                 from .session_backtest import compare_session
                 compare_session(args.input, args.universe, args.report, settings=settings, synthetic=synthetic)
                 print(f"성과와 비용 비교 보고서: {args.report} / {args.report.with_suffix('.md')}")
+        elif args.command == "data-retention":
+            from .database.retention import retention_command
+            result = retention_command(args.config, apply=args.apply, receipt=args.backup_receipt)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         elif args.command.startswith("db-"):
             from .database.operations import check_database, migrate_sqlite, prune_database
             from .database.repository import Repository

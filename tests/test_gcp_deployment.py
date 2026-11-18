@@ -66,6 +66,7 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
     executable(bindir/'systemctl','echo "systemctl $*" >> "$CALLS"\n')
     executable(bindir/'sync','echo sync >> "$CALLS"\n')
     executable(root/'deploy/gcp/backup.sh',f'echo backup >> "$CALLS"\nexit {int(failed_backup)}\n')
+    executable(root/'deploy/gcp/retention.sh','echo retention >> "$CALLS"\n')
     script=tmp_path/'stop.sh'
     # The disposable copy cannot execute host poweroff or access production paths.
     body=(DEPLOY/'stop.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
@@ -78,6 +79,8 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
     lines=calls.read_text().splitlines()
     assert 'stop -t 180 app' in lines[0]
     assert lines.index('backup')<next(i for i,line in enumerate(lines) if 'down --timeout 120' in line)
+    assert ('retention' in lines) is (not failed_backup)
+    if not failed_backup: assert lines.index('backup') < lines.index('retention')
     assert lines[-2:]==['sync','systemctl poweroff']
     assert not any(' -v' in line for line in lines)
     assert ('백업 실패' in result.stderr) is failed_backup

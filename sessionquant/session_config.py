@@ -47,6 +47,7 @@ class SessionConfig:
     market_reference: dict = field(default_factory=dict)
     macro_reference_filter: dict = field(default_factory=dict)
     recording_enabled: bool = True
+    retention: dict = field(default_factory=dict)
     news_enabled: bool = True
     include_alpaca: bool = True
     company_rss_catalog: bool = True
@@ -58,6 +59,10 @@ class SessionConfig:
     candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        from .database.retention import RetentionPolicy
+        if not isinstance(self.retention, dict):
+            raise ValueError('자료 보관 설정은 객체여야 합니다.')
+        RetentionPolicy(**self.retention)
         from .market.paper_policy import validate_policy
         validate_policy(self.paper_data_policy)
         if type(self.actual_account_monitor_enabled) is not bool:

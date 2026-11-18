@@ -1,0 +1,117 @@
+"""Disposable command doubles: no VM, production files or shutdown calls."""
+import json
+import os
+from pathlib import Path
+import subprocess
+
+import pytest
+
+from test_gcp_deployment import DEPLOY, executable
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment scripts")
+
+
+def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE"):
+    root = tmp_path / "repo"
+    root.mkdir()
+    etc = tmp_path / "etc"
+    etc.mkdir()
+    (etc / "backup-status").write_text(current)
+    data = tmp_path / "app"
+    data.mkdir()
+    (data / "retention-last.json").write_text('{"previous":"keep"}')
+    calls = tmp_path / "calls"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    executable(bindir / "chown", "exit 0\n")
+    report = json.dumps({"status": mode, "dry_run": False, "deleted": 20, "scanned": 25})
+    action = "exit 2" if mode == "FAIL" else "sleep 5" if mode == "WAIT" else "printf '%s\\n' '" + report + "'"
+    executable(bindir / "docker", f'''echo "docker $*" >> "$CALLS"
+if [[ "$*" == *"--services app"* ]]; then
+    {"echo app" if app_running else ":"}
+elif [[ "$*" == *" run "* ]]; then
+    {action}
+fi
+''')
+    script = tmp_path / "retention.sh"
+    script.write_text((DEPLOY / "retention.sh").read_text().replace("/opt/sessionquant", str(root))
+                      .replace("/etc/sessionquant", str(etc)).replace("/var/lib/sessionquant/app", str(data)))
+    env = {**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"], "CALLS": str(calls)}
+    return script, env, etc, data, calls
+
+
+@pytest.mark.parametrize("current,previous,running", [
+    ("FAILED new", "UPLOADED old backup.tar.gz", False),
+    ("UPLOADED old backup.tar.gz", "UPLOADED old backup.tar.gz", False),
+    ("UPLOADED new backup.tar.gz", "MISSING", True),
+])
+def test_cleanup_refuses_failed_or_unchanged_backup_and_running_app(tmp_path, current, previous, running):
+    script, env, etc, data, calls = setup_wrapper(tmp_path, current=current, app_running=running)
+    result = subprocess.run(["bash", str(script), previous], env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert not calls.exists() or " run " not in calls.read_text()
+    assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
+    assert (etc / "backup-status").read_text() == current
+
+
+@pytest.mark.parametrize("mode", ["COMPLETE", "PARTIAL", "DISABLED", "FAIL"])
+def test_cleanup_preserves_backup_and_removes_only_its_own_container(tmp_path, mode):
+    script, env, etc, data, calls = setup_wrapper(tmp_path, mode=mode)
+    result = subprocess.run(["bash", str(script), "UPLOADED old backup.tar.gz"], env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == (2 if mode == "FAIL" else 0), result.stderr
+    assert (etc / "backup-status").read_text() == "UPLOADED new backup.tar.gz"
+    lines = calls.read_text().splitlines()
+    run = next(line for line in lines if " run " in line)
+    name = run.split("--name ")[1].split()[0]
+    assert name.startswith("sessionquant-retention-")
+    assert lines[-1] == "docker rm -f " + name
+    assert "--volume" in run and ":ro app python -m sessionquant data-retention" in run
+    assert ".retention-proof." in run and str(etc) not in run
+    assert "--apply --backup-receipt" in run
+    assert not list(data.glob(".retention.*"))
+    assert not list(data.glob(".retention-proof.*"))
+    report = json.loads((data / "retention-last.json").read_text())
+    assert (etc / "retention-status").read_text().startswith("FAILED" if mode == "FAIL" else mode)
+    assert report == {"previous": "keep"} if mode == "FAIL" else report["status"] == mode
+
+
+def test_timeout_removes_the_oneoff_container_and_keeps_last_report(tmp_path):
+    script, env, etc, data, calls = setup_wrapper(tmp_path, mode="WAIT")
+    result = subprocess.run(["timeout", "--kill-after=2", "0.5", "bash", str(script), "old"],
+                            env=env, capture_output=True, text=True, timeout=8)
+    assert result.returncode == 124
+    lines = calls.read_text().splitlines()
+    name = next(line for line in lines if " run " in line).split("--name ")[1].split()[0]
+    assert lines[-1] == "docker rm -f " + name
+    assert "FAILED" in (etc / "retention-status").read_text()
+    assert (etc / "backup-status").read_text().startswith("UPLOADED")
+    assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
+    assert not list(data.glob(".retention*"))
+
+
+def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):
+    root = tmp_path / "repo"
+    deploy = root / "deploy/gcp"
+    deploy.mkdir(parents=True)
+    etc = tmp_path / "etc"
+    etc.mkdir()
+    status = etc / "backup-status"
+    status.write_text("UPLOADED old\n")
+    calls = tmp_path / "calls"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    executable(bindir / "docker", 'echo "docker $*" >> "$CALLS"\nif [[ "$*" == *"--services db"* ]]; then echo db; fi\n')
+    executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
+    executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
+    executable(deploy / "backup.sh", 'echo "UPLOADED new complete.tar.gz" > "$BACKUP_STATUS"\n')
+    executable(deploy / "retention.sh", 'echo retention >> "$CALLS"\nexit 124\n')
+    script = tmp_path / "stop.sh"
+    script.write_text((DEPLOY / "stop.sh").read_text().replace("/opt/sessionquant", str(root))
+                      .replace("/run/sessionquant-stop.lock", str(tmp_path / "lock"))
+                      .replace("/etc/sessionquant", str(etc)).replace("/usr/bin/systemctl", str(bindir / "systemctl")))
+    result = subprocess.run(["bash", str(script)], env={**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"],
+                            "CALLS": str(calls), "BACKUP_STATUS": str(status)}, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1 and status.read_text().startswith("UPLOADED new")
+    assert "exit_code=124" in (etc / "retention-status").read_text()
+    assert calls.read_text().splitlines()[-2:] == ["sync", "poweroff"]
+    assert "down --timeout 120" in calls.read_text()
