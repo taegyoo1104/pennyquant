@@ -50,14 +50,14 @@ def main_news(data,view,now):
         if key in seen:continue
         seen.add(key)
         tickers=set(event.get('symbols',[]))
-        from .watchlist_panel import current_status
+        from .watchlist_panel import current_status, focus_is_monitored
         status,active=current_status(data.watchlist_state,now)
         from ..models import utc
         focus=set()
         if active and status=='VALID':
             for item in data.watchlist_state.get('items',[]):
                 try:
-                    if item.get('focused') and utc(item['focus_valid_until'])>=now:focus.add(item['ticker'])
+                    if focus_is_monitored(item,now):focus.add(item['ticker'])
                 except (KeyError,TypeError,ValueError,AttributeError):pass
         labels=[('보유 ' if t in held else '집중 ')+t for t in sorted(tickers & (held|focus))]
         result.append({**row,'labels':', '.join(labels)})

@@ -16,12 +16,12 @@ def current_company_news(rows, data, view, now=None):
                 symbols.add(row['symbol'])
         except (InvalidOperation, KeyError, TypeError):
             pass
-    from .watchlist_panel import current_status
+    from .watchlist_panel import current_status, focus_is_monitored
     status, active = current_status(data.watchlist_state, now)
     if active and status == 'VALID':
         for row in data.watchlist_state.get('items', []):
             try:
-                if row.get('focused') and utc(row['focus_valid_until']) >= now:
+                if focus_is_monitored(row,now):
                     symbols.add(row['ticker'])
             except (ValueError, TypeError, KeyError, AttributeError):
                 pass

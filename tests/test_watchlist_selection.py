@@ -150,8 +150,12 @@ async def test_focus_uses_observed_activity_not_top20_caps_and_keeps_permissions
         assert all(r['rvol'] is None and r['tradable'] is None and r['fractional'] is None for r in manager.state['focus'])
         assert manager.entry_blockers(focused[0],now)==[]
         assert manager.entry_blockers('T000',now)==['outside_market_cap_watchlist']
-        assert manager.focus(now+timedelta(seconds=121))==[]
+        assert set(manager.focus(now+timedelta(seconds=121)))==set(focused)
+        assert manager.entry_blockers(focused[0],now+timedelta(seconds=121))==['focus_refresh_pending']
         manager.publish(now+timedelta(seconds=121))
+        assert repo.get_control('watchlist_dashboard_v1')['focus_count']==20
+        assert manager.focus(now+timedelta(seconds=241))==[]
+        manager.publish(now+timedelta(seconds=241))
         assert repo.get_control('watchlist_dashboard_v1')['focus_count']==0
     finally:repo.close()
 
@@ -227,7 +231,10 @@ async def test_empty_closed_market_ranking_remains_unknown_without_fake_volume(t
         now=observe(manager)
         assert len(manager.focus(now))==20
         manager.observe_rankings({'rankedAt':None,'rankings':[]},now)
-        assert manager.focus(now)==[] and manager.state['rankings']=={}
+        assert len(manager.focus(now))==20 and manager.state['rankings']=={}
+        assert all(r['data_status']=='UNKNOWN' for r in manager.state['focus'])
+        assert manager.entry_blockers('T400',now)==['focus_refresh_pending']
+        assert manager.focus(now+timedelta(seconds=121))==[]
     finally:repo.close()
 
 

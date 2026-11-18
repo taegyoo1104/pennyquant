@@ -38,6 +38,7 @@ class SessionConfig:
     watchlist_refresh_days: int = 7
     watchlist_data_max_age_seconds: int = 120
     focus_min_hold_seconds: int = 300
+    focus_refresh_grace_seconds: int = 120
     max_api_calls_per_cycle: int = 24
     light_refresh_seconds: int = 30
     ranking_refresh_seconds: int = 60
@@ -83,6 +84,7 @@ class SessionConfig:
             raise ValueError('감시목록은 불리언·market_cap_top 정책이어야 합니다.')
         for name, low, high in [('watchlist_size',1,100),('focus_size',1,20),('watchlist_refresh_days',1,7),
                                ('watchlist_data_max_age_seconds',10,300),('focus_min_hold_seconds',0,3600),
+                               ('focus_refresh_grace_seconds',0,300),
                                ('max_api_calls_per_cycle',8,100),('light_refresh_seconds',10,300),('ranking_refresh_seconds',30,600),
                                ('max_cycle_seconds',5,30),('history_pages_per_cycle',0,3),('watchlist_candles_per_cycle',0,10)]:
             value=getattr(self,name)

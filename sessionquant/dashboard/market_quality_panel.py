@@ -2,17 +2,57 @@
 from ..market.reporting import current_report
 
 
+def quality_observation_fields(item, now):
+    """Historical diagnostics only. No retained value is a trading input."""
+    from ..models import utc
+    from .session_app import timestamp
+    received, quote, lag, age = None, None, None, None
+    try:
+        quote, received = utc(item.get('quote_at')), utc(item.get('quote_received_at'))
+        if not quote <= received <= now:
+            raise ValueError('quote time order')
+        lag, age = round((received-quote).total_seconds(),1), round((now-received).total_seconds(),1)
+    except (TypeError, ValueError, AttributeError):
+        lag, age = None, None
+    status = ('시각 미확인' if lag is None else '수신 당시 호가 시각 오래됨' if lag > 30
+              else '새 호가 수신 대기' if age > 30 else '호가 시각 갱신 대기' if lag+age > 30 else '최신')
+    saved = item.get('last_evaluation') or {}
+    try:
+        if saved.get('observed_at') != item.get('observed_at') or utc(saved['observed_at']) > now:
+            saved = {}
+    except (TypeError,ValueError,KeyError):
+        saved = {}
+    def coverage(key):
+        value = saved.get(key)
+        return '미확인' if value is None else '확보' if value == 1 else '부족'
+    return {'평가 후 경과(초)':item.get('evaluation_age_seconds'),
+        '호가 수신 시각':timestamp(item.get('quote_received_at')), '호가 갱신 상태':status,
+        '수신 당시 호가 경과(초)':lag, '호가 수신 후 경과(초)':age,
+        '평가 당시 5분봉':coverage('five_coverage'), '평가 당시 15분봉':coverage('fifteen_coverage'),
+        '평가 당시 RVOL·참고':saved.get('rvol_calculated_value'),
+        '참고 RVOL 기준 시각':timestamp(saved.get('rvol_cutoff_at'))}
+
+
 def render_quality(state, *, performance=None):
     import streamlit as st
+    from datetime import datetime, timezone
+    from ..models import utc
     from .session_app import _table, timestamp
-    report = current_report(state)
+    now = datetime.now(timezone.utc)
+    report = current_report(state, now)
     st.subheader('시세·거래 적격성·RVOL 데이터 품질')
-    st.caption('최근 평가 시각: '+timestamp(report.get('captured_at'))+' · 대상: 현재 집중 후보와 위험 관리 종목. SPY·QQQ는 별도 참조입니다.')
+    times = sorted({utc(row['observed_at']) for row in report['items'] if row.get('evaluation_age_seconds') is not None})
+    evaluated = timestamp(times[0]) if times else '—'
+    if len(times)>1:evaluated += ' ~ '+timestamp(times[-1])
+    st.caption('종목 평가 시각: '+evaluated+' · 대상: 집중·보유·미체결 종목. SPY·QQQ는 별도 참조입니다.')
     st.caption('당일 분봉 수집 상태와 전략에 쓰는 확정봉 상태를 구분합니다. 실제 매수 판단은 아래 후보 선정 표에서 확인할 수 있습니다.')
+    stale_count = sum('quality_observation_stale' in row.get('blockers',[]) for row in report['items'])
+    if stale_count:
+        st.info(f'{stale_count}종목은 평가 갱신 대기입니다. 아래 0은 현재 확인된 수이며, 저장된 분봉이 없다는 뜻은 아닙니다. 표의 ‘평가 당시’ 값은 참고 기록입니다.')
     if report['synthetic']:
         st.warning('합성 입력의 데이터 품질 검사입니다. 실제 계좌 자격·시장 확보율이 아닙니다.')
     columns = st.columns(6)
-    labels = {'eligibility':'거래 자격','quote':'최신 호가','minute_history':'1분봉 연속성',
+    labels = {'eligibility':'실계좌 확인','quote':'최신 호가','minute_history':'1분봉 연속성',
               'five_bars':'5분봉 확보','fifteen_bars':'15분봉 확보','rvol':'RVOL 근거'}
     for column,(key,label) in zip(columns,labels.items()):
         metric = report['required_data_coverage'][key]
@@ -27,9 +67,10 @@ def render_quality(state, *, performance=None):
             '전략 확정봉 상태':strategy_bars.get('status','UNKNOWN'),
             '전략 기준 시각':timestamp(strategy_bars.get('cutoff_at')),'제공처':', '.join(bars.get('source',[])),
             '평가 시각':timestamp(item.get('observed_at')),'호가 시각':timestamp(item.get('quote_at')),
+            **quality_observation_fields(item, now),
             '누락 분':bars.get('missing_minutes'),'누락률':bars.get('missing_rate'),
             '정정 충돌 분':bars.get('conflicting_minutes'),'명시적 거래량 0분':bars.get('explicit_zero_volume_minutes'),
-            '분봉 지연(초)':bars.get('age_seconds'),'수신 지연(초)':bars.get('latest_receipt_lag_seconds'),
+            '평가 당시 분봉 지연(초)':bars.get('age_seconds'),'분봉 수신 지연(초)':bars.get('latest_receipt_lag_seconds'),
             'RVOL(검증됨)':volume.get('value'),'RVOL(계산값·비교 근거 미확인 가능)':volume.get('calculated_value'),
             'Paper 거래 조건':(item.get('paper_eligibility') or {}).get('status','strict'),
             'Paper 가정':', '.join((item.get('paper_eligibility') or {}).get('assumptions',[])),
@@ -41,6 +82,7 @@ def render_quality(state, *, performance=None):
     _table(rows)
     with st.expander('우선 조회·요청 지연·과거 봉 보충 근거'):
         source = report.get('source_state') or {}
+        st.caption('토스 호가 시각은 마지막 호가 변동 시각입니다. 오래된 시각만으로 통신 지연·중단을 확정할 수 없습니다.')
         st.caption('위험 호가 전달: '+timestamp(source.get('priority_delivered_at'))+' · 후보보다 먼저 엔진에 전달합니다. 네트워크 오류·거래소 지연까지 성공을 보장하지 않습니다.')
         _table(source.get('read_measurements',[]),'수집 주기 계측 자료가 없습니다.')
         _table(history_progress_rows(source.get('history_progress',{})),'과거 봉 보충 이력이 없습니다.')

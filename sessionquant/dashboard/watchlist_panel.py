@@ -24,6 +24,15 @@ def current_status(state, now=None):
     return status, active
 
 
+def focus_is_monitored(row, now):
+    """Collection membership for display only; this never grants entry eligibility."""
+    try:
+        deadline = row.get('focus_monitor_until') or row.get('focus_valid_until')
+        return bool(row.get('focused') and deadline and utc(deadline) > now)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 def render_watchlist(state, candidates):
     import streamlit as st
     from .session_app import timestamp, usd, _table
@@ -31,9 +40,9 @@ def render_watchlist(state, candidates):
     now = datetime.now(timezone.utc)
     status, active = current_status(state, now)
     items = state.get('items', [])
-    focus = {row['ticker'] for row in items if row.get('focused') and row.get('focus_valid_until')
-             and utc(row['focus_valid_until']) >= now} if active and status == 'VALID' else set()
-    signals = [row for row in candidates or [] if row.get('symbol') in focus and row.get('eligible') and row.get('signal')
+    focus = {row['ticker'] for row in items if focus_is_monitored(row, now)} if active and status == 'VALID' else set()
+    pending = {row['ticker'] for row in items if row['ticker'] in focus and row.get('focus_refresh_pending')}
+    signals = [row for row in candidates or [] if row.get('symbol') in focus-pending and row.get('eligible') and row.get('signal')
                and row.get('timestamp') and 0 <= (now-utc(row['timestamp'])).total_seconds() <= 120]
     st.subheader(f"시총 후보 최대 {state.get('watchlist_limit',50)} → 분봉 준비 종목 운영 → 집중 분석 최대 {state.get('focus_limit',20)}")
     cols = st.columns(5)
@@ -45,6 +54,8 @@ def render_watchlist(state, candidates):
     st.caption('선정 정책 상태: '+LABELS.get(status,status)+' · 미확인 수는 선정 상한 기준이며 확정 종목 수가 아닙니다.')
     cols[3].metric('현재 집중 분석', f"{len(focus)} / {state.get('focus_limit',20)}")
     cols[4].metric('현재 진입 신호', str(len(signals)) if candidates is not None else '—')
+    if pending:
+        st.info(f'집중 유지 {len(pending)}종목은 자료 갱신을 기다립니다. 계속 조회하며, 새 자료 확인 전에는 매수하지 않습니다.')
     if candidates is None:
         st.caption('진입 신호 기록 조회 미완료 · 신호가 0개라는 뜻은 아닙니다.')
     if active and not focus:
@@ -96,7 +107,7 @@ def render_watchlist(state, candidates):
             '분봉 제외 사유':'; '.join(p['session']+': '+', '.join(p['reasons']) for p in (row.get('history_selection') or {}).get('problems',[]))
                 or ('시작 자료 준비 중' if history.get('preparing') else '당일 고정 목록 밖' if history and not row.get('history_ready') else ''),
             '선정 상태':LABELS.get(status,status),'시총 선택 이유':row.get('selection_reason'),
-            '현재 집중':row['ticker'] in focus, '집중 근거':row.get('focus_reason'),
+            '현재 집중':row['ticker'] in focus, '자료 갱신 대기':row['ticker'] in pending, '집중 근거':row.get('focus_reason'),
             '시총 기준일/수집 시작':timestamp(row.get('as_of_at')), '시총 수신일':timestamp(row.get('received_at')),
             '알려진 시각':timestamp(row.get('known_at')), '최종 상세 조회':timestamp(last),
             '최근 조회 시도':timestamp(row.get('last_detail_attempt_at')), '상세 자료 지연(초)':age,
