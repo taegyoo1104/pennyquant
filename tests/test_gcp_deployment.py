@@ -74,7 +74,7 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
     script.write_text(body)
     result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
         'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
-    assert result.returncode==0 and disk.read_text()=='preserved'
+    assert result.returncode==int(failed_backup) and disk.read_text()=='preserved'
     lines=calls.read_text().splitlines()
     assert 'stop -t 180 app' in lines[0]
     assert lines.index('backup')<next(i for i,line in enumerate(lines) if 'down --timeout 120' in line)
@@ -155,6 +155,7 @@ def test_storage_thresholds_and_inode_exhaustion_fail_closed(tmp_path, monkeypat
 def test_backup_streams_compressed_sql_and_preserves_previous_backup_on_failure(tmp_path, failure):
     import tarfile
     import gzip
+    import shutil
     root=tmp_path/'repo'; deploy=root/'deploy/gcp'; deploy.mkdir(parents=True)
     data=tmp_path/'data'; (data/'app').mkdir(parents=True)
     (data/'app/state.json').write_text('{"fixture":true}')
@@ -168,6 +169,7 @@ if [[ "$FAILURE" == dump ]]; then exit 1; fi
 ''')
     (deploy/'storage_check.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="space"))')
     (deploy/'upload_backup.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="upload"))')
+    shutil.copyfile(DEPLOY/'package_backup.py',deploy/'package_backup.py')
     body=(DEPLOY/'backup.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
         '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)).replace(
         '/run/sessionquant-backup.lock',str(tmp_path/'backup.lock'))
@@ -180,6 +182,13 @@ if [[ "$FAILURE" == dump ]]; then exit 1; fi
     completed=[p for p in backups.glob('sessionquant-*.tar.gz') if p!=old]
     assert len(completed)==(1 if failure in ('', 'upload') else 0)
     assert (etc/'backup-status').read_text().startswith('FAILED' if failure else 'UPLOADED')
+    if failure:
+        phase={'dump':'DUMP','upload':'UPLOAD','space':'PREPARE'}[failure]
+        assert f'phase={phase}' in (etc/'backup-status').read_text()
+        assert 'elapsed_seconds=' in (etc/'backup-status').read_text()
+    else:
+        for phase in ('DUMP','VERIFY_SQL','PACKAGE','VERIFY_ARCHIVE','UPLOAD'):
+            assert f'백업 단계 완료: {phase}' in result.stdout
     if completed:
         with tarfile.open(completed[0]) as archive:
             assert 'database.sql' not in archive.getnames()

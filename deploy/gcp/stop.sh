@@ -4,14 +4,31 @@ exec 9>/run/sessionquant-stop.lock
 flock -n 9 || exit 0
 cd /opt/sessionquant || exit 1
 compose=(docker compose -f deploy/gcp/compose.yaml)
+result=0
 echo '장 마감: 프로그램 저장·종료 후 백업합니다. 잔량이 있으면 다음 실행에서 복구합니다.'
 "${compose[@]}" stop -t 180 app || echo '프로그램 종료 상태를 확인하세요.' >&2
 if [[ $("${compose[@]}" ps --status running --services db) == db ]]; then
-    if ! timeout 480 /opt/sessionquant/deploy/gcp/backup.sh; then
+    # Match the enclosing 40-minute systemd limit. A large logical dump may
+    # legitimately take more than the former eight-minute budget.
+    backup_status_before=$(cat /etc/sessionquant/backup-status 2>/dev/null || true)
+    timeout --kill-after=30 1800 /opt/sessionquant/deploy/gcp/backup.sh
+    backup_result=$?
+    if ((backup_result != 0)); then
+        result=1
         # Also covers an early refusal, timeout, or a killed backup process.
         install -d -m 700 /etc/sessionquant
-        (umask 077; printf 'FAILED %s\n' "$(date -u +%FT%TZ)" > /etc/sessionquant/backup-status) || true
-        echo '백업 실패: VM의 DB 디스크는 유지됩니다. 다음 시작 시 로그를 확인하세요.' >&2
+        # Keep the stage/error recorded by backup.sh; cover hard kills and early
+        # failures separately so an old UPLOADED status cannot permit restart.
+        if ! grep -q '^FAILED ' /etc/sessionquant/backup-status 2>/dev/null || \
+            [[ $(cat /etc/sessionquant/backup-status 2>/dev/null) == "$backup_status_before" ]]; then
+            (umask 077; printf 'FAILED %s phase=SHUTDOWN exit_code=%s\n' \
+                "$(date -u +%FT%TZ)" "$backup_result" > /etc/sessionquant/backup-status) || true
+        fi
+        if ((backup_result == 124 || backup_result == 137)); then
+            echo '백업 제한 시간 1800초 초과: 미완료 상태를 남기고 DB 디스크를 보존합니다.' >&2
+        else
+            echo "백업 실패: 종료 코드 $backup_result. DB 디스크는 유지됩니다." >&2
+        fi
     fi
 else
     echo '실행 중인 DB가 없습니다. 기존 디스크를 보존하고 종료합니다.'
@@ -19,4 +36,6 @@ fi
 # Never remove volumes or the persistent boot disk.
 "${compose[@]}" down --timeout 120 || echo '컨테이너 종료 오류: OS 종료로 마무리합니다.' >&2
 sync
-/usr/bin/systemctl poweroff
+/usr/bin/systemctl poweroff || result=1
+# A shutdown request is not proof of a successful backup.
+exit "$result"
