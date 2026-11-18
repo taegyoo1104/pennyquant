@@ -121,6 +121,40 @@ def test_all_six_pages_navigation_and_refresh_are_read_only(tmp_path,monkeypatch
     repo=Repository(path,backend='sqlite');assert not repo.all('order_intents') and not repo.all('orders');repo.close()
 
 
+def test_market_fragment_refreshes_stored_values_and_toggle_disables_timer(tmp_path,monkeypatch):
+    import streamlit as st
+    path = tmp_path / 'refresh.db'
+    writer = Repository(path, backend='sqlite')
+    begin_session(writer, mode='paper')
+    writer.set_control('watchlist_dashboard_v1', {'status': 'VALID', 'operating_count': 20,
+                                               'updated_at': datetime.now(timezone.utc).isoformat()})
+    monkeypatch.setenv('SQ_DB_BACKEND', 'sqlite')
+    monkeypatch.setattr('sys.argv', ['session_app.py', '--db', str(path)])
+    intervals = []
+    original_fragment = st.fragment
+    def fragment(*args, **kwargs):
+        intervals.append(kwargs.get('run_every'))
+        return original_fragment(*args, **kwargs)
+    monkeypatch.setattr(st, 'fragment', fragment)
+    try:
+        app = AppTest.from_file(APP, default_timeout=30).run()
+        assert intervals[-1] == 5
+        app.radio(key='dashboard_page').set_value('시장·종목').run()
+        assert not app.exception and intervals[-1] == 10
+        assert any(m.label == '유효 운영 종목' and m.value == '20 / 50' for m in app.metric)
+        writer.set_control('watchlist_dashboard_v1', {'status': 'VALID', 'operating_count': 19,
+                                                   'updated_at': datetime.now(timezone.utc).isoformat()})
+        app.run()
+        assert any(m.label == '유효 운영 종목' and m.value == '19 / 50' for m in app.metric)
+        app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
+        assert intervals[-1] == 30
+        app.toggle(key='dashboard_auto_refresh').set_value(False).run()
+        assert not app.exception and intervals[-1] is None
+        assert not writer.all('orders') and not writer.all('order_intents')
+    finally:
+        writer.close()
+
+
 def test_malformed_focus_expiry_never_crashes_or_labels_current_news():
     data=data_for();data.watchlist_state['items'][0]['focus_valid_until']='unknown'
     data.tables['news_events']=[article('rss:a','AAPL'),article('rss:m','MSFT')]

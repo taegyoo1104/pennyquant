@@ -54,7 +54,7 @@ class MySQLRepositoryError(RuntimeError):
 class MySQLRepository:
     backend = "mysql"
 
-    def __init__(self, path: str | Path, config: MySQLConfig | None = None):
+    def __init__(self, path: str | Path, config: MySQLConfig | None = None, *, initialize: bool = True):
         # SQLite만 사용하는 경우 드라이버를 설치하지 않아도 되도록 늦게 가져온다.
         from .repository import KINDS
         self.kinds = KINDS
@@ -84,7 +84,8 @@ class MySQLRepository:
             if "mariadb" in version.lower() or match is None or int(match.group(1)) < 8:
                 raise RuntimeError("MySQL 8 이상이 필요합니다. 지원하는 MySQL 서버인지 확인하세요")
             self._execute("SET SESSION time_zone = '+00:00'")
-            self._create_tables()
+            if initialize:
+                self._create_tables()
         except BaseException:
             self.close()
             raise

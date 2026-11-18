@@ -100,10 +100,10 @@ def age_seconds(value: Any, now: datetime) -> float | None:
         return None
 
 
-def load_database(path: str | Path, *, page=None) -> DashboardData:
+def load_database(path: str | Path, *, page=None, news_section=None) -> DashboardData:
     """선택한 화면의 기록만 읽는다. 중간 실패는 이미 읽은 자료를 지우지 않는다."""
     from sessionquant.dashboard.load_plan import CONTROLS, SOURCE_LABELS, read_plan
-    controls, tables = read_plan(page)
+    controls, tables = read_plan(page, news_section=news_section)
     include_fred = page is None or page == '시장·종목'
     include_news = page is None or page in {'뉴스·LLM', '대시보드'}
     pending = {'state', *controls, *tables}
@@ -134,7 +134,7 @@ def load_database(path: str | Path, *, page=None) -> DashboardData:
         result.backend = database_backend()
         if result.backend == "sqlite" and not Path(path).exists():
             return result
-        repository = Repository(path)
+        repository = Repository(path, initialize=False)
         from contextlib import nullcontext
         with repository.transaction() if hasattr(repository,'transaction') else nullcontext():
             result.state = read('state', repository.load_state) or {}
@@ -298,7 +298,11 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
     style()
     page=selected_page or st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
-    data=load_database(path,page=page)
+    news_section = None
+    if page == '뉴스·LLM':
+        from sessionquant.dashboard.load_plan import NEWS_SECTIONS
+        news_section = st.radio('뉴스 상세', tuple(NEWS_SECTIONS), horizontal=True, key='news_detail')
+    data=load_database(path,page=page,news_section=news_section)
     view=build_view(data)
     account=view['account']
     from sessionquant.dashboard.labels import label
@@ -390,7 +394,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             from sessionquant.database.repository import Repository
             from sessionquant.trading_controls import render_controls
             from contextlib import closing
-            with closing(Repository(path)) as repo:
+            with closing(Repository(path, initialize=False)) as repo:
                 positions=(data.state.get('broker') or {}).get('positions') or {}
                 render_controls(repo,positions=[{'symbol':s,**r} for s,r in positions.items()],environment=view['environment'])
         from sessionquant.dashboard.summary_panels import render_actual_account
@@ -424,8 +428,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         except Exception:st.caption('LLM 상태 미확인')
         finally:
             if cost_repo:cost_repo.close()
-        corporate, macro, usage = st.tabs(["기업 뉴스", "경제·정치·국제정세", "LLM 사용량"])
-        with corporate:
+        if news_section == '기업 뉴스':
             from sessionquant.dashboard.news_panel import current_company_news
             rows=data.tables['news_analysis'] or data.tables['news_events']
             _table(_news_rows(current_company_news(rows,data,view)),
@@ -433,12 +436,12 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             with st.expander('전체 기업 뉴스·과거·오류 상세'):
                 _table(_news_rows(rows))
             st.caption("SEC·검증된 기업 IR/RSS를 우선 확인합니다. 무료 Alpaca REST는 보조 자료로 표시합니다.")
-        with macro:
+        elif news_section == '경제·정치·국제정세':
             originals={row['id']:row for row in data.tables['macro_news'] if row.get('id')}
             rows=[{**originals.get(row.get('article_id'),{}),**row} for row in data.tables['macro_analysis']]
             _table(_news_rows(rows or data.tables['macro_news']))
             st.caption("GDELT 검색 결과는 사건 확정의 증거가 아닙니다. 출처·공개 시각·독립 검증·실제 시장 반응을 확인하며 미확인 국제 뉴스만으로 강제 청산하지 않습니다.")
-        with usage:
+        elif news_section == 'LLM 사용량':
             if data.connected:
                 from sessionquant.dashboard.llm_panel import render_llm_details
                 render_llm_details(path,usage_path=usage_path,usage_environment=usage_environment)
@@ -477,13 +480,18 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         st.caption("화면은 엔진에 제어 요청을 전달합니다. 실제 주문·취소·체결 확인은 실행 중인 엔진에서 처리합니다.")
 
 
+def refresh_interval(page, enabled=True):
+    """조회량에 맞춘 화면 갱신 주기. 거래 제어 요청은 주기와 무관하게 처리한다."""
+    return {'대시보드': 5, '시장·종목': 10, '뉴스·LLM': 30}.get(page) if enabled else None
+
+
 def main() -> None:
     """로컬 전략·실계좌 통합 화면을 실행한다."""
     import streamlit as st
 
     # 상세 화면이 렌더링되지 않아도 확인/검색 위젯의 세션 값을 보존한다.
     for key in list(st.session_state):
-        if key.startswith(('confirm-','trade_','llm-','strategy_')):
+        if key.startswith(('confirm-','trade_','llm-','strategy_','news_')):
             st.session_state[key]=st.session_state[key]
 
     parser = argparse.ArgumentParser(description="SessionQuant 통합 대시보드")
@@ -497,12 +505,15 @@ def main() -> None:
         st.title("SessionQuant")
         page=st.radio('화면',PAGES,key='dashboard_page',label_visibility='collapsed')
         st.divider()
-        refresh = st.toggle("자동 갱신 · 5초", value=True,help='메인과 뉴스 화면을 자동으로 갱신합니다.')
+        refresh = st.toggle("자동 갱신", value=True, key='dashboard_auto_refresh',
+                            help='메인 5초 · 시장·종목 10초 · 뉴스 30초마다 저장된 기록을 다시 읽습니다.')
+        interval = refresh_interval(page, refresh)
+        st.caption(f'이 화면은 {interval}초마다 갱신합니다.' if interval else '이 화면은 수동으로 새로고침합니다.')
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
         st.caption("한국시간 · 미국 달러")
 
-    @st.fragment(run_every="5s" if refresh and page in {'대시보드','뉴스·LLM'} else None)
+    @st.fragment(run_every=interval)
     def monitor() -> None:
         render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,usage_environment=args.usage_environment,selected_page=page)
 

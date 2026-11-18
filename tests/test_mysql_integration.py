@@ -232,7 +232,7 @@ def test_mysql_market_dashboard_keeps_data_after_connection_loss_and_recovers(my
 
     monkeypatch.setattr(reader, 'recent', disconnected_recent)
     monkeypatch.setattr(config, 'database_backend', lambda: 'mysql')
-    monkeypatch.setattr(module, 'Repository', lambda path: reader)
+    monkeypatch.setattr(module, 'Repository', lambda path, **kwargs: reader)
     failed = load_database('unused.db', page='시장·종목')
     assert not failed.connected and '2013' in failed.error
     assert reader._closed
@@ -240,11 +240,29 @@ def test_mysql_market_dashboard_keeps_data_after_connection_loss_and_recovers(my
     assert failed.tables['quote_snapshots'][0]['symbol'] == 'SPY'
     assert 'candidates' in failed.unavailable
     reopened = mysql_repositories(writer.config.namespace)
-    monkeypatch.setattr(module, 'Repository', lambda path: reopened)
+    monkeypatch.setattr(module, 'Repository', lambda path, **kwargs: reopened)
     refreshed = load_database('unused.db', page='시장·종목')
     assert refreshed.connected and not refreshed.error and reopened._closed
     assert refreshed.tables['candidates'][0]['symbol'] == 'AAPL'
     assert not writer.all('orders')
+
+
+def test_mysql_existing_schema_dashboard_connection_reads_fresh_state(mysql_repositories):
+    from sessionquant.database.mysql_repository import MySQLRepository
+    writer = mysql_repositories()
+    writer.set_control('trade_control_state', {'status': 'WAITING'})
+    reader = MySQLRepository('integration.db', writer.config, initialize=False)
+    try:
+        with reader.transaction():
+            assert reader.get_control('trade_control_state')['status'] == 'WAITING'
+        writer.set_control('trade_control_state', {'status': 'STOPPED'})
+        with reader.transaction():
+            assert reader.get_control('trade_control_state')['status'] == 'STOPPED'
+            reader.set_control('dashboard_request', {'action': 'start'})
+        assert writer.get_control('dashboard_request') == {'action': 'start'}
+        assert not writer.all('orders')
+    finally:
+        reader.close()
 
 
 def test_real_mysql_unicode_upserts_and_anonymous_journal_rows(mysql_repositories):

@@ -94,7 +94,7 @@ def render_account_overview(data,view,path,usage_path=None,usage_environment=Non
     repo=None
     if data.connected:
         try:
-            repo=Repository(path)
+            repo=Repository(path, initialize=False)
             broker=data.state.get('broker',{})
             positions=[{'symbol':symbol,**r} for symbol,r in broker.get('positions',{}).items()] if isinstance(broker.get('positions'),dict) else []
             render_controls(repo,positions=positions,environment=view['environment'],readonly=data.context.get('mode')=='account_readonly',compact=True)
