@@ -121,6 +121,17 @@ def test_delayed_correction_only_affects_quality_after_receipt():
     assert bar_quality(rows,'TEST',NOW+timedelta(minutes=2))['age_seconds']==122
 
 
+def test_strategy_coverage_cutoff_does_not_weaken_latest_minute_freshness():
+    now = NOW+timedelta(minutes=2)
+    rows = [replace(b,received_at=now) for b in minutes(through=THROUGH+timedelta(minutes=1))]
+    report = bar_quality(rows,'TEST',now,through=THROUGH)
+    assert report['status']=='COMPLETE' and report['expected_minutes']==5
+    assert report['age_seconds']==62  # freshness uses minute 6, coverage uses minute 5
+    assert report['last_closed_at']==(THROUGH+timedelta(minutes=1)).isoformat()
+    assert bar_quality(rows,'TEST',now+timedelta(seconds=29),through=THROUGH)['status']=='INCOMPLETE'
+    assert bar_quality(rows,'TEST',now,through=now+timedelta(minutes=1))['status']=='UNKNOWN'
+
+
 @pytest.mark.parametrize('now,expected,opened',[
     ('2026-11-26T15:00:00+00:00',0,None),
     ('2026-11-27T18:01:00+00:00',210,'2026-11-27T14:30:00+00:00'),
@@ -141,6 +152,19 @@ def test_rvol_twenty_same_elapsed_sessions_use_actual_knowledge_time():
     assert relative_volume(10000,THROUGH,rows,symbol='TEST',corporate_actions_verified=True) is None
     assert relative_volume(10000,THROUGH,rows,symbol='TEST',corporate_actions_verified=True,observed_at=NOW)==2
     assert rvol_report(rows,'TEST',THROUGH,NOW-timedelta(seconds=3),evidence=proof)['value'] is None
+
+
+def test_rvol_diagnostics_distinguish_internal_gaps_from_unreceived_tail():
+    rows = full_history()
+    current_start = THROUGH-timedelta(minutes=5)
+    missing = {current_start+timedelta(minutes=2),THROUGH}
+    rows = [b for b in rows if b.timestamp not in missing]
+    report = rvol_report(rows,'TEST',THROUGH,NOW)
+    assert report['complete_sessions']==20 and report['calculated_value'] is None
+    assert report['current_expected_minutes']==5 and report['current_observed_minutes']==3
+    assert report['current_missing_minutes']==2
+    assert report['current_missing_interior_minutes']==1 and report['current_missing_tail_minutes']==1
+    assert report['current_missing_examples']==[t.isoformat() for t in sorted(missing)]
 
 
 @pytest.mark.parametrize('case',['missing_history','missing_current','correction','no_proof','expired_proof',

@@ -8,6 +8,7 @@ def render_quality(state, *, performance=None):
     report = current_report(state)
     st.subheader('시세·거래 적격성·RVOL 데이터 품질')
     st.caption('최근 평가 시각: '+timestamp(report.get('captured_at'))+' · 대상: 현재 집중 후보와 위험 관리 종목. SPY·QQQ는 별도 참조입니다.')
+    st.caption('당일 분봉 수집 상태와 전략에 쓰는 확정봉 상태를 구분합니다. 실제 매수 판단은 아래 후보 선정 표에서 확인할 수 있습니다.')
     if report['synthetic']:
         st.warning('합성 입력의 데이터 품질 검사입니다. 실제 계좌 자격·시장 확보율이 아닙니다.')
     columns = st.columns(6)
@@ -21,7 +22,10 @@ def render_quality(state, *, performance=None):
     rows = []
     for item in report['items']:
         bars, volume = item['bars'], item['rvol']
-        rows.append({'종목':item['symbol'],'분봉 상태':bars['status'],'제공처':', '.join(bars.get('source',[])),
+        strategy_bars=item.get('strategy_bars',{})
+        rows.append({'종목':item['symbol'],'당일 분봉 수집':bars['status'],
+            '전략 확정봉 상태':strategy_bars.get('status','UNKNOWN'),
+            '전략 기준 시각':timestamp(strategy_bars.get('cutoff_at')),'제공처':', '.join(bars.get('source',[])),
             '평가 시각':timestamp(item.get('observed_at')),'호가 시각':timestamp(item.get('quote_at')),
             '누락 분':bars.get('missing_minutes'),'누락률':bars.get('missing_rate'),
             '정정 충돌 분':bars.get('conflicting_minutes'),'명시적 거래량 0분':bars.get('explicit_zero_volume_minutes'),
@@ -39,7 +43,7 @@ def render_quality(state, *, performance=None):
         source = report.get('source_state') or {}
         st.caption('위험 호가 전달: '+timestamp(source.get('priority_delivered_at'))+' · 후보보다 먼저 엔진에 전달합니다. 네트워크 오류·거래소 지연까지 성공을 보장하지 않습니다.')
         _table(source.get('read_measurements',[]),'수집 주기 계측 자료가 없습니다.')
-        _table([{'종목':s,**row} for s,row in source.get('history_progress',{}).items()],'과거 봉 보충 이력이 없습니다.')
+        _table(history_progress_rows(source.get('history_progress',{})),'과거 봉 보충 이력이 없습니다.')
         _table([{'종목':s,**row} for s,row in report.get('market_reference_quality',{}).items()])
     with st.expander('처리 속도 확인'):
         latest = (performance or {}).get('latest',{})
@@ -53,6 +57,18 @@ def render_quality(state, *, performance=None):
         _table([{'확인 시각':timestamp(r.get('observed_at')),'전체 시간(초)':r['elapsed_seconds'],
             '프로세스 CPU(초)':r['process_cpu_seconds']} for r in slow], '느린 수집 기록이 없습니다.')
     st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. observed_paper_v1에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
+
+
+def history_progress_rows(progress):
+    from .session_app import timestamp
+    states={'SESSION_WINDOW_REACHED':'당일 조회 범위 도달','WINDOW_CACHED':'저장 자료 재사용',
+            'PAGING':'과거 구간 조회 중','DONE':'조회 종료','EXHAUSTED':'더 이전 자료 없음',
+            'WINDOW_REACHED':'필요 조회 범위 도달','CURSOR_STALLED':'다음 조회 위치 확인 필요'}
+    return [{'종목':symbol,'보충 상태':states.get(row.get('status'),row.get('status','UNKNOWN')),
+             '추가 조회 횟수':row.get('pages',0),'다음 조회 기준':timestamp(row.get('cursor')),
+             '마지막 시도':timestamp(row.get('last_attempt_at')),
+             '마지막 수신':timestamp(row.get('last_received_at'))}
+            for symbol,row in progress.items()]
 
 
 def performance_rows(snapshot):

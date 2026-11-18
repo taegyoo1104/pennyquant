@@ -20,7 +20,9 @@ def changed_bar(bar, close):
 @pytest.mark.parametrize('strategy',list(CASES))
 def test_four_single_strategies_use_closed_signal_id_and_common_risk_gates(strategy):
     data = data_for(strategy)
-    one = technical_signal('AAPL',strategy,data,'BULLISH',NOW)
+    diagnostics = []
+    one = technical_signal('AAPL',strategy,data,'BULLISH',NOW,diagnostics=diagnostics)
+    assert diagnostics == []
     two = technical_signal('AAPL',strategy,data,'BULLISH',NOW+timedelta(seconds=1))
     assert one and two and one.id==two.id and one.timestamp==data.five[-1].timestamp
     assert one.stop_price<one.reference_price
@@ -73,7 +75,17 @@ def test_pullback_two_adjustments_rebound_and_depth_are_independent(case):
     if case=='rebound_not_breaking_high':bars[-1]=changed_bar(bars[-1],bars[-2].high)
     if case=='rebound_volume_low':bars[-1]=replace(bars[-1],volume=bars[-2].volume)
     if case=='excessive_retracement':bars[-6]=replace(bars[-6],high=bars[-1].close+5*data.atr14)
-    assert technical_signal('AAPL','pullback',replace(data,five=tuple(bars)),'BULLISH',NOW) is None
+    diagnostics = []
+    assert technical_signal('AAPL','pullback',replace(data,five=tuple(bars)),'BULLISH',NOW,
+                            diagnostics=diagnostics) is None
+    expected = {
+        'first_not_pullback':'strategy_first_pullback_missing',
+        'second_not_pullback':'strategy_second_pullback_missing',
+        'rebound_not_breaking_high':'strategy_rebound_high_breakout_missing',
+        'rebound_volume_low':'strategy_rebound_volume_missing',
+        'excessive_retracement':'strategy_pullback_depth_invalid',
+    }
+    assert expected[case] in diagnostics
 
 
 @pytest.mark.parametrize('support',['vwap','ema'])
@@ -113,3 +125,42 @@ def test_signal_future_incomplete_minute_never_changes_closed_strategy_early():
     data=indicators(raw,NOW)
     future=replace(raw[-1],timestamp=NOW+timedelta(minutes=1),received_at=NOW+timedelta(minutes=1),high=1000)
     assert technical_signal('AAPL','momentum',indicators(raw+[future],NOW),'BULLISH',NOW).id==technical_signal('AAPL','momentum',data,'BULLISH',NOW).id
+
+
+def test_diagnostics_report_every_unmet_pullback_condition_without_changing_signal():
+    data = data_for('pullback')
+    five, fifteen = list(data.five), list(data.fifteen)
+    five[-1] = replace(five[-1], volume=five[-2].volume)
+    fifteen[-1] = changed_bar(fifteen[-1], fifteen[-2].close)
+    waiting = replace(data, five=tuple(five), fifteen=tuple(fifteen))
+    diagnostics = []
+    assert technical_signal('AAPL','pullback',waiting,'BULLISH',NOW) is None
+    assert technical_signal('AAPL','pullback',waiting,'BULLISH',NOW,diagnostics=diagnostics) is None
+    assert diagnostics == ['strategy_fifteen_minute_uptrend_missing', 'strategy_rebound_volume_missing']
+    from sessionquant.dashboard.labels import label
+    assert [label(reason) for reason in diagnostics] == ['15분봉 상승 추세 대기', '반등 거래량 증가 대기']
+
+
+def test_strategy_recent_volume_diagnostic_does_not_call_it_historical_rvol_failure():
+    diagnostics = []
+    data = replace(data_for('pullback'), volume_ratio=.99)
+    assert technical_signal('AAPL','pullback',data,'BULLISH',NOW,diagnostics=diagnostics) is None
+    assert diagnostics == ['strategy_recent_volume_below_minimum']
+
+
+def test_regime_and_pullback_accept_sequential_current_quotes_without_etf_history():
+    # Live reads arrive sequentially. They need freshness, not identical timestamps
+    # or 20 days of ETF history (only the stock RVOL needs that history).
+    current = engine('pullback')
+    for offset, symbol in enumerate(('SPY', 'QQQ', 'AAPL'), start=1):
+        current.quotes[symbol] = replace(current.quotes[symbol],
+            timestamp=NOW + timedelta(seconds=offset), received_at=NOW + timedelta(seconds=offset + 1))
+    current.quotes['SPY'] = replace(current.quotes['SPY'],tradable=False)
+    current.quotes['QQQ'] = replace(current.quotes['QQQ'],tradable=False)
+    decision = current.evaluate('AAPL',NOW + timedelta(seconds=20))
+    assert decision.regime == 'BULLISH'
+    assert decision.eligible and decision.signal
+    assert {bar.timestamp.date() for values in current.bars.values() for bar in values} == {NOW.date()}
+    stale = current.evaluate('AAPL',NOW + timedelta(seconds=32))
+    assert stale.regime == 'UNKNOWN' and stale.signal is None
+    assert 'market_unknown' in stale.blockers

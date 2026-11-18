@@ -17,7 +17,7 @@ from .database.repository import Repository
 from .locking import exclusive_lock
 from .market.source import TossSessionSource
 from .market.universe import UniverseStore
-from .models import jsonable
+from .models import jsonable, utc
 from .notifications import DesktopNotifier, dashboard_environment
 from .portfolio.models import PortfolioSettings
 from .session_config import SessionConfig
@@ -100,12 +100,29 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
                 'risk_decisions':[row for row in repo.all('pipeline_status') if row.get('kind') == 'risk_decision']}
 
 
-def batch_events(batch) -> list[dict]:
+def batch_events(batch, *, delivered_at: datetime | None = None,
+                 last_time: datetime | None = None) -> list[dict]:
+    """Keep late bars/listing evidence without refreshing their source clocks.
+
+    Quotes older than the engine watermark remain excluded. Late non-execution
+    inputs are available only at actual delivery time, including during replay.
+    """
     result = [{"kind": "bar", "data": jsonable(x)} for x in batch.bars]
     result += [{"kind":"bar","data":jsonable(x),"restored_at":jsonable(batch.observed_at)}
                for x in getattr(batch,'cached_bars',())]
     result += [{"kind": "quote", "data": jsonable(x)} for x in batch.quotes]
     result += [{"kind": "eligibility", "data": jsonable(x)} for x in batch.eligibility]
+    if last_time is not None:
+        retained = []
+        for raw in result:
+            if event_time(raw) < last_time:
+                if raw['kind'] not in {'bar', 'eligibility'}:
+                    continue
+                if delivered_at is None:
+                    raise ValueError('지연 자료에는 실제 전달 시각이 필요합니다.')
+                raw = {**raw, 'delivered_at': utc(delivered_at).isoformat()}
+            retained.append(raw)
+        result = retained
     return sorted(result, key=event_time)
 
 
@@ -187,9 +204,9 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     engine.market.history_provider = lambda symbol,stamp: history_store.load(symbol,stamp,record=config.recording_enabled)
                 def receive_priority(batch):
                     # 위험 자료는 후보 탐색 완료를 기다리지 않고 단일 작성자 엔진에 전달한다.
-                    raw = batch_events(batch)
-                    raw = [x for x in raw if engine.last_time is None or event_time(x) >= engine.last_time]
-                    engine.apply_batch(raw,datetime.now(timezone.utc))
+                    observed_at = datetime.now(timezone.utc)
+                    raw = batch_events(batch, delivered_at=observed_at, last_time=engine.last_time)
+                    engine.apply_batch(raw,observed_at)
                 from .market_reference.collector import MarketReferenceMonitor
                 from .market_reference.settings import reference_settings
                 reference_config = reference_settings(config.market_reference)
@@ -250,10 +267,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     news_task = None
                 if market_task and market_task.done():
                     batch = market_task.result()
-                    raw = batch_events(batch)
-                    # 이전에 받은 봉은 원본 수신 시각을 유지하므로 신규 배치의 커서보다 과거일 수 있다.
-                    raw = [x for x in raw if engine.last_time is None or event_time(x) >= engine.last_time]
                     observed_at = datetime.now(timezone.utc)
+                    raw = batch_events(batch, delivered_at=observed_at, last_time=engine.last_time)
                     engine.apply_batch(raw, observed_at, controls={'sq_market_cycle_at':observed_at.isoformat()})
                     for error in batch.errors:
                         repo.log("WARNING", error["message"], source=error["source"], symbol=error["symbol"],

@@ -12,7 +12,13 @@ QUALITY_KEY = 'market_data_quality_v1'
 
 
 @timed('bar_quality')
-def bar_quality(bars, symbol, now):
+def bar_quality(bars, symbol, now, *, through=None):
+    """Check coverage through a closed input boundary, keeping live-minute freshness.
+
+    The strategy uses a closed five-minute candle. A newly closed minute after
+    that candle is a collection concern, not a hole in the strategy's inputs.
+    Its receipt must nevertheless remain within the existing 90-second limit.
+    """
     now = utc(now)
     bounds = session_bounds(now)
     result = {'symbol':symbol, 'observed_at':now.isoformat(), 'status':'UNKNOWN',
@@ -29,7 +35,11 @@ def bar_quality(bars, symbol, now):
         result['reasons'] = ['market_closed_or_calendar_unknown']
         return result
     opened, closed = bounds
-    count = max(0, int((min(now,closed)-opened).total_seconds()//60))
+    cutoff = min(now,closed).replace(second=0,microsecond=0) if through is None else utc(through)
+    if (cutoff > min(now,closed) or cutoff < opened or cutoff.second or cutoff.microsecond):
+        result['reasons'] = ['current_closed_interval_missing']
+        return result
+    count = max(0, int((cutoff-opened).total_seconds()//60))
     expected = {opened+timedelta(minutes=i) for i in range(1,count+1)}
     available = available_minutes(bars, now, symbol)
     valid = {b.timestamp:b for b in available if b.timestamp in expected}
@@ -39,8 +49,11 @@ def bar_quality(bars, symbol, now):
     for b in raw:
         versions[b.timestamp].add((b.open,b.high,b.low,b.close,b.volume))
     conflicts = sum(len(values)>1 for values in versions.values())
-    last = max(valid.values(), key=lambda b:b.timestamp) if valid else None
-    five, fifteen = _aggregate_available(available,5,now,bounds), _aggregate_available(available,15,now,bounds)
+    # The coverage cutoff must not make a stale feed look fresh. Conversely,
+    # a later valid minute may prove freshness without entering a 5m signal.
+    last = available[-1] if available else None
+    covered = [b for b in available if b.timestamp <= cutoff]
+    five, fifteen = _aggregate_available(covered,5,cutoff,bounds), _aggregate_available(covered,15,cutoff,bounds)
     reasons = (['minute_gaps'] if missing else [])+(['bar_revisions_unresolved'] if conflicts else [])
     if not count:
         reasons.append('no_completed_regular_minute')
@@ -49,6 +62,7 @@ def bar_quality(bars, symbol, now):
         reasons.append('minute_data_stale_or_missing')
     result.update(status='COMPLETE' if count and not reasons else 'INCOMPLETE',
         session_open=opened.isoformat(), session_close=closed.isoformat(),
+        cutoff_at=cutoff.isoformat(),
         expected_minutes=count, observed_minutes=len(valid), missing_minutes=len(missing),
         missing_rate=len(missing)/count if count else None, missing_examples=[t.isoformat() for t in missing[:5]],
         explicit_zero_volume_minutes=sum(b.volume == 0 for b in valid.values()),
@@ -132,7 +146,18 @@ def rvol_report(bars, symbol, through, now, *, evidence=None, legacy_comparable=
         result['reasons'].append('historical_same_minute_coverage_incomplete')
     current = [b for b in available_minutes(bars,now,symbol) if b.timestamp <= through]
     all_relevant.extend(current)
-    if len(current) != elapsed:
+    current_required = {bounds[0]+timedelta(minutes=i) for i in range(1,elapsed+1)}
+    current_missing = sorted(current_required-{b.timestamp for b in current})
+    latest = current[-1] if current else None
+    interior_missing = sum(t < latest.timestamp for t in current_missing) if latest else 0
+    result.update(current_expected_minutes=elapsed, current_observed_minutes=len(current),
+        current_missing_minutes=len(current_missing),
+        current_missing_interior_minutes=interior_missing,
+        current_missing_tail_minutes=len(current_missing)-interior_missing,
+        current_missing_examples=[t.isoformat() for t in current_missing[:5]],
+        current_last_bar_at=latest.timestamp.isoformat() if latest else None,
+        current_last_received_at=latest.received_at.isoformat() if latest else None)
+    if current_missing:
         result['reasons'].append('current_session_coverage_incomplete')
     provenance = {(b.source,b.price_adjustment) for b in all_relevant}
     if len(provenance) != 1 or any(source in {'','UNKNOWN'} or adjustment not in {'raw','adjusted'}
