@@ -14,7 +14,7 @@ def quality_observation_fields(item, now):
         lag, age = round((received-quote).total_seconds(),1), round((now-received).total_seconds(),1)
     except (TypeError, ValueError, AttributeError):
         lag, age = None, None
-    status = ('시각 미확인' if lag is None else '수신 당시 이미 지연' if lag > 30
+    status = ('시각 미확인' if lag is None else '수신 당시 호가 시각 오래됨' if lag > 30
               else '새 호가 수신 대기' if age > 30 else '호가 시각 갱신 대기' if lag+age > 30 else '최신')
     saved = item.get('last_evaluation') or {}
     try:
@@ -27,7 +27,7 @@ def quality_observation_fields(item, now):
         return '미확인' if value is None else '확보' if value == 1 else '부족'
     return {'평가 후 경과(초)':item.get('evaluation_age_seconds'),
         '호가 수신 시각':timestamp(item.get('quote_received_at')), '호가 갱신 상태':status,
-        '수신 당시 호가 지연(초)':lag, '호가 수신 후 경과(초)':age,
+        '수신 당시 호가 경과(초)':lag, '호가 수신 후 경과(초)':age,
         '평가 당시 5분봉':coverage('five_coverage'), '평가 당시 15분봉':coverage('fifteen_coverage'),
         '평가 당시 RVOL·참고':saved.get('rvol_calculated_value'),
         '참고 RVOL 기준 시각':timestamp(saved.get('rvol_cutoff_at'))}
@@ -82,6 +82,7 @@ def render_quality(state, *, performance=None):
     _table(rows)
     with st.expander('우선 조회·요청 지연·과거 봉 보충 근거'):
         source = report.get('source_state') or {}
+        st.caption('토스 호가 시각은 마지막 호가 변동 시각입니다. 오래된 시각만으로 통신 지연·중단을 확정할 수 없습니다.')
         st.caption('위험 호가 전달: '+timestamp(source.get('priority_delivered_at'))+' · 후보보다 먼저 엔진에 전달합니다. 네트워크 오류·거래소 지연까지 성공을 보장하지 않습니다.')
         _table(source.get('read_measurements',[]),'수집 주기 계측 자료가 없습니다.')
         _table(history_progress_rows(source.get('history_progress',{})),'과거 봉 보충 이력이 없습니다.')

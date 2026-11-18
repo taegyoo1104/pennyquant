@@ -35,11 +35,11 @@ def test_quote_receipt_distinguishes_old_provider_time_from_no_recent_receipt():
     row=report()['items'][0]
     row['quote_at']=(NOW-timedelta(minutes=4)).isoformat()
     fields=quality_observation_fields(row,NOW)
-    assert fields['호가 갱신 상태']=='수신 당시 이미 지연'
-    assert fields['수신 당시 호가 지연(초)']==240 and fields['호가 수신 후 경과(초)']==0
+    assert fields['호가 갱신 상태']=='수신 당시 호가 시각 오래됨'
+    assert fields['수신 당시 호가 경과(초)']==240 and fields['호가 수신 후 경과(초)']==0
     row['quote_received_at']=None
     fields=quality_observation_fields(row,NOW)
-    assert fields['호가 갱신 상태']=='시각 미확인' and fields['수신 당시 호가 지연(초)'] is None
+    assert fields['호가 갱신 상태']=='시각 미확인' and fields['수신 당시 호가 경과(초)'] is None
 
 
 def test_invalid_or_future_evaluation_cannot_create_historical_success():
