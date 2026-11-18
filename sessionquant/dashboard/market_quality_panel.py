@@ -33,7 +33,26 @@ def quality_observation_fields(item, now):
         '참고 RVOL 기준 시각':timestamp(saved.get('rvol_cutoff_at'))}
 
 
-def render_quality(state, *, performance=None):
+def coverage_display(report, key):
+    """미평가/만료를 확보 실패 0으로 표시하지 않는다. 매매 판정은 바꾸지 않는다."""
+    if key == 'strategy_rvol':
+        from .session_app import decimal_value
+        values = [decimal_value(row.get('strategy_rvol')) for row in report['items']]
+        metric = {'required': len(values), 'verified': sum(value is not None and value >= 0 for value in values)}
+    else:
+        metric = report['required_data_coverage'][key]
+    required = metric['required']
+    if not required:
+        return '미평가'
+    waiting = sum(any(reason in row.get('blockers', []) for reason in
+                      ('quality_observation_stale', 'symbol_not_yet_evaluated'))
+                  for row in report['items'])
+    if waiting == required:
+        return f'— / {required}'
+    return f"{metric['verified']} / {required}"
+
+
+def render_quality(state, *, performance=None, details=True):
     import streamlit as st
     from datetime import datetime, timezone
     from ..models import utc
@@ -45,18 +64,22 @@ def render_quality(state, *, performance=None):
     evaluated = timestamp(times[0]) if times else '—'
     if len(times)>1:evaluated += ' ~ '+timestamp(times[-1])
     st.caption('종목 평가 시각: '+evaluated+' · 대상: 집중·보유·미체결 종목. SPY·QQQ는 별도 참조입니다.')
-    st.caption('당일 분봉 수집 상태와 전략에 쓰는 확정봉 상태를 구분합니다. 실제 매수 판단은 아래 후보 선정 표에서 확인할 수 있습니다.')
-    stale_count = sum('quality_observation_stale' in row.get('blockers',[]) for row in report['items'])
+    st.caption('현재 확인 수입니다. 마지막 평가와 실제 매수 판단은 각각 상세 표와 ‘매수 판단’에서 확인하세요.')
+    stale_count = sum(any(reason in row.get('blockers',[]) for reason in
+                          ('quality_observation_stale', 'symbol_not_yet_evaluated')) for row in report['items'])
     if stale_count:
-        st.info(f'{stale_count}종목은 평가 갱신 대기입니다. 아래 0은 현재 확인된 수이며, 저장된 분봉이 없다는 뜻은 아닙니다. 표의 ‘평가 당시’ 값은 참고 기록입니다.')
+        st.info(f'{stale_count}종목은 평가 갱신 대기입니다. 전부 대기 중이면 —로 표시합니다. ‘평가 당시’ 값은 참고 기록입니다.')
     if report['synthetic']:
         st.warning('합성 입력의 데이터 품질 검사입니다. 실제 계좌 자격·시장 확보율이 아닙니다.')
     columns = st.columns(6)
     labels = {'eligibility':'실계좌 확인','quote':'최신 호가','minute_history':'1분봉 연속성',
-              'five_bars':'5분봉 확보','fifteen_bars':'15분봉 확보','rvol':'RVOL 근거'}
+              'five_bars':'5분봉 확보','fifteen_bars':'15분봉 확보','strategy_rvol':'전략 RVOL'}
     for column,(key,label) in zip(columns,labels.items()):
-        metric = report['required_data_coverage'][key]
-        column.metric(label,f"{metric['verified']} / {metric['required']}" if metric['required'] else '미평가')
+        help_text = ('현재 전략에 전달할 수 있는 RVOL이 있는 종목 수입니다. 매수 승인 수나 RVOL 배수가 아닙니다.'
+                     if key == 'strategy_rvol' else '실제 계좌 권한 확인 수입니다. 모의매매 허용 여부와 다릅니다.'
+                     if key == 'eligibility' else None)
+        column.metric(label, coverage_display(report, key), help=help_text)
+    st.caption('전략 RVOL은 계산값·시세·확정봉 조건을 확인한 수입니다. 분할 비교 근거 검증은 아래 표에서 별도로 표시합니다.')
     _table([{'차단 사유':code,'종목 수':count} for code,count in report['blocker_counts'].items()],
            '아직 평가한 종목이 없습니다. 입력 미확인은 매수 허가가 아닙니다.')
     rows = []
@@ -71,7 +94,7 @@ def render_quality(state, *, performance=None):
             '누락 분':bars.get('missing_minutes'),'누락률':bars.get('missing_rate'),
             '정정 충돌 분':bars.get('conflicting_minutes'),'명시적 거래량 0분':bars.get('explicit_zero_volume_minutes'),
             '평가 당시 분봉 지연(초)':bars.get('age_seconds'),'분봉 수신 지연(초)':bars.get('latest_receipt_lag_seconds'),
-            'RVOL(검증됨)':volume.get('value'),'RVOL(계산값·비교 근거 미확인 가능)':volume.get('calculated_value'),
+            'RVOL(비교 근거 검증값)':volume.get('value'),'RVOL(계산값·비교 근거 미확인 가능)':volume.get('calculated_value'),
             'Paper 거래 조건':(item.get('paper_eligibility') or {}).get('status','strict'),
             'Paper 가정':', '.join((item.get('paper_eligibility') or {}).get('assumptions',[])),
             '전략에 전달한 RVOL':item.get('strategy_rvol'),'전략 RVOL 근거 상태':item.get('strategy_rvol_status'),
@@ -80,6 +103,14 @@ def render_quality(state, *, performance=None):
             '계좌 검증 범위':(item.get('eligibility') or {}).get('account_scope','UNKNOWN'),
             '제한 사유':', '.join(item.get('blockers',[]))})
     _table(rows)
+    if details:
+        render_quality_details(report, performance)
+    st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. observed_paper_v1에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
+
+
+def render_quality_details(report, performance=None):
+    import streamlit as st
+    from .session_app import _table, timestamp
     with st.expander('우선 조회·요청 지연·과거 봉 보충 근거'):
         source = report.get('source_state') or {}
         st.caption('토스 호가 시각은 마지막 호가 변동 시각입니다. 오래된 시각만으로 통신 지연·중단을 확정할 수 없습니다.')
@@ -98,7 +129,6 @@ def render_quality(state, *, performance=None):
         slow = (performance or {}).get('slowest_this_process',[])
         _table([{'확인 시각':timestamp(r.get('observed_at')),'전체 시간(초)':r['elapsed_seconds'],
             '프로세스 CPU(초)':r['process_cpu_seconds']} for r in slow], '느린 수집 기록이 없습니다.')
-    st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. observed_paper_v1에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
 
 
 def history_progress_rows(progress):
@@ -169,7 +199,7 @@ def watchlist_rvol_rows(view, now=None):
                 else '계산 자료 부족')
         result.append({'종목':row['symbol'],'RVOL 계산값':row.get('calculated_value'),
             '마지막 계산값·참고':float(prior) if prior is not None else None,
-            '매매용 검증값':row.get('value'),'현재성':status,'기준 시각 경과(초)':age,
+            '비교 근거 검증값':row.get('value'),'현재성':status,'기준 시각 경과(초)':age,
             '계산 기준 시각':timestamp(row.get('cutoff_at')),'수신·평가 시각':timestamp(row.get('observed_at')),
             '과거 확보 거래일':row.get('complete_sessions'),'현재 누적 거래량':row.get('current_cumulative_volume'),
             '과거 동시간 평균':row.get('historical_mean_cumulative_volume'),
@@ -177,7 +207,7 @@ def watchlist_rvol_rows(view, now=None):
     return result
 
 
-def render_watchlist_rvol(view, backfill):
+def render_watchlist_rvol(view, backfill, *, paper_policy=None):
     import streamlit as st
     from .session_app import _table
     st.subheader('감시목록 과거 분봉·RVOL')
@@ -186,6 +216,10 @@ def render_watchlist_rvol(view, backfill):
                    f"{backfill.get('complete_symbol_days','—')} / {backfill.get('required_symbol_days','—')}")
     else:
         st.caption('별도 일괄 수집 기록 없음 · 저장된 분봉이 없다는 뜻은 아닙니다. 시작 시 자료 준비는 시스템·설정에서 확인하세요.')
-    st.caption('마지막 계산값은 해당 기준 시각의 참고 기록입니다. 오래되면 현재 계산값·매매용 검증값은 비워 두며, 전략 허용으로 사용하지 않습니다.')
+    if paper_policy == 'observed_paper_v1':
+        st.caption('현재 모의 설정은 분할 비교 근거가 미확인이어도 완전한 분봉으로 계산한 RVOL을 사용할 수 있습니다. 실제 전략 사용 여부는 ‘매수 판단’에서 확인하세요.')
+    else:
+        st.caption('계산값과 비교 근거까지 검증한 값은 다릅니다. 실제 전략 사용 여부는 ‘매수 판단’에서 확인하세요.')
+    st.caption('마지막 계산값은 참고 기록입니다. 오래된 값은 현재 계산값·비교 근거 검증값에서 제외합니다.')
     _table(watchlist_rvol_rows(view),
            '장전 history-backfill 후 run으로 당일 분봉을 수집하세요.')

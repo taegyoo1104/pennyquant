@@ -26,6 +26,7 @@ def database(monkeypatch):
             self.closed = False
             self.__class__.instances.append(self)
         def load_state(self):
+            self.calls.append('state')
             return {'broker': {'cash': '100', 'positions': {}}}
         def get_control(self, name, default=None):
             self.calls.append(name)
@@ -186,3 +187,76 @@ def test_existing_sqlite_dashboard_connection_never_creates_empty_database(tmp_p
     finally:
         reader.close()
         writer.close()
+
+
+def test_fast_home_refresh_does_not_read_news_or_full_history(database):
+    database.failure = 'news_ingestions'
+    data = load_database('unused.db', page='대시보드', panel='live')
+    assert data.connected and not data.error
+    assert 'state' in database.calls
+    assert [call for call in database.calls if isinstance(call, tuple)] == [
+        ('executions', 1), ('quote_snapshots', 300)]
+    assert 'news_provider_schedule_v1' not in database.calls
+
+
+def test_news_summary_never_loads_portfolio_and_keeps_original_count_scope(database):
+    data = load_database('unused.db', page='대시보드', panel='news')
+    assert data.connected and not data.error
+    assert 'state' not in database.calls
+    assert ('news_ingestions', 300) in database.calls
+    assert ('llm_calls', 300) in database.calls and ('llm_attempts', 300) in database.calls
+    assert ('quote_snapshots', 300) not in database.calls
+    assert not data.tables['news_events'] and not data.tables['executions']
+
+
+@pytest.mark.parametrize('panel,expected', [
+    ('시세·품질', set()), ('거래량 비교', set()), ('매수 판단', set()),
+    ('처리 속도', set()), ('감시·집중 종목', {'candidates'}), ('분석 이력', {'candidates'}),
+    ('시장 참고', {'market_regimes', 'quote_snapshots', 'economic_events', 'fred_reference_observations'}),
+])
+def test_selected_market_panel_only_reads_its_own_sources(database, panel, expected):
+    data = load_database('unused.db', page='시장·종목', panel=panel)
+    assert data.connected and not data.error
+    assert {call[0] for call in database.calls if isinstance(call, tuple)} == expected
+    assert 'state' not in database.calls and 'actual_account_snapshot' not in database.calls
+    assert ('market_data_quality_v1' in database.calls) == (panel in {'시세·품질', '처리 속도'})
+    assert ('portfolio_selection_v1' in database.calls) == (panel == '매수 판단')
+
+
+def test_panel_selection_reads_new_values_and_preserves_manual_refresh(database, monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr('sys.argv', ['session_app.py', '--db', 'unused.db'])
+    app = AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()), default_timeout=30).run()
+    app.radio(key='dashboard_page').set_value('시장·종목').run()
+    database.calls.clear()
+    app.radio(key='market_detail').set_value('감시·집중 종목').run()
+    assert not app.exception
+    assert ('candidates', 300) in database.calls and ('quote_snapshots', 300) not in database.calls
+    assert any(m.label == '유효 운영 종목' and m.value == '25 / 50' for m in app.metric)
+    app.toggle(key='dashboard_auto_refresh').set_value(False).run()
+    database.controls['watchlist_dashboard_v1']['operating_count'] = 23
+    next(b for b in app.button if b.label == '화면 새로고침').click().run()
+    assert not app.exception
+    assert app.radio(key='market_detail').value == '감시·집중 종목'
+    assert not app.toggle(key='dashboard_auto_refresh').value
+    assert any(m.label == '유효 운영 종목' and m.value == '23 / 50' for m in app.metric)
+    database.calls.clear()
+    app.radio(key='market_detail').set_value('거래량 비교').run()
+    assert not app.exception
+    assert 'watchlist_rvol_v1' in database.calls
+    assert not any(isinstance(call, tuple) for call in database.calls)
+
+
+def raw_table_fixture():
+    import streamlit as st
+    from sessionquant.dashboard.session_app import _table
+    st.toggle('원본 기록도 보기', key='dashboard_raw_data')
+    _table([{'symbol': 'AAPL', 'unexpected_source_code': 'new_provider_code'}])
+
+
+def test_hidden_raw_json_is_not_serialized_to_browser_until_requested():
+    app = AppTest.from_function(raw_table_fixture).run()
+    assert not app.exception and len(app.dataframe) == 1 and not app.json
+    app.toggle(key='dashboard_raw_data').set_value(True).run()
+    assert not app.exception and len(app.json) == 1
+    assert 'new_provider_code' in app.json[0].value

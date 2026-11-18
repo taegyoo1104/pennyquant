@@ -34,7 +34,7 @@ def test_invalid_timestamp_clears_current_values_without_affecting_other_symbols
     assert current['items'][0]['calculated_value'] is None
     assert current['items'][0]['status'] == 'UNKNOWN'
     rows = watchlist_rvol_rows(source, NOW)
-    assert rows[0]['RVOL 계산값'] is None and rows[0]['매매용 검증값'] is None
+    assert rows[0]['RVOL 계산값'] is None and rows[0]['비교 근거 검증값'] is None
     if field in {'cutoff_at', 'observed_at'}:
         assert rows[0]['마지막 계산값·참고'] is None and rows[0]['기준 시각 경과(초)'] is None
         assert rows[0]['현재성'] == '시각 미확인'
@@ -61,7 +61,7 @@ def test_inconsistent_or_expired_time_does_not_show_current_rvol(field, value):
     row = calculated_row()
     row[field] = value.isoformat()
     result = watchlist_rvol_rows({'items': [row]}, NOW)[0]
-    assert result['RVOL 계산값'] is None and result['매매용 검증값'] is None
+    assert result['RVOL 계산값'] is None and result['비교 근거 검증값'] is None
 
 
 @pytest.mark.parametrize('value', [None, 0, True, [], {}, datetime(2026, 11, 18)])
@@ -97,10 +97,11 @@ def test_preopen_report_with_null_cutoff_renders_entire_market_page(tmp_path, mo
     app_path = Path(__file__).resolve().parents[1]/'sessionquant/dashboard/session_app.py'
     app = AppTest.from_file(str(app_path), default_timeout=30).run()
     app.radio(key='dashboard_page').set_value('시장·종목').run()
+    app.radio(key='market_detail').set_value('거래량 비교').run()
     assert not app.exception and not app.error
     assert any('별도 일괄 수집 기록 없음' in r.value for r in app.caption)
     assert not any('0 / 0' in r.value for r in app.caption)
-    assert any(r.value == '기술 분석 이력과 진입 근거' for r in app.subheader)
-    # 새로고침으로 같은 미수집 기록을 다시 읽어도 아래 표까지 표시한다.
+    assert any(r.value == '감시목록 과거 분봉·RVOL' for r in app.subheader)
+    # 새로고침으로 같은 미수집 기록을 다시 읽어도 거래량 표를 표시한다.
     app.run()
     assert not app.exception and not app.error

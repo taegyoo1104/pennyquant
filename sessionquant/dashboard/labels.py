@@ -217,7 +217,10 @@ def market_hours_label(now):
         times=schedule_times(now)
         if times is None:return '정규장 아님 · 뉴스 확인 가능'
         if now < times['opens_at'] or now >= times['closes_at']:return '장외 시간 · 뉴스 확인 가능'
-        if now < times['entry_start']:return '개장 후 자료 수집 중 · 매수 시간 대기'
+        if now < times['entry_start']:
+            from zoneinfo import ZoneInfo
+            starts = times['entry_start'].astimezone(ZoneInfo('Asia/Seoul')).strftime('%H:%M')
+            return f'매수 시작 대기 · {starts} KST부터 조건 확인'
         if now >= times['entry_end']:return '신규 매수 마감 · 보유 종목 관리'
         return '정규장 · 매수 조건 확인 시간'
     except (ValueError,TypeError,RuntimeError):return '시장 시간 확인 필요'

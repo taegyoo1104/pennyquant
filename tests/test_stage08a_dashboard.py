@@ -107,7 +107,7 @@ def test_all_six_pages_navigation_and_refresh_are_read_only(tmp_path,monkeypatch
     repo.save_state({'broker':{'cash':'100','reserved_cash':'0','equity':'100','positions':{}}});repo.close()
     monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setattr('sys.argv',['session_app.py','--db',str(path)])
     app=AppTest.from_file(APP,default_timeout=30).run()
-    assert [m.label for m in app.metric]==['시세','종목','뉴스','AI 분석','모의 총자산','매수 가능 금액']
+    assert [m.label for m in app.metric]==['시세','종목','모의 총자산','매수 가능 금액','뉴스','AI 분석']
     assert app.sidebar.radio(key='dashboard_page').options==list(PAGES)
     assert app.button(key='trading-start').disabled
     app.checkbox[0].check().run()
@@ -138,9 +138,10 @@ def test_market_fragment_refreshes_stored_values_and_toggle_disables_timer(tmp_p
     monkeypatch.setattr(st, 'fragment', fragment)
     try:
         app = AppTest.from_file(APP, default_timeout=30).run()
-        assert intervals[-1] == 5
+        assert intervals[-2:] == [5, 60]
         app.radio(key='dashboard_page').set_value('시장·종목').run()
         assert not app.exception and intervals[-1] == 10
+        app.radio(key='market_detail').set_value('감시·집중 종목').run()
         assert any(m.label == '유효 운영 종목' and m.value == '20 / 50' for m in app.metric)
         writer.set_control('watchlist_dashboard_v1', {'status': 'VALID', 'operating_count': 19,
                                                    'updated_at': datetime.now(timezone.utc).isoformat()})
