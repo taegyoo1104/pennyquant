@@ -94,7 +94,21 @@ def render_warmup_details(warmup):
             st.caption('검사가 끝나면 누락 결과가 표시됩니다.')
 
 
-def render_operations(data, view, path):
+def render_operation_cards(data, view, *, news_only=False, live_only=False):
+    import streamlit as st
+    cards = operation_cards(data, view)
+    if news_only:
+        cards = cards[2:]
+    elif live_only:
+        cards = cards[:2]
+    for column, card in zip(st.columns(len(cards)), cards):
+        with column:
+            with st.container(border=True):
+                st.metric(card['label'], card['value'], help=card.get('help'))
+                st.caption((':orange['+card['detail']+']') if card['warning'] else card['detail'])
+
+
+def render_operations(data, view, path, *, panel=None):
     import streamlit as st
     from contextlib import closing
     from ..database.repository import Repository
@@ -103,6 +117,9 @@ def render_operations(data, view, path):
     from .overview import link
     from .session_app import _table
 
+    if panel == 'news':
+        render_operation_cards(data, view, news_only=True)
+        return
     now = datetime.now(timezone.utc)
     st.subheader('프로그램 상태')
     st.caption('모의매매 · '+market_hours_label(now))
@@ -120,11 +137,7 @@ def render_operations(data, view, path):
         controls[0].button('매매 시작', disabled=True, key='offline-start')
         controls[1].button('전체 매도', disabled=True, key='offline-stop')
 
-    for column, card in zip(st.columns(4), operation_cards(data,view,now)):
-        with column:
-            with st.container(border=True):
-                st.metric(card['label'],card['value'],help=card.get('help'))
-                st.caption((':orange['+card['detail']+']') if card['warning'] else card['detail'])
+    render_operation_cards(data, view, live_only=panel == 'live')
 
     account = view['account']
     cash = decimal_value(account.get('cash'))

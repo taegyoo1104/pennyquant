@@ -65,6 +65,6 @@ def render_selection(frame):
     with st.expander('후보 점수·뉴스·업종 상세'):
         _table(rows,'집중 후보의 동일 시점 선정 기록이 없습니다.')
     st.caption('미확인 뉴스·업종은 가점 0이며 검증된 중립과 구분합니다. 시장 참고 ETF와 거시 LLM 해설은 종목 가점에 포함하지 않습니다.')
-    if frame:
+    if frame and st.session_state.get('dashboard_raw_data', False):
         with st.expander('선택 근거·뉴스/업종 입력·시장 위험 상세'):
             st.json(frame)

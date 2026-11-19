@@ -2,7 +2,7 @@
 from copy import deepcopy
 from datetime import timedelta
 
-from sessionquant.dashboard.market_quality_panel import quality_observation_fields
+from sessionquant.dashboard.market_quality_panel import quality_observation_fields, coverage_display
 from sessionquant.market.reporting import current_report
 from test_market_data_quality import NOW
 
@@ -48,3 +48,40 @@ def test_invalid_or_future_evaluation_cannot_create_historical_success():
         row=current_report(source,NOW)['items'][0]
         assert row['evaluation_age_seconds'] is None and not row.get('last_evaluation')
         assert quality_observation_fields(row,NOW)['평가 당시 RVOL·참고'] is None
+
+
+def test_dashboard_distinguishes_expired_evaluation_from_verified_zero():
+    live = current_report(report(), NOW)
+    assert coverage_display(live, 'quote') == '1 / 1'
+    assert coverage_display(live, 'rvol') == '0 / 1'  # 계산값과 비교 근거 검증은 다르다.
+    assert coverage_display(live, 'strategy_rvol') == '1 / 1'
+    stale = current_report(report(), NOW+timedelta(seconds=31))
+    original = deepcopy(stale)
+    assert all(coverage_display(stale, key) == '— / 1' for key in stale['required_data_coverage'])
+    assert stale == original and stale['items'][0]['strategy_rvol'] is None
+    assert coverage_display(stale, 'strategy_rvol') == '— / 1'
+    missing = report()
+    missing['items'][0]['bars']['five_coverage'] = 0
+    assert coverage_display(current_report(missing, NOW), 'five_bars') == '0 / 1'
+    assert coverage_display(current_report({}, NOW), 'quote') == '미평가'
+
+
+def test_partial_expiry_retains_denominator_without_claiming_unknown_success():
+    source = report()
+    old = deepcopy(source['items'][0])
+    old.update(symbol='OLD', observed_at=(NOW-timedelta(seconds=31)).isoformat())
+    source['items'].append(old)
+    current = current_report(source, NOW)
+    assert coverage_display(current, 'quote') == '1 / 2'
+    assert coverage_display(current, 'strategy_rvol') == '1 / 2'
+    assert current['items'][1]['strategy_rvol'] is None
+
+
+def test_schedule_waiting_text_does_not_claim_data_collection_is_incomplete():
+    from datetime import datetime, timezone
+    from sessionquant.dashboard.labels import market_hours_label
+    before = datetime(2026, 11, 18, 15, 41, tzinfo=timezone.utc)
+    label = market_hours_label(before)
+    assert '00:45 KST' in label and '매수 시작 대기' in label
+    assert '자료 수집' not in label
+    assert '매수 조건 확인 시간' in market_hours_label(before+timedelta(minutes=5))

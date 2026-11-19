@@ -59,7 +59,29 @@ NEWS_SECTIONS = {
 }
 
 
-def read_plan(page, *, news_section=None):
+# 펼쳐 놓지 않은 화면의 큰 상태·이력을 자동 갱신 때 함께 읽지 않는다.
+MARKET_SECTIONS = {
+    '시세·품질': (('market_quality',), {}),
+    '거래량 비교': (('watchlist_rvol', 'history_backfill'), {}),
+    '감시·집중 종목': (('watchlist_state',), {'candidates': 300}),
+    '매수 판단': (('portfolio_selection',), {}),
+    '시장 참고': (('market_reference',), {'market_regimes': 1, 'quote_snapshots': 300, 'economic_events': 200}),
+    '처리 속도': (('market_performance', 'market_quality'), {}),
+    '분석 이력': ((), {'candidates': 300}),
+}
+
+
+def read_plan(page, *, news_section=None, panel=None):
+    if panel is not None:
+        if page == '대시보드' and panel == 'live':
+            return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup'), {
+                'executions': 1, 'quote_snapshots': 300}
+        if page == '대시보드' and panel == 'news':
+            return ('context', 'engine_state', 'news_status'), {'news_ingestions': 300}
+        if page == '시장·종목' and panel in MARKET_SECTIONS:
+            controls, tables = MARKET_SECTIONS[panel]
+            return ('context', *controls), tables
+        raise ValueError('지원하지 않는 대시보드 구역입니다.')
     if page is None:
         tables = {}
         for plan in PAGE_TABLES.values():
