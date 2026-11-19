@@ -143,7 +143,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
     os.environ["SQ_ENVIRONMENT"] = config.environment
     universe = UniverseStore(config.universe_path)
     now = datetime.now(timezone.utc)
-    if not universe.members(now):
+    if config.universe_source == 'sp500' and not universe.members(now):
         if config.source == "file":
             raise ValueError("유효한 S&P 500 구성 이력이 없습니다. universe-refresh 또는 출처가 있는 이력을 준비하세요.")
         await universe.refresh_public()
@@ -367,7 +367,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     from .strategy_explanation import snapshot
                     explanation_task=asyncio.create_task(explainer.refresh(snapshot(engine,news,current),current))
                     next_explanation=monotonic+10
-                if monotonic >= next_universe:
+                if config.universe_source == 'sp500' and monotonic >= next_universe:
                     # 갱신은 별도 작업으로 돌려 청산 시계를 막지 않는다.
                     async def refresh_universe():
                         try:

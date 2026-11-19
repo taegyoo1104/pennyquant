@@ -173,6 +173,12 @@ def render_operations(data, view, path, *, panel=None):
     from .home_benchmarks import render_benchmarks
     render_benchmarks(data.market_reference,data.context,now=now)
     st.markdown('<div class="sq-section"><h2>집중 감시</h2><p>가격과 전략 단계를 한눈에</p></div>', unsafe_allow_html=True)
+    if (data.watchlist_state or {}).get('universe_source') == 'toss_us':
+        roster = (data.watchlist_state or {}).get('snapshot') or {}
+        if roster.get('selection_policy') == 'toss_us_daily_fixed_v1':
+            st.caption('기본 후보 '+str(len(roster.get('items', [])))+'개 · 미국 거래일 '+str(roster.get('session_date'))+' 동안 유지')
+        else:
+            st.caption('오늘 감시할 미국 주식 후보를 준비하고 있어요.')
     schedule = (data.watchlist_state or {}).get('focus_schedule') or {}
     if schedule.get('next_at'):
         st.caption('30분마다 목록 확인 · 다음 '+timestamp(schedule['next_at']))

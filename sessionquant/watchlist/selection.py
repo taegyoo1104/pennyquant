@@ -115,8 +115,10 @@ class WatchlistManager:
         self.provider = provider or FileMarketCapProvider(config.market_cap_input)
         self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days,
                                           missing_cap_policy=config.watchlist_missing_cap_policy)
+        from .us_universe import POLICY
         self.store = WatchlistStore(repo, universe, max_age_days=config.watchlist_refresh_days,
-                                   missing_cap_policy=config.watchlist_missing_cap_policy)
+                                   missing_cap_policy=config.watchlist_missing_cap_policy,
+                                   required_selection_policy=POLICY if config.universe_source=='toss_us' else None)
         self.state = repo.get_control(STATE, {})
         self.state.setdefault('prices', {})
         self.state.setdefault('rankings', {})
@@ -132,6 +134,13 @@ class WatchlistManager:
         now = utc(now or self.clock())
         attempt = self.repo.get_control(ATTEMPT, {})
         snapshot = self.store.at(now)
+        if self.config.universe_source == 'toss_us':
+            from .us_universe import selection_session, POLICY
+            bounds = selection_session(now)
+            status = self.store.status(now, allow_synthetic=self.allow_synthetic)
+            if (bounds and status['status']=='VALID' and snapshot.get('selection_policy')==POLICY
+                    and snapshot.get('session_open_at')==bounds[0].isoformat()):
+                return status  # Even a manual force refresh cannot churn today's selected candidates.
         size_changed = bool(snapshot and snapshot.get('size_limit',len(snapshot.get('items',[]))) != self.config.watchlist_size)
         policy_changed = bool(snapshot and snapshot.get('missing_cap_policy','block') != self.config.watchlist_missing_cap_policy
                               and attempt.get('requested_missing_cap_policy') != self.config.watchlist_missing_cap_policy)
@@ -175,6 +184,8 @@ class WatchlistManager:
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         members = self.universe.members(now)
         if not status['snapshot'] or status['status'] == 'SYNTHETIC_BLOCKED':
+            return []
+        if self.config.universe_source == 'toss_us' and status['status'] != 'VALID':
             return []
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         return [row['ticker'] for row in status['items'] if row['ticker'] in members and row['ticker'] not in REFERENCE_SYMBOLS][:self.config.watchlist_size]
@@ -398,6 +409,7 @@ class WatchlistManager:
             self.state['recorded_watchlist_id'] = watchlist_id
         self.repo.set_control(STATE, self.state)
         self.repo.set_control(VIEW, {**status, 'updated_at': now.isoformat(), 'items': rows,
+            'universe_source': self.config.universe_source,
             'watchlist_limit': self.config.watchlist_size, 'focus_limit': self.config.focus_size,
             'focus_schedule':self.state.get('focus_schedule',{}),
             'history_selection':history, 'operating_count':len(operating),

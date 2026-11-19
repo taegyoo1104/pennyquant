@@ -1,4 +1,4 @@
-"""관측 시각을 보존하는 S&P 500 구성 종목 목록.
+"""관측 시각을 보존하는 종목 목록과 기존 S&P 500 공개 목록 수집.
 
 현재 목록을 내려받아 과거에 소급하지 않는다. 과거 구성 이력은 출처와
 당시 확인 가능 시각을 포함한 별도 자료를 가져와야 한다.
@@ -39,6 +39,8 @@ class UniverseStore:
         self.path = Path(path) if path else None
         self.max_age_days = max_age_days
         self.snapshots: list[dict] = []
+        self._members_id = None
+        self._members_cache = {}
         if self.path and self.path.exists():
             payload = json.loads(self.path.read_text(encoding="utf-8"))
             if payload.get("schema_version") != 1:
@@ -59,6 +61,7 @@ class UniverseStore:
             validated.append(canonical)
         self.snapshots = sorted({s["id"]: s for s in self.snapshots + validated}.values(),
                                 key=lambda x: (x["effective_at"], x["known_at"]))
+        self._members_id = None
         if persist:
             self._save()
 
@@ -121,7 +124,12 @@ class UniverseStore:
 
     def members(self, at: datetime, *, allow_stale: bool = False) -> dict[str, Constituent]:
         snapshot = self.snapshot(at, allow_stale=allow_stale)
-        return {x["symbol"]: Constituent(**x) for x in snapshot["members"]} if snapshot else {}
+        if not snapshot:
+            return {}
+        if snapshot['id'] != self._members_id:
+            self._members_cache = {x['symbol']: Constituent(**x) for x in snapshot['members']}
+            self._members_id = snapshot['id']
+        return dict(self._members_cache)
 
     def contains(self, symbol: str, at: datetime) -> bool:
         return symbol in self.members(at)

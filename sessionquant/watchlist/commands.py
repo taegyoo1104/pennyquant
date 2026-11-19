@@ -35,10 +35,14 @@ async def command(config, action, *, output=None):
                     try:
                         async def read(stream,symbol):
                             budget.take()
+                            if stream=='stocks_all':return await client.stocks_all(symbol)
                             return await client.sectors() if stream=='sectors' else await client.sector_stocks(symbol)
                         # 계층 1회 + 대분류별 1회. 호출 제한·실패 시 재전송하지 않고 종료한다.
                         import asyncio
-                        await asyncio.wait_for(manager.provider.advance(read,limit=32),timeout=90)
+                        async def collect():
+                            for _ in range(32):
+                                if await manager.provider.advance(read,limit=1):break
+                        await asyncio.wait_for(collect(),timeout=90)
                     finally:retry_budget.reset(token)
                 result = await manager.refresh(datetime.now(timezone.utc), force=True)
             finally:await client.aclose()
