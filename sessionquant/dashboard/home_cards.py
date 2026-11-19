@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from ..models import utc
 from .watchlist_panel import current_status, focus_is_monitored
 from .instrument_names import korean_name
+from .performance_display import two_decimals
 
 
 STAGES = {
@@ -28,6 +29,30 @@ def _positive(value):
     except (InvalidOperation, TypeError, ValueError):return None
 
 
+def _day_change(row, price, at, now):
+    """Use the displayed price, never a percent from a different observation."""
+    unknown = {'change':'—', 'change_tone':'flat', 'change_help':'전일 기준가 미확인'}
+    base = row.get('day_price_base')
+    if not isinstance(base, dict) or base.get('source') != 'toss:MARKET_TRADING_AMOUNT:1d':
+        return unknown
+    try:
+        previous = _positive(base.get('previous_close'))
+        stamp, known = utc(base.get('as_of_at')), utc(base.get('known_at'))
+        ny = ZoneInfo('America/New_York')
+        # A prior US day's base cannot be reused with today's websocket quote.
+        if (previous is None or not stamp <= known <= now
+                or not stamp.astimezone(ny).date() == at.astimezone(ny).date() == now.astimezone(ny).date()):
+            return unknown
+        change = two_decimals((price-previous)/previous*100)
+        if change == '—':return unknown
+        shown = Decimal(change)
+        return {'change':('+' if shown > 0 else '')+change+'%',
+                'change_tone':'gain' if shown > 0 else 'loss' if shown < 0 else 'flat',
+                'change_help':'표시 가격의 전일 대비 · 공급자 전일 기준가 사용'}
+    except (ValueError, TypeError, AttributeError, ArithmeticError):
+        return unknown
+
+
 def _observed_price(row, quote, published_at, now, max_age):
     choices=[]
     try:
@@ -41,13 +66,14 @@ def _observed_price(row, quote, published_at, now, max_age):
         if quote.get('symbol')==row['ticker'] and bid is not None and ask is not None and bid<=ask and at<=received<=now:
             choices.append((at,(bid+ask)/2,'호가 중간값',30))
     except (ValueError,TypeError,KeyError,AttributeError):pass
-    if not choices:return {'price':'—','price_kind':'관측가','price_status':'수신 대기','price_fresh':False,'time_label':'시세 미확인'}
+    if not choices:return {'price':'—','price_kind':'관측가','price_status':'수신 대기','price_fresh':False,
+                           'time_label':'시세 미확인','change':'—','change_tone':'flat','change_help':'시세 미확인'}
     at,price,kind,limit=max(choices,key=lambda value:value[0])
     age=(now-at).total_seconds()
     fresh=0<=age<=limit
     stamp=at.astimezone(ZoneInfo('Asia/Seoul')).strftime('%m.%d %H:%M:%S')
     return {'price':f'${price:,.2f}','price_kind':kind,'price_status':'최근 수신' if fresh else '이전 가격',
-            'price_fresh':fresh,'time_label':stamp+' KST'}
+            'price_fresh':fresh,'time_label':stamp+' KST',**_day_change(row,price,at,now)}
 
 
 def focus_cards(state, assessments=None, *, quotes=None, now=None):
@@ -121,6 +147,11 @@ CARD_STYLE='''<style>
 .sq-focus-badge{font-size:.73rem;border-radius:20px;padding:4px 9px;background:var(--sq-soft,#1b2b3d);color:var(--sq-muted,#a7b8ca);white-space:nowrap}
 .sq-focus-badge.fresh{color:var(--sq-accent,#55dec5)}
 .sq-focus-price{font-size:1.9rem;font-weight:720;letter-spacing:-.045em;line-height:1.15;font-variant-numeric:tabular-nums}
+.sq-focus-price-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sq-focus-price-line.gain{color:#f87171}.sq-focus-price-line.loss{color:#60a5fa}
+.sq-focus-change{font-size:.85rem;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sq-focus-price-line.flat .sq-focus-change{color:var(--sq-muted,#a7b8ca)}
+.sq-focus-change small{display:block;font-size:.65rem;font-weight:400;color:var(--sq-muted,#a7b8ca)}
 .sq-focus-kind,.sq-focus-time{font-size:.73rem;color:var(--sq-muted,#a7b8ca);margin-top:5px}
 .sq-focus-time{margin-top:2px}
 .sq-focus-steps{display:flex;gap:7px;list-style:none;margin:20px 0 13px;padding:0}
@@ -132,6 +163,7 @@ CARD_STYLE='''<style>
 .sq-focus-card p.sq-focus-explanation{font-size:.82rem;line-height:1.55;color:var(--sq-muted,#a7b8ca);margin:0;min-height:2.4em;word-break:keep-all;overflow-wrap:anywhere}
 .sq-focus-empty{border:1px dashed var(--sq-card-border,#29374a);border-radius:18px;padding:26px;color:var(--sq-muted,#a7b8ca)}
 @media(max-width:540px){.sq-focus-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sq-focus-card{padding:14px}.sq-focus-price{font-size:1.5rem}.sq-focus-symbol{font-size:.95rem}.sq-focus-badge{padding:3px 6px;font-size:.65rem}.sq-focus-steps{gap:4px}.sq-focus-time{font-size:.65rem}}
+@media(max-width:540px){.sq-focus-price-line{gap:6px}.sq-focus-price-line .sq-focus-price{font-size:1.25rem}.sq-focus-change{font-size:.75rem}}
 @media(max-width:359px){.sq-focus-grid{grid-template-columns:1fr}}
 </style>'''
 
@@ -143,9 +175,11 @@ def focus_cards_html(cards):
     for card in cards[:10]:
         e=lambda key:escape(str(card.get(key,'')),quote=True)
         badge=' fresh' if card.get('price_fresh') is True else ''
+        tone=card.get('change_tone') if card.get('change_tone') in {'gain','loss','flat'} else 'flat'
         steps=''.join('<li class="'+(s['state'] if s.get('state') in {'done','wait','pending','warn'} else 'pending')+'">'+escape(str(s.get('label','')),quote=True)+'</li>' for s in card.get('steps',[]))
         name='<div class="sq-focus-name">'+e('name')+'</div>' if card.get('name') else ''
-        elements.append('<article class="sq-focus-card"><div class="sq-focus-top"><div class="sq-focus-identity"><div class="sq-focus-symbol">'+e('symbol')+'</div>'+name+'</div><span class="sq-focus-badge'+badge+'">'+e('price_status')+'</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div><div class="sq-focus-time">'+e('time_label')+'</div><ol class="sq-focus-steps" aria-label="현재 전략 단계">'+steps+'</ol><p class="sq-focus-title">'+e('title')+'</p><p class="sq-focus-explanation">'+e('explanation')+'</p></article>')
+        price='<div class="sq-focus-price-line '+tone+'"><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-change" title="'+e('change_help')+'">'+e('change')+'<small>전일 대비</small></div></div>'
+        elements.append('<article class="sq-focus-card"><div class="sq-focus-top"><div class="sq-focus-identity"><div class="sq-focus-symbol">'+e('symbol')+'</div>'+name+'</div><span class="sq-focus-badge'+badge+'">'+e('price_status')+'</span></div>'+price+'<div class="sq-focus-kind">'+e('price_kind')+' · USD</div><div class="sq-focus-time">'+e('time_label')+'</div><ol class="sq-focus-steps" aria-label="현재 전략 단계">'+steps+'</ol><p class="sq-focus-title">'+e('title')+'</p><p class="sq-focus-explanation">'+e('explanation')+'</p></article>')
     return CARD_STYLE+'<div class="sq-focus-grid">'+''.join(elements)+'</div>'
 
 
