@@ -190,7 +190,8 @@ def render_operations(data, view, path, *, panel=None):
     fills=data.tables.get('executions',[])
     if fills:
         latest=max(fills,key=lambda r:str(r.get('timestamp') or r.get('filled_at') or ''))
-        st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
+        side={'buy':'매수', 'sell':'매도'}.get(str(latest.get('side')).lower(), '방향 미확인')
+        st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' '+side+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
         if str(latest.get('side')).lower()=='sell':
             from .trade_reasons import execution_reasons
             explained=execution_reasons([latest],orders=data.tables.get('orders',[]),state=data.state)[0]
