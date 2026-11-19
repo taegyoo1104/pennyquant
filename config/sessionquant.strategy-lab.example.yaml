@@ -16,10 +16,11 @@ retention:
 news_enabled: true
 strategy: pullback_simple
 watchlist_enabled: true
-watchlist_size: 20
+watchlist_size: 50
 watchlist_missing_cap_policy: exclude
 watchlist_candles_per_cycle: 0
-focus_size: 5
+focus_size: 10
+focus_selection: turnover
 focus_min_hold_seconds: 300
 focus_refresh_grace_seconds: 120
 market_cap_provider: auto
@@ -63,3 +64,9 @@ llm:
   monthly_soft_budget_usd: '2'
   monthly_hard_budget_usd: '3'
 market_filter_enabled: false
+market_reference:
+  enabled: false
+strategy_explanation:
+  enabled: true
+  min_interval_seconds: 600
+  max_attempts_per_day: 20

@@ -61,6 +61,67 @@ def test_lab_profile_is_separate_paper_configuration():
     assert c.strategy=='pullback_simple' and not c.market_filter_enabled
     assert c.environment=='PAPER_LOCAL' and c.actual_account_monitor_enabled is False
     assert c.db_path.name=='sessionquant-strategy-lab-v1.db'
+    assert (c.watchlist_size,c.focus_size,c.focus_selection)==(50,10,'turnover')
+    assert c.strategy_explanation['enabled'] is True
+
+
+async def test_turnover_focus_uses_fifty_candidates_without_spy_or_history(tmp_path):
+    from watchlist_fixtures import context,NOW
+    from sessionquant.watchlist.selection import WatchlistManager,VIEW
+    from sessionquant.dashboard.focus_summary import focus_rows
+    repo,universe,config,provider,_=context(tmp_path,count=60,size=50)
+    config=replace(config,strategy='pullback_simple',focus_size=10,focus_selection='turnover')
+    manager=WatchlistManager(repo,universe,config,provider=provider,clock=lambda:NOW,allow_synthetic=True)
+    try:
+        await manager.refresh(NOW)
+        symbols=manager.light_symbols(NOW)
+        assert len(symbols)==50
+        manager.observe_prices([{'symbol':s,'lastPrice':'101','timestamp':NOW.isoformat(),'currency':'USD'} for s in symbols],NOW)
+        manager.observe_rankings({'rankedAt':NOW.isoformat(),'rankings':[{'symbol':s,'currency':'USD',
+            'tradingAmount':str((1000-int(s[1:]))*1000000),'tradingVolume':'100000'} for s in symbols]},NOW)
+        assert not manager.state['prices'].get('SPY')
+        focus=manager.focus(NOW)
+        assert focus==sorted(symbols)[:10]
+        manager.publish(NOW)
+        state=repo.get_control(VIEW)
+        assert state['operating_count']==50 and state['focus_count']==10
+        display=focus_rows(state,NOW)
+        assert len(display)==10 and all(r['최근 관측가(USD)']!='—' for r in display)
+        assert all(r['상태']=='확인' for r in display)
+        assert all('현재 집중 여부 미확인' in r['상태'] for r in focus_rows(state,NOW+timedelta(minutes=3)))
+    finally:repo.close()
+
+
+async def test_simple_source_keeps_held_priority_and_stops_history_at_session_open(tmp_path):
+    from types import SimpleNamespace
+    from watchlist_fixtures import context,NOW
+    from test_watchlist_source import Market
+    from sessionquant.market.source import TossSessionSource
+    from sessionquant.watchlist.selection import WatchlistManager
+    from sessionquant.market.bars import session_bounds
+    repo,universe,config,provider,_=context(tmp_path,size=50)
+    config=replace(config,strategy='pullback_simple',focus_size=10,focus_selection='turnover')
+    manager=WatchlistManager(repo,universe,config,provider=provider,clock=lambda:NOW,allow_synthetic=True)
+    try:
+        await manager.refresh(NOW)
+        opened=session_bounds(NOW)[0]
+        manager.state['history_progress']={'T001':{'started':True,'cursor':(opened-timedelta(minutes=1)).isoformat(),'done':False}}
+        class Client(Market):
+            async def candles(self,symbol,**kwargs):
+                assert 'before' not in kwargs  # Must not page into earlier sessions.
+                rows,_=await super().candles(symbol,**kwargs)
+                old=replace(rows[0],timestamp=opened-timedelta(minutes=1))
+                return [old,*rows],None
+        client=Client(lambda:NOW)
+        source=TossSessionSource(client,clock=lambda:NOW,watchlist=manager,
+            include_benchmarks=False,current_session_only=True,watchlist_candles_per_cycle=0)
+        batch=await source.poll([],priority_symbols=['T001'])
+        assert batch.quotes[0].symbol=='T001'
+        assert all(q.symbol not in {'SPY','QQQ'} for q in batch.quotes)
+        assert all(b.timestamp>opened for b in batch.bars)
+        assert manager.state['history_progress']['T001']['status']=='SESSION_WINDOW_REACHED'
+        assert manager.state['last_cycle_calls']<=24
+    finally:repo.close()
 
 
 def test_scenarios_execute_real_paper_path_and_report_fixture_truthfully(tmp_path):

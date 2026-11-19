@@ -32,7 +32,12 @@ class TossSessionSource:
     def __init__(self, client: TossMarketClient | None = None, *, candidates_per_cycle: int = 2, clock=None,
                  watchlist=None, max_api_calls=24, light_refresh_seconds=30, ranking_refresh_seconds=60,
                  max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None,
-                 history_store=None, watchlist_candles_per_cycle=4, warmup=None):
+                 history_store=None, watchlist_candles_per_cycle=4, warmup=None,
+                 include_benchmarks=True, current_session_only=False):
+        if type(include_benchmarks) is not bool or type(current_session_only) is not bool:
+            raise ValueError('시장 참조·당일 수집 설정은 불리언이어야 합니다.')
+        self.benchmark_symbols=('SPY','QQQ') if include_benchmarks else ()
+        self.current_session_only=current_session_only
         if type(candidates_per_cycle) is not int or not 1 <= candidates_per_cycle <= 10:
             raise ValueError("한 주기에 상세 수집할 종목 수는 1~10개입니다")
         self.client = client or TossMarketClient()
@@ -75,7 +80,7 @@ class TossSessionSource:
         chosen = [candidates[(self.cursor + i) % len(candidates)] for i in range(count)] if candidates else []
         if candidates:
             self.cursor = (self.cursor + count) % len(candidates)
-        selected = list(dict.fromkeys(["SPY", "QQQ", *priority_symbols, *chosen]))
+        selected = list(dict.fromkeys([*self.benchmark_symbols, *priority_symbols, *chosen]))
         batch, metadata = MarketBatch(), {}
         try:
             response = await self.client.stocks(selected)
@@ -148,7 +153,7 @@ class TossSessionSource:
         state = manager.state
         budget = ReadCallBudget(self.max_api_calls)
         token = retry_budget.set(budget)
-        priority = list(dict.fromkeys([*priority_symbols, 'SPY', 'QQQ']))
+        priority = list(dict.fromkeys([*priority_symbols, *self.benchmark_symbols]))
         measurements = []
         updated_history = set()
         latest_quotes = {}
@@ -271,6 +276,9 @@ class TossSessionSource:
 
         def accept(symbol,bars, *, cached=False):
             nonlocal optional_deadline
+            if self.current_session_only:
+                bounds=session_bounds(utc(self.clock()))
+                bars=[bar for bar in bars if bounds and bounds[0]<bar.timestamp<=bounds[1]]
             if self.history_store is not None and bars and not cached:
                 began = monotonic()
                 self.history_store.ingest(bars)
@@ -394,7 +402,7 @@ class TossSessionSource:
             current = utc(self.clock())
             if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
                 before = budget.used
-                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,'SPY','QQQ'])),optional=True,reserved_seconds=quote_seconds)
+                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,*self.benchmark_symbols])),optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_light_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:
@@ -432,7 +440,7 @@ class TossSessionSource:
                 # neither timestamps nor the engine's 30-second gate are changed.
                 current = utc(self.clock())
                 refresh_age = 30-min(15,len(chosen)+3)
-                references = [s for s in ('SPY','QQQ') if s not in latest_quotes or
+                references = [s for s in self.benchmark_symbols if s not in latest_quotes or
                     any((current-t).total_seconds() >= refresh_age for t in
                         (latest_quotes[s].timestamp,latest_quotes[s].received_at))]
                 for symbol in references:
@@ -492,13 +500,15 @@ class TossSessionSource:
             order = sorted([s for s in dict.fromkeys(history_targets) if history.get(s,{}).get('cursor') and not history[s].get('done')],
                            key=lambda s:(history[s].get('last_attempt_at',''),s))
             bounds = session_bounds(utc(self.clock()))
+            if self.current_session_only and not bounds:
+                order=[]
             if bounds:
                 # SPY/QQQ regime/VWAP needs this session, not the stock RVOL's
                 # twenty prior sessions. Stop once paging has crossed the open;
                 # this records the search bound, NOT verified minute coverage.
                 # candles() rearms a current-session gap after a late restart.
                 for symbol in order[:]:
-                    if symbol in {'SPY','QQQ'} and utc(history[symbol]['cursor']) <= bounds[0]:
+                    if (self.current_session_only or symbol in {'SPY','QQQ'}) and utc(history[symbol]['cursor']) <= bounds[0]:
                         history[symbol].update(done=True,status='SESSION_WINDOW_REACHED')
                         order.remove(symbol)
             for symbol in order[:self.history_pages_per_cycle]:

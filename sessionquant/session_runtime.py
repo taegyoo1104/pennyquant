@@ -149,6 +149,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
         await universe.refresh_public()
     stack, repo = _open(config.db_path, config.database_backend)
     market = news = market_task = news_task = account_task = dashboard = None
+    explainer = explanation_task = explanation_owner = None
     notifier = DesktopNotifier(enabled=desktop_notifications)
     engine = None
     watchlist = None
@@ -217,7 +218,9 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
                     history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference,
-                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup)
+                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup,
+                    include_benchmarks=config.market_filter_enabled or config.focus_selection!='turnover' or reference_config['enabled'],
+                    current_session_only=config.strategy=='pullback_simple')
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:
@@ -226,9 +229,17 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     "--server.address", "127.0.0.1", "--server.port", str(port), "--server.headless", "true",
                     "--", "--db", str(config.db_path)], env=dashboard_environment(database=True))
                 print(f"SessionQuant 모의매매 대시보드: http://127.0.0.1:{port}", flush=True)
+            if config.strategy_explanation.get('enabled'):
+                from .strategy_explanation import StrategyExplainer
+                if news is None:
+                    from .macro.analysis import BudgetedAnalyzer
+                    from .macro.models import LLMSettings
+                    explanation_owner=BudgetedAnalyzer(repo,LLMSettings.from_dict(config.llm))
+                explainer=StrategyExplainer(repo,news.analyzer if news else explanation_owner,config.strategy_explanation)
             print("PAPER_LOCAL 실행 중입니다. 실제 주문은 비활성화되어 있습니다.", flush=True)
             next_account=0.
             cycles, next_market, next_news, next_tick, next_universe = 0, 0., 0., 0., time.monotonic() + 86400
+            next_explanation=0.
             while max_cycles is None or cycles < max_cycles:
                 current, monotonic = datetime.now(timezone.utc), time.monotonic()
                 if market and market_task is None and monotonic >= next_market:
@@ -307,6 +318,15 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     for alert in engine.broker.alerts:
                         notifier(alert)
                     next_tick = monotonic + 1
+                if explanation_task and explanation_task.done():
+                    try:explanation_task.result()
+                    except Exception as exc:
+                        repo.log('WARNING','AI 설명 실패: 규칙 기반 매매는 계속합니다.',error_type=type(exc).__name__)
+                    explanation_task=None
+                if explainer and explanation_task is None and monotonic>=next_explanation:
+                    from .strategy_explanation import snapshot
+                    explanation_task=asyncio.create_task(explainer.refresh(snapshot(engine,news,current),current))
+                    next_explanation=monotonic+10
                 if monotonic >= next_universe:
                     # 갱신은 별도 작업으로 돌려 청산 시계를 막지 않는다.
                     async def refresh_universe():
@@ -321,7 +341,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     next_universe = monotonic + 86400
                 await asyncio.sleep(.1)
         finally:
-            for task in (market_task, news_task, account_task):
+            for task in (market_task, news_task, account_task, explanation_task):
                 if task and not task.done():
                     task.cancel()
                 if task:
@@ -330,6 +350,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 await market.aclose()
             if news:
                 await news.aclose()
+            if explanation_owner:
+                await explanation_owner.aclose()
             if dashboard:
                 dashboard.terminate()
                 try:

@@ -40,9 +40,10 @@ class FairScheduler:
 
 
 class FocusSelector:
-    def __init__(self, size=20, max_age_seconds=120, minimum_hold_seconds=300, refresh_grace_seconds=120):
+    def __init__(self, size=20, max_age_seconds=120, minimum_hold_seconds=300, refresh_grace_seconds=120, method='activity'):
         self.size, self.age, self.hold = size, max_age_seconds, minimum_hold_seconds
         self.refresh_grace = refresh_grace_seconds
+        self.method=method
 
     def choose(self, metrics, previous, now):
         """관찰 점수는 주문 허가가 아니다. RVOL·계좌 적격성을 계산하거나 대체하지 않는다."""
@@ -51,6 +52,10 @@ class FocusSelector:
         eligible.sort(key=lambda r: (-Decimal(r['dollar_volume_usd']), r['ticker']))
         liquidity = {r['ticker']: Decimal(len(eligible)-i)/max(1, len(eligible)) for i, r in enumerate(eligible)}
         for row in eligible:
+            if self.method=='turnover':
+                row['focus_score']=str(liquidity[row['ticker']]*100)
+                row['selection_reason']='후보 내 거래대금 순위 · 당일 분봉 수집·매수 조건은 별도 검사'
+                continue
             relative = max(Decimal('-0.02'), min(Decimal('0.02'), Decimal(row['relative_strength_sample'])))
             volatility = min(Decimal('0.02'), abs(Decimal(row['sample_return'])))
             score = liquidity[row['ticker']]*60+(relative+Decimal('.02'))/Decimal('.04')*30+volatility/Decimal('.02')*10
@@ -116,7 +121,7 @@ class WatchlistManager:
         self.state.setdefault('focus', [])
         self.scheduler = FairScheduler(self.state)
         self.focus_selector = FocusSelector(config.focus_size, config.watchlist_data_max_age_seconds,
-                                             config.focus_min_hold_seconds, config.focus_refresh_grace_seconds)
+                                             config.focus_min_hold_seconds, config.focus_refresh_grace_seconds, config.focus_selection)
 
     def read_scope(self):
         return self.store.read_scope()
@@ -240,6 +245,17 @@ class WatchlistManager:
         current = self.state['prices'].get(symbol, [])
         spy = self.state['prices'].get('SPY', [])
         ranking = self.state['rankings'].get(symbol)
+        if self.config.focus_selection=='turnover':
+            if not current or not ranking:
+                return {**empty,'missing_inputs':['price_or_turnover_missing'],'reason':'현재가·거래대금 수신 대기'}
+            points=[current[0],ranking]
+            age=self.config.watchlist_data_max_age_seconds
+            if any(not 0<=(now-utc(r['as_of_at'])).total_seconds()<=age or utc(r['known_at'])>now for r in points):
+                return {**empty,'missing_inputs':['observation_stale_or_future'],'reason':'현재가·거래대금 갱신 대기'}
+            return {**empty,**ranking,'data_status':'VERIFIED','reason':'최신 현재가·거래대금 확인',
+                'known_at':current[0]['known_at'],'as_of_at':current[0]['as_of_at'],
+                'metric_basis':'turnover_only','sample_return':None,'relative_strength_sample':None,
+                'valid_until':min(utc(r['as_of_at'])+timedelta(seconds=age) for r in points).isoformat()}
         if len(current) < 2 or len(spy) < 2 or not ranking:
             missing, labels = [], []
             for values, prefix, label in ((current,'symbol','종목'),(spy,'spy','시장(SPY)')):
@@ -350,6 +366,7 @@ class WatchlistManager:
                 'focus_refresh_pending':bool(focused.get(symbol,{}).get('refresh_wait_until')),
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],
                 'last_price_at': self.state['prices'].get(symbol, [{}])[0].get('as_of_at'),
+                'last_price': self.state['prices'].get(symbol, [{}])[0].get('price'),
                 'entry_blockers': self.entry_blockers(symbol, now)})
         previous = self.state.get('focus_recorded_at')
         identity = sorted(focused)

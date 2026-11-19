@@ -30,6 +30,7 @@ class SessionConfig:
     watchlist_enabled: bool = True
     watchlist_size: int = 50
     focus_size: int = 20
+    focus_selection: str = 'activity'
     selection_method: str = 'market_cap_top'
     market_cap_input: Path = Path('data/market-cap-input.json')
     market_cap_provider: str = 'auto'
@@ -58,9 +59,16 @@ class SessionConfig:
     llm: dict = field(default_factory=dict)
     llm_debug_audit: dict = field(default_factory=dict)
     macro_context_llm: dict = field(default_factory=dict)
+    strategy_explanation: dict = field(default_factory=dict)
     candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        from .strategy_explanation import ExplanationSettings
+        if not isinstance(self.strategy_explanation,dict):
+            raise ValueError('AI 설명 설정은 객체여야 합니다.')
+        ExplanationSettings(**self.strategy_explanation)
+        if self.focus_selection not in {'activity','turnover'}:
+            raise ValueError('집중 선정 방식은 activity 또는 turnover입니다.')
         from .database.retention import RetentionPolicy
         if not isinstance(self.retention, dict):
             raise ValueError('자료 보관 설정은 객체여야 합니다.')

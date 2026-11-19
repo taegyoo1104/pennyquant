@@ -14,15 +14,16 @@ CONTROLS = {
     'market_reference': ('market_reference_view_v1', '시장 참고 지표'),
     'news_status': ('session_news_status', '뉴스 수집 상태'),
     'warmup': ('startup_data_warmup_v1', '자료 준비'),
+    'strategy_explanation': ('strategy_explanation_v1', 'AI 전략 설명'),
 }
 
 PAGE_CONTROLS = {
-    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status'),
+    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation'),
     '시장·종목': ('watchlist_state', 'market_quality', 'market_performance', 'watchlist_rvol',
                  'history_backfill', 'portfolio_selection', 'market_reference'),
     '전략·백테스트': (),
     '매매 내역': ('actual_account', 'account_status'),
-    '뉴스·LLM': ('actual_account', 'account_status', 'watchlist_state', 'news_status'),
+    '뉴스·LLM': ('actual_account', 'account_status', 'watchlist_state', 'news_status', 'strategy_explanation'),
     '시스템·설정': ('warmup', 'market_reference', 'news_status'),
 }
 
@@ -77,7 +78,7 @@ def read_plan(page, *, news_section=None, panel=None):
             return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup'), {
                 'executions': 1, 'quote_snapshots': 300}
         if page == '대시보드' and panel == 'news':
-            return ('context', 'engine_state', 'news_status'), {'news_ingestions': 300}
+            return ('context', 'engine_state', 'news_status', 'strategy_explanation'), {'news_ingestions': 300}
         if page == '시장·종목' and panel in MARKET_SECTIONS:
             controls, tables = MARKET_SECTIONS[panel]
             return ('context', *controls), tables
