@@ -76,6 +76,7 @@ def parser():
         if name == 'history-backfill':
             history.add_argument('--max-requests',type=int,default=5000)
             history.add_argument('--refresh-complete',action='store_true',help='완료 거래일도 다시 조회해 정정 충돌 확인')
+            history.add_argument('--repair-conflicts',action='store_true',help='종료한 거래일을 두 번 완전히 재조회해 일치할 때만 충돌 복구; 수집기 중지 필요')
             history.add_argument('--allow-partial-watchlist',action='store_true',help='시총 누락만 있는 PARTIAL 후보의 분봉 사전 수집; 매수 허용 아님')
         else:
             history.add_argument('--details',action='store_true',help='저장된 DB에서 날짜별 누락·충돌 분을 검사; API 호출 없음')
@@ -237,6 +238,7 @@ def main(argv=None):
             from .market.history_commands import command
             report = asyncio.run(command(load_session_config(args.config),args.command,
                 max_requests=getattr(args,'max_requests',5000),refresh=getattr(args,'refresh_complete',False),
+                repair_conflicts=getattr(args,'repair_conflicts',False),
                 allow_partial=getattr(args,'allow_partial_watchlist',False),details=getattr(args,'details',False),
                 output=getattr(args,'output',None)))
             print(json.dumps(report,ensure_ascii=False,indent=2))
