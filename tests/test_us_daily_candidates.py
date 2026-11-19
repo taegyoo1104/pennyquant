@@ -245,13 +245,16 @@ async def test_managed_collector_uses_existing_client_and_one_catalog_request_pe
         async def stocks_all(self,market):return await s.read('stocks_all',market)
         async def sectors(self):return await s.read('sectors',None)
         async def sector_stocks(self,sector):return await s.read('sector_stocks',sector)
-        async def prices(self,symbols):return []
+        async def prices(self,symbols):
+            assert symbols, 'Do not request empty prices while the daily catalog is preparing.'
+            return []
         async def rankings(self,**kwargs):return {'rankings':[],'rankedAt':None}
         async def stocks(self,symbols):return []
     source=TossSessionSource(Client(),watchlist=s.manager,clock=lambda:s.clock.now,
                              include_benchmarks=False,current_session_only=True)
     for index in range(3):
-        await source.poll([])
+        batch=await source.poll([])
+        assert not batch.errors
         assert len(s.calls)==index+1
     assert s.calls==[('stocks_all',market) for market in MARKETS]
     assert s.provider.us_catalog.ready(s.clock.now)

@@ -416,9 +416,10 @@ class TossSessionSource:
             state['candidate_quote_reserved_seconds'] = quote_seconds
             pool = manager.light_symbols(utc(self.clock()))
             current = utc(self.clock())
-            if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
+            light_symbols = list(dict.fromkeys([*pool,*self.benchmark_symbols]))
+            if light_symbols and (not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds):
                 before = budget.used
-                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,*self.benchmark_symbols])),optional=True,reserved_seconds=quote_seconds)
+                rows = await call('toss_prices',self.client.prices,light_symbols,optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_light_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:
