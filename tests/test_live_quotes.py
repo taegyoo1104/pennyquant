@@ -45,7 +45,7 @@ def test_stream_batch_passes_heartbeat_watermark_without_forging_receipt(observe
     quote=prepare(observed)
     now=NOW+timedelta(seconds=3)
     feed,clock,delivery=receiver(now)
-    observed.engine.quote_entry_guard=lambda s,t:feed.latest(s,t) is not None
+    observed.engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=observed.engine.market.quotes)
     quote=replace(quote,timestamp=NOW+timedelta(seconds=1),received_at=NOW+timedelta(seconds=1),exchange='UNKNOWN')
     offer(feed,quote)
     observed.engine.tick(now)
@@ -70,7 +70,7 @@ def test_disconnect_cancels_pending_buy_and_rest_cannot_reenter(observed,cancel_
     observed.engine.broker.settings=replace(observed.engine.broker.settings,paper_cancel_latency_seconds=str(cancel_delay))
     quote=prepare(observed);now=NOW+timedelta(seconds=2)
     feed,clock,delivery=receiver(now)
-    observed.engine.quote_entry_guard=lambda s,t:feed.latest(s,t) is not None
+    observed.engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=observed.engine.market.quotes)
     offer(feed,replace(quote,timestamp=now,received_at=now))
     observed.engine.apply_batch(delivery.events(['AAPL'],now),now)
     assert observed.engine.broker.get_open_orders()
@@ -90,7 +90,7 @@ def test_disconnect_cancels_pending_buy_and_rest_cannot_reenter(observed,cancel_
 def test_risk_rest_quote_exits_held_symbol_when_feed_disconnected(observed):
     quote=prepare(observed);now=NOW+timedelta(seconds=2)
     feed,clock,delivery=receiver(now)
-    observed.engine.quote_entry_guard=lambda s,t:feed.latest(s,t) is not None
+    observed.engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=observed.engine.market.quotes)
     for offset in (0,2):
         clock.now=now+timedelta(seconds=offset)
         offer(feed,replace(quote,timestamp=clock.now,received_at=clock.now))
@@ -219,7 +219,7 @@ def test_disconnect_recording_replays_pending_buy_cancellation(observed,tmp_path
     observed.engine.use_market_filter=observed.engine.market.use_market_filter=False
     feed,clock,delivery=receiver(NOW)
     monkeypatch.setattr(journal,'clock',lambda:clock.now)
-    observed.engine.quote_entry_guard=lambda s,t:feed.latest(s,t) is not None
+    observed.engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=observed.engine.market.quotes)
     journal.start(observed.repo,observed.engine,source='SYNTHETIC_WEBSOCKET')
     observed.repo.record('universe_history',observed.universe.snapshots[0])
     clock.now+=timedelta(seconds=1)
@@ -236,11 +236,18 @@ def test_disconnect_recording_replays_pending_buy_cancellation(observed,tmp_path
     export_recording(observed.repo,tmp_path/'ws-recording')
     replay=replay_recording(tmp_path/'ws-recording',tmp_path/'ws-replay.db',use_market_filter=False)
     assert replay['state']==observed.engine.broker.to_state()
+    # A real process restart loses feed memory, but the emitted/cancelled setup
+    # remains consumed even after a valid new connection restores entry access.
+    feed,clock,delivery=receiver(clock.now+timedelta(seconds=1))
     restored=SessionEngine(observed.repo,observed.universe,synthetic=True,strategy='pullback_simple',
         strict_market_data=True,paper_data_policy='observed_paper_v1',use_market_filter=False,
-        candidate_settings={'enabled':True},restore=True,quote_entry_guard=lambda s,t:False)
-    clock.now+=timedelta(seconds=1)
-    restored.apply_batch([{'kind':'quote','data':jsonable(replace(quote,timestamp=clock.now,received_at=clock.now))}],clock.now)
+        candidate_settings={'enabled':True},restore=True)
+    restored.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=restored.market.quotes)
+    for _ in range(2):
+        offer(feed,replace(quote,timestamp=clock.now,received_at=clock.now))
+        restored.apply_batch(delivery.events(['AAPL'],clock.now,known_quotes=restored.market.quotes),clock.now)
+        assert delivery.entry_allowed('AAPL',clock.now,known_quotes=restored.market.quotes)
+        clock.now+=timedelta(seconds=1)
     assert not restored.broker.get_open_orders() and not restored.broker.fills
     assert len(observed.repo.all('order_intents'))==1
 
@@ -266,3 +273,94 @@ def test_fifty_cached_books_deliver_only_focus_and_focus_change_uses_latest():
     selected=delivery.synchronize(watchlist,broker,now)
     assert feed._generation==generation
     assert {r['data']['symbol'] for r in delivery.events(selected,now)}==set(pool[10:20])
+
+
+@pytest.mark.parametrize('fault',['older','conflicting'])
+@pytest.mark.parametrize('restart',[False,True])
+def test_reconnect_bad_book_cannot_unlock_cached_engine_quote_for_delayed_bar(observed,fault,restart):
+    engine=observed.engine
+    engine.strategy=engine.market.strategy='pullback_simple'
+    engine.use_market_filter=engine.market.use_market_filter=False
+    now=NOW+timedelta(seconds=1)
+    feed,clock,delivery=receiver(now)
+    engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=engine.market.quotes)
+    quote=next(parse_event(r).data for r in observed.rows if r['kind']=='quote' and r['data']['symbol']=='AAPL')
+    quote=replace(quote,timestamp=now,received_at=now)
+    offer(feed,quote)
+    tail=next(r for r in observed.rows if r['kind']=='bar' and r['data']['symbol']=='AAPL'
+        and r['data']['timestamp']==NOW.isoformat())
+    initial=[r for r in observed.rows if r['kind']!='quote' and event_time(r)<=now and r!=tail]
+    engine.apply_batch(sorted(initial+delivery.events(['AAPL'],now),key=event_time),now)
+    assert not observed.repo.all('order_intents')
+    now+=timedelta(seconds=1)
+    if restart:
+        # Feed ordering memory disappears on process restart; engine state does not.
+        feed,clock,delivery=receiver(now)
+        engine=SessionEngine(observed.repo,observed.universe,synthetic=True,strategy='pullback_simple',
+            strict_market_data=True,paper_data_policy='observed_paper_v1',use_market_filter=False,
+            candidate_settings={'enabled':True},restore=True)
+        engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=engine.market.quotes)
+    else:
+        clock.now=now;feed._invalidate('DISCONNECTED');feed._generation+=1;feed._acked=True
+    bad=(replace(quote,timestamp=quote.timestamp-timedelta(seconds=1),received_at=now) if fault=='older'
+        else replace(quote,bid=quote.bid+5,ask=quote.ask+5,received_at=now))
+    offer(feed,bad)
+    assert not delivery.entry_allowed('AAPL',now,known_quotes=engine.market.quotes)
+    assert delivery.events(['AAPL'],now,known_quotes=engine.market.quotes)==[]
+    delayed=MarketBatch(bars=[parse_event(tail).data])
+    engine.apply_batch(batch_events(delayed,delivered_at=now,last_time=engine.last_time),now)
+    assert not observed.repo.all('order_intents')
+    assert 'websocket_quote_unavailable' in observed.repo.get_control(VIEW)['rows'][0]['blockers']
+    # A genuinely newer valid book reopens eligibility; same setup still submits once.
+    clock.now=now+timedelta(seconds=1)
+    offer(feed,replace(quote,timestamp=clock.now,received_at=clock.now))
+    assert not delivery.entry_allowed('AAPL',clock.now,known_quotes=engine.market.quotes)
+    engine.apply_batch(delivery.events(['AAPL'],clock.now,known_quotes=engine.market.quotes),clock.now)
+    assert delivery.entry_allowed('AAPL',clock.now,known_quotes=engine.market.quotes)
+    assert len(observed.repo.all('order_intents'))==1
+    assert delivery.events(['AAPL'],clock.now,known_quotes=engine.market.quotes)==[]
+
+
+@pytest.mark.parametrize('fault',['reconnect','conflict_then_newer'])
+def test_newer_book_must_reach_engine_after_disconnect_or_conflict_before_delayed_bar_can_enter(observed,fault):
+    engine=observed.engine
+    engine.strategy=engine.market.strategy='pullback_simple'
+    engine.use_market_filter=engine.market.use_market_filter=False
+    now=NOW+timedelta(seconds=1)
+    feed,clock,delivery=receiver(now)
+    engine.quote_entry_guard=lambda s,t:delivery.entry_allowed(s,t,known_quotes=engine.market.quotes)
+    quote=next(parse_event(r).data for r in observed.rows if r['kind']=='quote' and r['data']['symbol']=='AAPL')
+    quote=replace(quote,timestamp=now,received_at=now)
+    offer(feed,quote)
+    tail=next(r for r in observed.rows if r['kind']=='bar' and r['data']['symbol']=='AAPL'
+        and r['data']['timestamp']==NOW.isoformat())
+    initial=[r for r in observed.rows if r['kind']!='quote' and event_time(r)<=now and r!=tail]
+    engine.apply_batch(sorted(initial+delivery.events(['AAPL'],now),key=event_time),now)
+    assert delivery.entry_allowed('AAPL',now,known_quotes=engine.market.quotes)
+    assert not observed.repo.all('order_intents')
+    clock.now=now+timedelta(seconds=1)
+    if fault=='reconnect':
+        feed._invalidate('DISCONNECTED');feed._generation+=1;feed._acked=True
+    else:
+        # Both frames arrive before the next engine heartbeat/guard invocation.
+        offer(feed,replace(quote,bid=quote.bid+5,ask=quote.ask+5,received_at=clock.now))
+    offer(feed,replace(quote,timestamp=clock.now,received_at=clock.now))
+    assert feed.latest('AAPL',clock.now) is not None
+    assert not delivery.entry_allowed('AAPL',clock.now,known_quotes=engine.market.quotes)
+    delayed=MarketBatch(bars=[parse_event(tail).data])
+    engine.apply_batch(batch_events(delayed,delivered_at=clock.now,last_time=engine.last_time),clock.now)
+    assert not observed.repo.all('order_intents')
+    engine.apply_batch(delivery.events(['AAPL'],clock.now,known_quotes=engine.market.quotes),clock.now)
+    assert len(observed.repo.all('order_intents'))==1
+    clock.now+=timedelta(seconds=1)
+    offer(feed,replace(quote,timestamp=clock.now,received_at=clock.now))
+    # Once this connection has supplied the engine, normal batching doesn't
+    # cancel its pending order merely because the next stream update is newer.
+    assert delivery.entry_allowed('AAPL',clock.now,known_quotes=engine.market.quotes)
+    engine.apply_batch(delivery.events(['AAPL'],clock.now,known_quotes=engine.market.quotes),clock.now)
+    assert len(observed.repo.all('order_intents'))==1
+    assert [fill.side for fill in engine.broker.fills]==['buy']
+    watchlist=SimpleNamespace(light_symbols=lambda t:['MSFT'],focus=lambda t:['MSFT'])
+    broker=SimpleNamespace(positions={},exit_intents={},get_open_orders=lambda:[])
+    delivery.synchronize(watchlist,broker,clock.now)
+    assert not delivery._entry_generations

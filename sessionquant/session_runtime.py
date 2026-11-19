@@ -231,7 +231,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                         engine.broker.settings.max_quote_age_seconds,engine.market.max_quote_age_seconds))
                     quote_delivery=LiveQuoteDelivery(quote_feed)
                     market.quote_feed=quote_feed
-                    engine.quote_entry_guard=lambda symbol,stamp: quote_feed.latest(symbol,stamp) is not None
+                    engine.quote_entry_guard=lambda symbol,stamp: quote_delivery.entry_allowed(
+                        symbol,stamp,known_quotes=engine.market.quotes)
                     quote_task=asyncio.create_task(quote_feed.run())
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)

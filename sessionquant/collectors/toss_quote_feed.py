@@ -22,7 +22,7 @@ class TossQuoteFeed:
             raise ValueError('positive feed timeouts required')
         self.rest,self.stream,self.clock = rest,stream or TossWebSocket(rest),clock
         self.max_age,self.retry_initial,self.retry_max,self.rest_timeout = max_age_seconds,retry_initial,retry_max,rest_timeout
-        self._desired=(); self._priority=(); self._quotes={}; self._conflicts={}
+        self._desired=(); self._priority=(); self._quotes={}; self._conflicts={}; self._history={}
         self._changed=asyncio.Event(); self._stop=False; self._running=False
         self._acked=False; self._generation=0; self._source={}
         self.state='IDLE'; self.last_error=None; self.retry_seconds=0.
@@ -37,12 +37,16 @@ class TossQuoteFeed:
         self._priority=tuple(sorted(priority))
         if desired==self._desired:return
         self._desired=desired
+        # Keep ordering/conflict evidence through reconnects, bounded by the
+        # current subscription. Engine-known quotes cover re-adds and restarts.
+        self._history={s:q for s,q in self._history.items() if s in desired}
+        self._conflicts={s:t for s,t in self._conflicts.items() if s in desired}
         self._generation+=1  # Reject in-flight REST/messages from the previous set immediately.
         self._invalidate('CHANGING' if desired else 'IDLE')
         self._changed.set()
 
     def _invalidate(self, state):
-        self._acked=False; self._quotes.clear(); self._source.clear(); self._conflicts.clear()
+        self._acked=False; self._quotes.clear(); self._source.clear()
         self.state=state
 
     def latest(self, symbol, now=None):
@@ -66,7 +70,7 @@ class TossQuoteFeed:
         now=utc(self.clock())
         if not quote.timestamp<=quote.received_at<=now:
             self.counts['invalid_quotes']+=1;return
-        symbol=quote.symbol; old=self._quotes.get(symbol); conflict=self._conflicts.get(symbol)
+        symbol=quote.symbol; old=self._history.get(symbol); conflict=self._conflicts.get(symbol)
         if conflict and quote.timestamp<=conflict:return
         if old and quote.timestamp<old.timestamp:
             self.counts['ignored_quotes']+=1;return
@@ -74,10 +78,15 @@ class TossQuoteFeed:
             if (quote.bid,quote.ask,quote.bid_size,quote.ask_size)!=(old.bid,old.ask,old.bid_size,old.ask_size):
                 self._quotes.pop(symbol,None); self._source.pop(symbol,None)
                 self._conflicts[symbol]=quote.timestamp; self.counts['invalid_quotes']+=1
-            else:self.counts['ignored_quotes']+=1
+            else:
+                # A matching reconnect snapshot can revalidate the old value,
+                # but must not renew its original receipt time or liquidity.
+                self._quotes[symbol]=old; self._source[symbol]=source
+                self.counts['ignored_quotes']+=1
             return
-        self._conflicts.pop(symbol,None)
-        self._quotes[symbol]=quote; self._source[symbol]=source; self.counts['quotes']+=1
+        # Keep the last disputed timestamp even after a newer valid frame. The
+        # engine must first receive a post-conflict book before entries resume.
+        self._history[symbol]=quote; self._quotes[symbol]=quote; self._source[symbol]=source; self.counts['quotes']+=1
 
     async def _seed(self, symbols, generation):
         # One worker shares the REST client's rate limiter. WebSocket receipt is
@@ -96,8 +105,11 @@ class TossQuoteFeed:
 
     async def _receive(self, symbols, generation):
         seed=None
+        def disconnected():
+            if generation==self._generation:self._invalidate('DISCONNECTED')
         try:
-            async with aclosing(self.stream.stream(list(symbols),trades=False,max_candidates=100)) as frames:
+            async with aclosing(self.stream.stream(list(symbols),trades=False,max_candidates=100,
+                    on_disconnect=disconnected)) as frames:
                 async for frame in frames:
                     if generation!=self._generation:return
                     self.counts['frames']+=1
@@ -117,6 +129,9 @@ class TossQuoteFeed:
                             self.counts['invalid_quotes']+=1
             raise ConnectionError('Quote stream closed')
         finally:
+            # Stop granting entries before waiting for REST/socket cleanup.
+            # A slow cancellation must not extend a disconnected generation.
+            if generation==self._generation:self._invalidate('DISCONNECTED')
             if seed:
                 seed.cancel(); await asyncio.gather(seed,return_exceptions=True)
 
