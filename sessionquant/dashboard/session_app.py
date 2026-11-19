@@ -415,7 +415,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
             if market_section('거래량 비교') and available('watchlist_rvol', 'history_backfill'):
                 render_watchlist_rvol(data.watchlist_rvol,data.history_backfill,
-                                     paper_policy=data.context.get('paper_data_policy'))
+                                     paper_policy=data.context.get('paper_data_policy'),
+                                     strategy=data.context.get('strategy'))
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
             if market_section('감시·집중 종목') and available('watchlist_state'):

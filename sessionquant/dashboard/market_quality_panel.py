@@ -209,7 +209,7 @@ def watchlist_rvol_rows(view, now=None):
     return result
 
 
-def render_watchlist_rvol(view, backfill, *, paper_policy=None):
+def render_watchlist_rvol(view, backfill, *, paper_policy=None, strategy=None):
     import streamlit as st
     from .session_app import _table
     st.subheader('감시목록 과거 분봉·RVOL')
@@ -218,10 +218,14 @@ def render_watchlist_rvol(view, backfill, *, paper_policy=None):
                    f"{backfill.get('complete_symbol_days','—')} / {backfill.get('required_symbol_days','—')}")
     else:
         st.caption('별도 일괄 수집 기록 없음 · 저장된 분봉이 없다는 뜻은 아닙니다. 시작 시 자료 준비는 시스템·설정에서 확인하세요.')
-    if paper_policy == 'observed_paper_v1':
-        st.caption('현재 모의 설정은 분할 비교 근거가 미확인이어도 완전한 분봉으로 계산한 RVOL을 사용할 수 있습니다. 실제 전략 사용 여부는 ‘매수 판단’에서 확인하세요.')
+    if strategy == 'pullback_simple':
+        st.caption('현재 눌림목 전략은 이 거래량 비교값을 매수 필수 조건으로 사용하지 않습니다. 실제 매수 조건은 ‘매수 판단’에서 확인하세요.')
+    elif paper_policy == 'observed_paper_v1':
+        st.caption('현재 모의 설정은 주식 분할 전후의 거래량 비교가 확인되지 않아도, 필요한 분봉이 모두 있으면 계산값을 사용할 수 있습니다. 실제 전략 사용 여부는 ‘매수 판단’에서 확인하세요.')
     else:
         st.caption('계산값과 비교 근거까지 검증한 값은 다릅니다. 실제 전략 사용 여부는 ‘매수 판단’에서 확인하세요.')
     st.caption('마지막 계산값은 참고 기록입니다. 오래된 값은 현재 계산값·비교 근거 검증값에서 제외합니다.')
-    _table(watchlist_rvol_rows(view),
-           '장전 history-backfill 후 run으로 당일 분봉을 수집하세요.')
+    empty_message = ('아직 거래량 비교 기록이 없습니다. 현재 전략의 진행 상태는 ‘매수 판단’에서 확인하세요.'
+        if strategy == 'pullback_simple' else
+        '아직 거래량 비교 기록이 없습니다. 과거와 당일 분봉 자료가 준비되면 계산값이 표시됩니다.')
+    _table(watchlist_rvol_rows(view), empty_message)
