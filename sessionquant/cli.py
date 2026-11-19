@@ -90,7 +90,7 @@ def parser():
     recorded_replay.add_argument('--bundle',type=Path,required=True)
     recorded_replay.add_argument('--db',type=Path,required=True,help='새 모의 재생 SQLite 파일')
     recorded_replay.add_argument('--policy',choices=('baseline','shadow','reference','fail_closed'),default='baseline')
-    recorded_replay.add_argument('--strategy',choices=('momentum','pullback','gap_breakout','vwap'))
+    recorded_replay.add_argument('--strategy',choices=('momentum','pullback','pullback_simple','gap_breakout','vwap'))
     recorded_replay.add_argument('--no-news',action='store_true')
     recorded_replay.add_argument('--resume',action='store_true')
     study = sub.add_parser('evaluate-recording',help='고정 정책·뉴스 기여·시간순 외표본 비교; 실거래·LLM 호출 없음')
@@ -110,8 +110,10 @@ def parser():
     run.add_argument("--max-cycles", type=int, help="지정한 시세 수집 횟수 후 종료")
     run.add_argument("--no-desktop-notifications", action="store_true", help="바탕화면 알림 끄기")
     demo = sub.add_parser("demo", help="외부 API 없이 합성 자료로 전략·주문·청산 검증")
+    lab = sub.add_parser('strategy-lab', help='전략·LLM 가점·모의 체결을 합성 시나리오로 검증; 외부 API 호출 없음')
+    lab.add_argument('--out',type=Path,required=True,help='새 출력 폴더')
     demo.add_argument("--out", type=Path, default=Path("data/session-demo"), help="새 출력 폴더")
-    demo.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
+    demo.add_argument("--strategy", choices=("momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"), default="pullback")
     demo.add_argument("--backend", choices=("sqlite", "mysql"), default="sqlite", help="합성 검증 자료의 저장소")
     replay = sub.add_parser("replay", help="수신 시각을 보존한 자료로 모의 주문 재생")
     backtest = sub.add_parser("backtest", help="동일 자료·비용으로 전략 및 추가매수 효과 비교")
@@ -123,7 +125,7 @@ def parser():
         cmd.add_argument('--fill-model',choices=('market_v2','legacy_limit_v1'),default=None,help='새 모의 체결은 market_v2 기본. 기존 가격제한 장부는 legacy_limit_v1')
     replay.add_argument("--db", type=Path, default=Path("data/sessionquant-replay.db"))
     replay.add_argument("--backend", choices=("sqlite", "mysql"), default="sqlite")
-    replay.add_argument("--strategy", choices=("momentum", "pullback", "gap_breakout", "vwap"), default="pullback")
+    replay.add_argument("--strategy", choices=("momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"), default="pullback")
     replay.add_argument("--watchlist-history",type=Path,help="당시 저장된 감시·집중 목록 이력 JSON")
     replay.add_argument("--resume", action="store_true", help="동일 입력과 설정으로 중단 지점 복구")
     risk = sub.add_parser('risk-experiments',help='단독 전략별 손절·익절·보유시간 가설 비교; 외부 API 없음')
@@ -232,6 +234,11 @@ def main(argv=None):
             from .session_config import load_session_config
             from .watchlist.diagnostics import command
             print(json.dumps(asyncio.run(command(load_session_config(args.config),connect=args.connect)),ensure_ascii=False,indent=2))
+        elif args.command == 'strategy-lab':
+            from .strategy_lab import demonstrate
+            result=demonstrate(args.out)
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+            return 0 if result['passed'] else 1
         elif args.command in {'history-backfill','history-status'}:
             from .session_config import load_session_config
             from .market.history_commands import command

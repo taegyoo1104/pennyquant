@@ -19,15 +19,16 @@ class TechnicalSignal:
     stop_price: float
     reason: str
     allow_add: bool = False
+    setup_id: str | None = None
 
     @property
     def id(self) -> str:
-        return sha256(f"sessionquant:{self.symbol}:{self.strategy}:{utc(self.timestamp).isoformat()}".encode()).hexdigest()
+        return sha256(f"sessionquant:{self.symbol}:{self.strategy}:{(self.setup_id or utc(self.timestamp).isoformat())}".encode()).hexdigest()
 
     def to_dict(self) -> dict:
         return {"id": self.id, "symbol": self.symbol, "strategy": self.strategy,
                 "timestamp": utc(self.timestamp).isoformat(), "reference_price": self.reference_price,
-                "stop_price": self.stop_price, "reason": self.reason, "allow_add": self.allow_add}
+                "stop_price": self.stop_price, "reason": self.reason, "allow_add": self.allow_add, **({"setup_id":self.setup_id} if self.setup_id else {})}
 
 
 def rising_structure(data: Indicators) -> bool:
@@ -56,7 +57,7 @@ def technical_signal(symbol: str, strategy: str, data: Indicators, regime: str, 
             diagnostics.extend(missing)
         return not missing
 
-    if strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
+    if strategy not in {"momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"}:
         raise ValueError("지원하지 않는 전략입니다")
     if opening_range_minutes not in (15, 30):
         raise ValueError("Opening Range는 15분 또는 30분이어야 합니다")
@@ -79,7 +80,7 @@ def technical_signal(symbol: str, strategy: str, data: Indicators, regime: str, 
             or any(b.timestamp > bars[-1].timestamp for b in data.fifteen)):
         return reject("strategy_indicator_cutoff_mismatch")
     if any(isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value <= 0
-           for value in (data.vwap,data.ema9,data.atr14,data.volume_ratio)):
+           for value in (data.vwap,data.ema9,data.atr14) + (() if strategy=="pullback_simple" else (data.volume_ratio,))):
         return reject("strategy_indicators_unavailable")
     if len(bars) < 15 or not contiguous(bars, 5) or data.vwap is None or data.ema9 is None or not data.atr14:
         return reject("strategy_five_minute_history_incomplete")
@@ -87,6 +88,21 @@ def technical_signal(symbol: str, strategy: str, data: Indicators, regime: str, 
     if not (last.timestamp <= last.received_at <= utc(now)) or (utc(now) - last.timestamp).total_seconds() > 330:
         return reject("strategy_closed_bar_stale")
     atr_value = data.atr14
+    if strategy == "pullback_simple":
+        from .simple_pullback import inspect_pattern
+        pattern = inspect_pattern(data)
+        if pattern['status'] != 'SIGNAL':
+            for check in pattern['checks']:
+                if not check['passed']:
+                    reject('simple_'+check['key']+'_missing')
+            if not pattern['checks']:
+                reject('simple_pattern_unavailable')
+            return None
+        stop = min(pattern['support']-.1*atr_value, last.close-atr_value)
+        if not 0<stop<last.close:
+            return reject('strategy_stop_price_invalid')
+        return TechnicalSignal(symbol,strategy,last.timestamp,last.close,stop,
+            '15분 상승·1~4개 조정봉·직전 고가 위 확정봉 반등',False,pattern['setup_id'])
     if last.close <= 0 or atr_value <= 0 or last.close - max(data.vwap, data.ema9) > max_chase_atr * atr_value:
         return reject("strategy_price_extended_or_invalid")
     if data.volume_ratio is None or data.volume_ratio < (1.2 if regime == "NEUTRAL" else 1.0):

@@ -51,7 +51,7 @@ def scan(universe: UniverseStore, symbol: str, quote: Quote | None, eligibility:
          data: Indicators, now: datetime, *, relative_volume: float | None = None,
          max_quote_age_seconds: float = 30, max_eligibility_age_seconds: float = 60,
          max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
-         min_rvol: float = 1.0, require_evidence: bool = False, paper_assumptions: bool = False) -> list[str]:
+         min_rvol: float = 1.0, require_evidence: bool = False, paper_assumptions: bool = False, require_rvol: bool = True) -> list[str]:
     """진입 차단 사유를 모두 반환한다. 매도 가능 여부는 별도로 관리한다."""
     now = utc(now)
     blockers = []
@@ -101,7 +101,7 @@ def scan(universe: UniverseStore, symbol: str, quote: Quote | None, eligibility:
         blockers.append("technical_history_incomplete")
     if data.cumulative_volume < 10_000 or data.dollar_volume < min_dollar_volume:
         blockers.append("insufficient_liquidity")
-    if relative_volume is None or not math.isfinite(relative_volume) or relative_volume < min_rvol:
+    if require_rvol and (relative_volume is None or not math.isfinite(relative_volume) or relative_volume < min_rvol):
         blockers.append("relative_volume_unknown_or_low")
     if require_evidence and any(code.startswith('instrument_') or code == 'exchange_unverified' for code in blockers):
         blockers.append('eligibility_unverified')

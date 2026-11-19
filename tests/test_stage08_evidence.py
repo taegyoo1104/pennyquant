@@ -57,6 +57,24 @@ async def test_later_failed_revision_suppresses_old_positive_instead_of_reusing_
     assert company_score([positive,later],'TEST',NEWS_NOW+timedelta(seconds=2))['value'] is None
 
 
+async def test_verified_adverse_article_overrides_positive_bonus_in_either_order(positive):
+    from sessionquant.events import parse_event
+    from sessionquant.news.analysis import event_digest
+    negative=deepcopy(positive)
+    negative['news_id']=negative['event']['id']='rss:negative-fixture'
+    negative['analysis_id']='negative-analysis'
+    negative['adopted_llm_call_id']='negative-call'
+    negative['input_digest']=event_digest(parse_event({'kind':'news','data':negative['event']}).data,'TEST')
+    negative['sentiment']='NEGATIVE'
+    negative['events'][0]['shareholder_impact']='NEGATIVE'
+    now=NEWS_NOW+timedelta(seconds=1)
+    for rows in ([positive,negative],[negative,positive]):
+        score=company_score(rows,'TEST',now)
+        assert score['status']=='VERIFIED' and score['value']==0
+        assert score['reason']=='verified_adverse_no_bonus'
+        assert score['analysis_ids']==['negative-analysis']
+
+
 def test_complete_known_sector_uses_same_window_and_unknown_is_not_neutral():
     market=market_fixture()
     report=RelativeStrength(market,NOW,synthetic=True).sector_strength('AAPL')

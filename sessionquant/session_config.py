@@ -14,6 +14,7 @@ class SessionConfig:
     db_path: Path = Path("data/sessionquant-paper-local.db")
     universe_path: Path = Path("data/sp500-universe.json")
     strategy: str = "pullback"
+    market_filter_enabled: bool = True
     source: str = "toss"
     input_path: Path | None = None
     poll_seconds: float = 10.0
@@ -72,8 +73,10 @@ class SessionConfig:
             raise ValueError("Phase 0~4 실행 환경은 PAPER_LOCAL만 허용합니다. 실제 주문은 비활성화되어 있습니다.")
         if self.database_backend not in {"mysql", "sqlite"}:
             raise ValueError("database_backend는 mysql 또는 sqlite여야 합니다.")
-        if self.strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
+        if self.strategy not in {"momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"}:
             raise ValueError("지원하지 않는 전략입니다.")
+        if type(self.market_filter_enabled) is not bool:
+            raise ValueError('시장 방향 필터는 불리언이어야 합니다.')
         if self.source not in {"toss", "file"} or (self.source == "file" and self.input_path is None):
             raise ValueError("source는 toss 또는 file이며, file은 input_path가 필요합니다.")
         if self.market_cap_provider not in {'auto','file','toss'}:

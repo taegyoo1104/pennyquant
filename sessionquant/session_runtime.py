@@ -179,14 +179,14 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
             if config.watchlist_enabled:
                 from .watchlist.selection import WatchlistManager
                 from .watchlist.history_selection import DailyHistorySelection
-                if config.source == 'toss':control_state['data_ready'] = False
+                if config.source == 'toss' and config.strategy != 'pullback_simple':control_state['data_ready'] = False
                 watchlist = WatchlistManager(repo, universe, config,
-                    history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' else None)
+                    history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' and config.strategy != 'pullback_simple' else None)
             from .market_reference.risk import MacroReferenceRiskMonitor
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
-                                   strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
+                                   strict_market_data=True, use_market_filter=config.market_filter_enabled, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
                                    candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy)
             if config.recording_enabled:
                 from .research.journal import start,stop
@@ -196,7 +196,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 repo.record("universe_history", snapshot)
             if config.source == "toss":
                 from .market.history import HistoryStore
-                history_store = HistoryStore(repo) if watchlist is not None else None
+                history_store = HistoryStore(repo) if watchlist is not None and config.strategy != "pullback_simple" else None
                 warmup = None
                 if history_store is not None:
                     from .market.warmup import StartupWarmup

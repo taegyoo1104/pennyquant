@@ -138,6 +138,9 @@ class SessionEngine:
 
     def risk_context(self, now: datetime, symbol: str) -> dict:
         context = self._risk_context(now,symbol)
+        if self.strategy == 'pullback_simple':
+            context = {**context, 'block_entries':False, 'major_adverse':False, 'blackout':False,
+                       'force_liquidation':False, 'llm_role':'candidate_priority_only'}
         if self.record_inputs:
             try:
                 evidence = self.risk_provider.recorded_evidence(now,symbol) if self.risk_provider and hasattr(self.risk_provider,'recorded_evidence') else {}
@@ -290,6 +293,17 @@ class SessionEngine:
                    'candidate_selection':asdict(self.candidate_selector.settings),
                    "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
+        if self.strategy == 'pullback_simple':
+            frame=self.selection_frame or {}
+            context['strategy_lab']={'evaluated_at':frame.get('evaluated_at'),
+                'llm_role':'candidate_priority_only','historical_rvol_required':False,
+                'rows':[{'symbol':r['symbol'],'checks':r.get('indicators',{}).get('strategy_pattern',{}).get('checks',[]),
+                    'llm_status':r.get('news_score_signal',{}).get('status','UNKNOWN'),
+                    'llm_points':r.get('indicators',{}).get('score_components',{}).get('news',0)*10,
+                    'analysis_ids':r.get('news_score_signal',{}).get('analysis_ids',[]),
+                    'llm_call_ids':r.get('news_score_signal',{}).get('llm_call_ids',[]),
+                    'order_status':r.get('portfolio_status'), 'order_intent_id':r.get('order_intent_id'),
+                    'blockers':r.get('blockers',[])} for r in frame.get('rows',[])[:5]]}
         self.repo.set_control("sessionquant_context", context)
         if self.market.strict_data:
             from .market.reporting import persist_quality

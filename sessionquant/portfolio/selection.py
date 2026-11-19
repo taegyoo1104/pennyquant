@@ -111,7 +111,7 @@ class PortfolioCandidateSelector:
                     if listing.get('received_at'):expiry.append(utc(listing['received_at'])+timedelta(days=1))
                     if listing.get('valid_until'):expiry.append(utc(listing['valid_until']))
             rvol=row['indicators'].get('data_quality',{}).get('rvol',{})
-            if rvol.get('valid_until'):expiry.append(utc(rvol['valid_until']))
+            if row['indicators'].get('rvol_required',True) and rvol.get('valid_until'):expiry.append(utc(rvol['valid_until']))
             news=row['news_score_signal']
             if row['indicators']['score_component_status']['news']=='VERIFIED':expiry.append(utc(news['valid_until']))
             sector=row['sector_strength']

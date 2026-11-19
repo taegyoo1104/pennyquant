@@ -26,10 +26,19 @@ def entry_rows(view):
             *([row['allocation_reason']] if row.get('allocation_reason') else [])]))
         if indicators.get('strategy_diagnostics'):
             reasons=[reason for reason in reasons if reason!='technical_signal_absent']
+        pattern=indicators.get('strategy_pattern') or {}
+        checks={c['key']:('통과' if c['passed'] else '미충족') for c in pattern.get('checks',[])}
+        news=row.get('news_score_signal') or {}
         result.append({'종목':row.get('symbol'),'기록 시각':timestamp(row.get('evaluated_at')),
             '현재성':'현재 평가' if view['active'] else '이전 평가 · 갱신 대기',
             '시장 방향':row.get('regime','UNKNOWN'),'전략 RVOL':indicators.get('relative_volume'),
             '전략 판단':statuses.get(indicators.get('strategy_status'),'이전 버전 · 상세 기록 확인'),
+            '상승 추세':checks.get('trend','—'),'조정':checks.get('correction','—'),
+            '반등':checks.get('rebound','—'),
+            'LLM 분석 상태':news.get('status','UNKNOWN'),
+            'LLM 가점':round(indicators.get('score_components',{}).get('news',0)*10,4),
+            'LLM 근거':', '.join(news.get('analysis_ids',[])) or '없음',
+            '주문 의도':row.get('order_intent_id') or '없음',
             '주문 판단':row.get('portfolio_status','UNKNOWN'),'대기·차단 이유':', '.join(reasons) or '—'})
     return result
 
