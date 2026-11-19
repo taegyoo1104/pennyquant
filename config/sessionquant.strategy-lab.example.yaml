@@ -21,7 +21,8 @@ watchlist_missing_cap_policy: exclude
 watchlist_candles_per_cycle: 0
 focus_size: 10
 focus_selection: turnover
-focus_min_hold_seconds: 300
+focus_rebalance_minutes: 30
+focus_min_hold_seconds: 0  # 개별 편입 시각 대신 정규장 개장 기준 30분 슬롯 사용
 focus_refresh_grace_seconds: 120
 market_cap_provider: auto
 company_news_refresh_seconds: 180

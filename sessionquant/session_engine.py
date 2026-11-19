@@ -70,6 +70,9 @@ class SessionEngine:
         self.use_market_filter = use_market_filter
         self.market = MarketEngine(universe, strategy, use_market_filter=use_market_filter, strict_data=strict_market_data,
                                    paper_data_policy=paper_data_policy)
+        if strategy=='pullback_simple' and hasattr(watchlist_policy,'pattern_provider'):
+            from .market.simple_pullback import progress
+            watchlist_policy.pattern_provider=lambda symbol,now:progress(indicators(self.market.bars.get(symbol,[]),now))
         self.broker = PaperBroker(settings or PortfolioSettings())
         if paper_data_policy == 'observed_paper_v1' and self.broker.settings.paper_fill_model != 'market_v2':
             raise ValueError('실데이터 Paper 정책은 market_v2 체결 모형이 필요합니다.')
@@ -135,6 +138,10 @@ class SessionEngine:
             raise ValueError("기존 PennyQuant DB는 호환 실행 경로로 열거나 새 DB를 지정하세요.")
         self.manager = PortfolioManager(self.broker,self.exit_policy)
         self.exit_manager = SessionExitManager(self.broker)
+        # Display-only latest assessment; never an entry/exit input. Preserve its
+        # original timestamp through heartbeat-only ticks and restarts.
+        self._lab_rows=((self.repo.get_control('sessionquant_context',{}) or {}).get('strategy_lab',{}).get('rows',[])
+                        if restore and strategy=='pullback_simple' else [])
 
     def risk_context(self, now: datetime, symbol: str) -> dict:
         context = self._risk_context(now,symbol)
@@ -295,15 +302,20 @@ class SessionEngine:
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         if self.strategy == 'pullback_simple':
             frame=self.selection_frame or {}
-            context['strategy_lab']={'evaluated_at':frame.get('evaluated_at'),
-                'llm_role':'candidate_priority_only','historical_rvol_required':False,
-                'rows':[{'symbol':r['symbol'],'checks':r.get('indicators',{}).get('strategy_pattern',{}).get('checks',[]),
+            if frame:
+                self._lab_rows=[{'symbol':r['symbol'],'evaluated_at':frame.get('evaluated_at'),
+                    'progress':r.get('indicators',{}).get('strategy_progress',{}),
+                    'signal_present':bool(r.get('signal')),
+                    'checks':r.get('indicators',{}).get('strategy_pattern',{}).get('checks',[]),
                     'llm_status':r.get('news_score_signal',{}).get('status','UNKNOWN'),
                     'llm_points':r.get('indicators',{}).get('score_components',{}).get('news',0)*10,
                     'analysis_ids':r.get('news_score_signal',{}).get('analysis_ids',[]),
                     'llm_call_ids':r.get('news_score_signal',{}).get('llm_call_ids',[]),
                     'order_status':r.get('portfolio_status'), 'order_intent_id':r.get('order_intent_id'),
-                    'blockers':r.get('blockers',[])} for r in frame.get('rows',[])[:5]]}
+                    'blockers':r.get('blockers',[])} for r in frame.get('rows',[])[:20]]
+            context['strategy_lab']={'evaluated_at':self._lab_rows[0].get('evaluated_at') if self._lab_rows else None,
+                'llm_role':'candidate_priority_only','historical_rvol_required':False,
+                'rows':self._lab_rows}
         self.repo.set_control("sessionquant_context", context)
         if self.market.strict_data:
             from .market.reporting import persist_quality

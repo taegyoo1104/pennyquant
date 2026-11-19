@@ -338,7 +338,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
     if page == '대시보드' and panel != 'news' and available('watchlist_state'):
         from sessionquant.dashboard.focus_summary import render_focus_summary
-        render_focus_summary(data.watchlist_state)
+        render_focus_summary(data.watchlist_state,data.context.get('strategy_lab'))
     if data.context.get('strategy')=='pullback_simple' and panel != 'news':
         st.info('전략 실험 · 상승 추세 → 1~4개 봉 조정 → 확정봉 반등. LLM은 판단을 설명하며 뉴스는 보조 가점입니다.')
         st.caption('과거 20일 분봉·RVOL은 진입 필수가 아닙니다. 당일 분봉·최신 호가와 주문 제한은 검사합니다. 매수 판단 표에서 조건별 결과를 확인하세요.')

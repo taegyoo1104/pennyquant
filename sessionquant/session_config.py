@@ -31,6 +31,7 @@ class SessionConfig:
     watchlist_size: int = 50
     focus_size: int = 20
     focus_selection: str = 'activity'
+    focus_rebalance_minutes: int = 0
     selection_method: str = 'market_cap_top'
     market_cap_input: Path = Path('data/market-cap-input.json')
     market_cap_provider: str = 'auto'
@@ -69,6 +70,10 @@ class SessionConfig:
         ExplanationSettings(**self.strategy_explanation)
         if self.focus_selection not in {'activity','turnover'}:
             raise ValueError('집중 선정 방식은 activity 또는 turnover입니다.')
+        if type(self.focus_rebalance_minutes) is not int or self.focus_rebalance_minutes not in {0,30}:
+            raise ValueError('집중 재선정 주기는 0(기존 방식) 또는 30분입니다.')
+        if self.focus_rebalance_minutes and (self.strategy!='pullback_simple' or self.focus_selection!='turnover'):
+            raise ValueError('30분 집중 재선정은 단순 눌림목·거래대금 선정 프로필에서 사용합니다.')
         from .database.retention import RetentionPolicy
         if not isinstance(self.retention, dict):
             raise ValueError('자료 보관 설정은 객체여야 합니다.')

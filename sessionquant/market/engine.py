@@ -227,8 +227,9 @@ class MarketEngine:
                                             'strategy_diagnostics':strategy_diagnostics,
                                             'strategy_status':'BLOCKED' if blockers else 'SIGNAL' if signal else 'WAITING'}
         if self.strategy == 'pullback_simple':
-            from .simple_pullback import inspect_pattern
+            from .simple_pullback import inspect_pattern, progress
             indicator_values['strategy_pattern'] = inspect_pattern(data)
+            indicator_values['strategy_progress'] = progress(data)
             indicator_values['rvol_required'] = False
         if quality is not None:
             quality['blockers'] = list(dict.fromkeys(blockers))

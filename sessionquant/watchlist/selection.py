@@ -45,7 +45,7 @@ class FocusSelector:
         self.refresh_grace = refresh_grace_seconds
         self.method=method
 
-    def choose(self, metrics, previous, now):
+    def choose(self, metrics, previous, now, *, pinned_symbols=()):
         """관찰 점수는 주문 허가가 아니다. RVOL·계좌 적격성을 계산하거나 대체하지 않는다."""
         eligible = [row for row in metrics if row.get('data_status') == 'VERIFIED'
                     and 0 <= (now-utc(row['known_at'])).total_seconds() <= self.age]
@@ -66,7 +66,8 @@ class FocusSelector:
         metrics_by_symbol = {row['ticker']: row for row in metrics}
         pinned = []
         for row in previous:
-            if row['ticker'] in by_symbol and 0 <= (now-utc(row['focus_since'])).total_seconds() < self.hold:
+            if row['ticker'] in by_symbol and (row['ticker'] in pinned_symbols or
+                    0 <= (now-utc(row['focus_since'])).total_seconds() < self.hold):
                 pinned.append({**by_symbol.pop(row['ticker']), 'focus_since': row['focus_since']})
             elif row['ticker'] not in by_symbol and self.refresh_grace:
                 # Keep collection membership briefly while refreshing inputs.
@@ -109,6 +110,7 @@ class WatchlistManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.allow_synthetic = allow_synthetic
         self.history_selection = history_selection
+        self.pattern_provider = None
         self.provider_explicit = provider is not None
         self.provider = provider or FileMarketCapProvider(config.market_cap_input)
         self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days,
@@ -289,7 +291,12 @@ class WatchlistManager:
             self.state['focus'] = []
             return []
         metrics = [self._metric(s, now) for s in self.light_symbols(now)]
-        self.state['focus'] = self.focus_selector.choose(metrics, self.state['focus'], now)
+        if self.config.focus_rebalance_minutes:
+            from .focus_schedule import choose_scheduled
+            changed = choose_scheduled(self, metrics, now)
+            if changed:self.repo.set_control(STATE,self.state)
+        else:
+            self.state['focus'] = self.focus_selector.choose(metrics, self.state['focus'], now)
         return [row['ticker'] for row in self.state['focus']]
 
     @snapshot_reads
@@ -363,6 +370,8 @@ class WatchlistManager:
                 'last_detail_at': self.state.get('last_detail_success', {}).get(symbol),
                 'focus_valid_until':focused.get(symbol,{}).get('valid_until'),
                 'focus_monitor_until':focused.get(symbol,{}).get('monitor_until'),
+                'focus_since':focused.get(symbol,{}).get('focus_since'),
+                'focus_pattern_retained':focused.get(symbol,{}).get('pattern_retained',False),
                 'focus_refresh_pending':bool(focused.get(symbol,{}).get('refresh_wait_until')),
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],
                 'last_price_at': self.state['prices'].get(symbol, [{}])[0].get('as_of_at'),
@@ -390,6 +399,7 @@ class WatchlistManager:
         self.repo.set_control(STATE, self.state)
         self.repo.set_control(VIEW, {**status, 'updated_at': now.isoformat(), 'items': rows,
             'watchlist_limit': self.config.watchlist_size, 'focus_limit': self.config.focus_size,
+            'focus_schedule':self.state.get('focus_schedule',{}),
             'history_selection':history, 'operating_count':len(operating),
             'data_max_age_seconds':self.config.watchlist_data_max_age_seconds, 'max_age_days':self.config.watchlist_refresh_days,
             'focus_count': len(focused), 'source_state': {k: v for k, v in self.state.items() if k not in {'prices', 'rankings'}},
