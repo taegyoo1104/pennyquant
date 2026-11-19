@@ -1,30 +1,189 @@
-# 저비용 GCP 모의매매
+# GCP에서 켜고, 확인하고, 종료하기
 
-프로그램과 MySQL 8.4를 **GCE 서버 한 대**에 설치한다. Cloud SQL은 사용하지 않는다. 서버 켜기와 대시보드의 매매 시작은 수동이며, 거래소 폐장 5분 후 프로그램 종료 → 백업 → 서버 종료를 자동 처리한다. 실제 주문은 계속 비활성이다.
+GCP VM 한 대에서 앱과 MySQL을 실행합니다. **VM 시작, 프로그램 시작, 코드 업데이트, 대시보드 접속, 매매 시작은 서로 다른 동작**입니다. 이 안내의 거래는 모두 Paper 모의매매입니다.
 
-현재 저장소에는 설치·종료·백업 파일이 준비되어 있다. GCP 프로젝트 생성과 실제 배포·토스 연결·백업 업로드는 사용자 계정에서 별도로 확인해야 한다. 아래 자원 생성 명령은 과금 대상 자원을 만든다. 실행 전에 프로젝트에 무료 크레딧이 있는 결제 계정을 연결하고 생성 화면의 예상 비용을 확인한다.
+현재 권장 설정은 `strategy-lab-websocket`입니다. 저장소에 코드가 있어도 운영 서버에 자동으로 배포되지 않습니다. 기존 서버의 설정을 확인하고 필요할 때 [장전 업데이트](#장전-업데이트)와 [웹소켓 전환](WEBSOCKET_ROLLOUT.md#gcp에서-전환)을 적용합니다. 처음 서버를 만드는 경우는 아래 [최초 설치](#고급-최초-설치)부터 진행하세요.
+
+## 명령을 어디에서 실행하나요?
+
+| 화면의 프롬프트 | 위치 | 할 일 |
+| --- | --- | --- |
+| `이름@cloudshell:~` | GCP Cloud Shell | VM 시작·상태 확인, SSH 접속, 브라우저용 터널 |
+| `이름@sessionquant-paper:~` | 운영 VM 내부 | 프로그램 상태·로그 확인, 업데이트, 종료 |
+| 로컬 PC의 PowerShell | 본인 PC | 로컬 실행 또는 PC용 SSH 터널 |
+
+Cloud Shell과 운영 VM은 다른 컴퓨터입니다. `gcloud compute ssh ... -L ...`로 **Cloud Shell의 웹 미리보기**를 열 때는 `@cloudshell`에서 실행합니다. VM 안에서 자기 자신에게 같은 터널을 열지 않습니다. `tmux`는 터미널 작업을 유지하는 도구이며 프로그램의 실행 상태를 뜻하지 않습니다.
+
+## 매일 켜고 접속하기
+
+### 1. Cloud Shell에서 VM 시작
+
+아래는 프로젝트 `sessionquant`, VM `sessionquant-paper`, 지역 `us-central1-a`를 쓰는 기존 구성입니다. 다른 프로젝트는 값을 바꿉니다.
+
+```bash
+gcloud compute instances start sessionquant-paper --project=sessionquant --zone=us-central1-a
+gcloud compute instances describe sessionquant-paper --project=sessionquant --zone=us-central1-a --format='yaml(status,networkInterfaces[0].accessConfigs[0].natIP)'
+```
+
+외부 IP가 토스 API 허용 목록과 일치하는지 확인합니다. 임시 IP는 다시 켤 때 달라질 수 있습니다. 기존 IP를 예약한 고정 IP라면 유지되지만 별도 IP 요금 조건을 확인합니다.
+
+VM 상태가 `RUNNING`이어도 SSH와 프로그램 준비는 조금 늦을 수 있습니다. 시작 직후 포트 22 연결 실패가 나면 잠시 뒤 SSH만 다시 시도하고, 계속 실패하면 상태·부팅 로그를 점검합니다. 반복 시작·강제 재설정부터 하지 않습니다.
+
+### 2. VM 안에서 프로그램 확인
+
+Cloud Shell에서 접속합니다.
+
+```bash
+gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap
+```
+
+프롬프트가 `@sessionquant-paper`로 바뀌면 아래를 실행합니다. 자동 시작을 설치해 둔 서버는 VM 부팅 때 앱과 DB를 시작하므로 매일 업데이트할 필요는 없습니다.
+
+```bash
+sudo systemctl show sessionquant.service -p ActiveState -p SubState -p Result
+sudo docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml ps -a
+sudo systemctl list-timers --all 'sessionquant-*' --no-pager
+```
+
+`app`, `db`가 `healthy`인지, 장 마감·저장 공간·비용 방지 타이머가 있는지 봅니다. 이 systemd 서비스는 컨테이너를 시작한 뒤 끝나는 형식이므로 **`active (exited)`는 정상일 수 있습니다.** 앱의 `healthy`는 화면 서버 응답이며 자료 준비·매수 허가와는 별개입니다.
+
+시작에 실패했다면 다음 읽기 전용 출력으로 원인을 확인합니다. 백업·디스크 차단을 지우거나 긴 업데이트 전체를 바로 반복하지 않습니다.
+
+```bash
+sudo journalctl -b -u sessionquant.service --no-pager -n 80
+sudo docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml logs --tail=100 app
+```
+
+### 3. 별도 Cloud Shell 터미널에서 대시보드 열기
+
+새 Cloud Shell 탭의 프롬프트가 **`@cloudshell`**인지 확인한 뒤 실행합니다.
+
+```bash
+gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap -- -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8501:127.0.0.1:8501
+```
+
+출력 없이 기다리는 상태가 정상입니다. Cloud Shell 상단 **웹 미리보기 → 포트 변경 → 8501**로 엽니다. PC에 Google Cloud CLI를 설치해 같은 명령을 실행했다면 PC 브라우저에서 `http://localhost:8501`을 사용합니다.
+
+휴대폰은 같은 Google 계정으로 인증된 미리보기 링크를 이용할 수 있지만, Cloud Shell 세션·터널이 끝나면 링크도 끊깁니다. 인터넷 공개 대시보드가 아닙니다. 휴대폰 앱 전환이나 PC 종료로 터널이 끊겨도 **VM의 systemd/Docker 앱은 별도로 계속 실행**됩니다. 서버가 실제로 종료됐는지는 VM 상태로 확인합니다.
+
+### 4. 화면에서 매매 시작
+
+메인에서 `모의매매`, 시세 시각, 집중 종목·자료 상태를 확인합니다. **매매 시작**을 열고 확인란을 선택해야 신규 진입 평가를 허용합니다. 자동으로 켜지는 VM/앱과 자동매매 허용은 별개입니다. 자세한 확인 순서는 [Paper 운영](REALTIME_PAPER.md)을 따릅니다.
+
+## 대시보드가 안 열릴 때
+
+| 표시 | 의미와 다음 확인 |
+| --- | --- |
+| `Unable to forward ... port 8501` | Cloud Shell에서 화면 서버까지 연결되지 않음. VM 앱 상태와 터널을 각각 확인 |
+| `channel ... Connection refused` | 터널의 목적지 VM에서 8501에 응답하는 서버가 아직 없거나 종료됨. 앱 로그 확인 |
+| `Address already in use` | Cloud Shell의 8501을 기존 터널/프로세스가 사용 중. 기존 터널 상태를 확인하며 앱을 재설치하지 않음 |
+| `active account` 없음 | Cloud Shell 인증 문제. 콘솔 로그인·Cloud Shell 인증을 복구한 뒤 접속 |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` | 접속 대상의 키가 바뀜. 복구·교체 이력과 GCP 측 지문을 확인한 후 해당 항목만 갱신 |
+| `Broken pipe` | SSH 연결 종료. VM 종료 알림 직후라면 예상 결과이며, 그 외에는 서버 상태를 확인 |
+
+앱은 DB·장부 복원 뒤 HTTP 포트를 열 수 있습니다. 최초 3분의 실패 유예, DB 포함 최대 8분의 Compose 준비 확인, 바깥 systemd 10분 제한이 있습니다. 매번 이 시간을 모두 기다리는 것은 아닙니다. 앱이 종료되거나 제한을 넘기면 로그를 확인하고, 포트 오류만으로 서버가 느리다고 단정하지 않습니다.
+
+화면 내부에 DB 오류가 뜨면 터널은 연결된 상태일 수 있습니다. `MySQL 2013` 등 실제 오류와 `dashboard_read_failed`의 조회 항목·시간을 확인합니다. [오류별 진단](REALTIME_PAPER.md#문제별로-먼저-볼-것)을 참고하세요.
+
+## 장전 업데이트
+
+**CI는 구현되어 있고 CD 자동 배포는 구현되지 않았습니다.** GitHub의 `SessionQuant 회귀 검사`가 push·PR에서 정적 검사와 오프라인 테스트를 실행합니다. 선택적 MySQL 검사는 수동 실행입니다. 병합만 해서는 GCP 코드·이미지가 바뀌지 않습니다.
+
+업데이트는 검사가 통과하고 `main`에 포함된 **검토한 전체 커밋 SHA**로 고정합니다. 정규장 시작 전, 매매 시작을 누르기 전에 하며 백업·빌드 시간을 넉넉히 둡니다. 백업이 커지면 20분 이상 걸릴 수도 있습니다. 현재 커밋·설정은 운영 VM에서 확인합니다.
+
+```bash
+sudo git -C /opt/sessionquant log -1 --oneline
+sudo grep -E '^(SQ_SESSION_CONFIG|SQ_DB_NAMESPACE)=' /etc/sessionquant/app.env
+```
+
+휴대폰 연결이 끊겨도 작업이 남도록 **운영 VM 안에서** `tmux`를 사용합니다. 설치돼 있지 않으면 `sudo apt-get install -y tmux`로 준비합니다.
+
+```bash
+tmux new-session -A -s sq-update
+```
+
+이미 tmux 안이면 다시 만들지 않습니다. 재접속 후 `tmux attach -t sq-update`로 진행 결과를 확인합니다. 화면에 `(END)`가 나오면 `q`로 조회 화면만 닫습니다. 다른 터미널에서 같은 업데이트를 중복 실행하지 않습니다.
+
+검토한 버전의 `update_preopen.sh`와 그 파일의 SHA256을 준비한 뒤 다음 템플릿의 두 값을 바꿉니다. 예시 문자열 그대로면 실행 전에 중단합니다. `main`의 최신 파일을 확인 없이 받아 바로 실행하지 않습니다.
+
+```bash
+bash <<'BASH'
+set -Eeuo pipefail
+SQ_REV='검토한_전체_커밋_SHA_40자리'
+SQ_SCRIPT_SHA256='해당_스크립트의_SHA256_64자리'
+[[ "$SQ_REV" =~ ^[0-9a-f]{40}$ && "$SQ_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+  echo '검토한 커밋과 스크립트 해시를 먼저 지정하세요.' >&2
+  exit 1
+}
+SQ_SCRIPT=$(mktemp /tmp/sq-update.XXXXXXXX)
+trap 'rm -f -- "$SQ_SCRIPT"' EXIT
+curl -fsSL "https://raw.githubusercontent.com/taegyoo1104/pennyquant/$SQ_REV/deploy/gcp/update_preopen.sh" -o "$SQ_SCRIPT"
+printf '%s  %s\n' "$SQ_SCRIPT_SHA256" "$SQ_SCRIPT" | sha256sum --check
+sudo bash "$SQ_SCRIPT" "$SQ_REV" < /dev/null
+BASH
+```
+
+스크립트는 변경 파일·저장 공간·시간·종료 작업 여부를 확인하고 새 이미지를 먼저 만듭니다. 앱을 멈춘 뒤 새 Cloud Storage 백업에 성공해야 코드·이미지를 적용합니다. 알려진 복구 수정은 `/var/lib/sessionquant/update-backups/`에 보존하고, 다른 로컬 변경은 덮지 않고 중단합니다. DB·앱 자료·환경 파일을 초기화하지 않습니다.
+
+DB 변경 로그 OFF, 전송 크기 64MiB 이상, 테이블·백업 준비, 토스 인증·AAPL 조회를 확인하고 서비스를 다시 시작합니다. 완료 출력의 컨테이너·타이머와 대시보드를 확인한 뒤 **매매 시작을 직접** 누릅니다. 중간 실패 시 DB·환경 파일은 남지만 앱은 중지돼 있을 수 있습니다. 마지막 성공 단계와 오류를 먼저 보고 재개하며, 이미 성공한 긴 백업을 무조건 다시 실행하지 않습니다.
+
+이 도구는 현재 선택한 프로필을 유지합니다. 이전 REST 프로필에서 웹소켓으로 처음 바꾼다면 업데이트 완료 후 [전환 스크립트](WEBSOCKET_ROLLOUT.md#gcp에서-전환)를 별도로 실행합니다.
+
+### 고급: 장중 업데이트와 롤백
+
+장중은 대시보드의 종료 요청이 완료되고 보유·미체결·제어 요청이 없는 경우에만, 검증한 동일 스크립트에 `--paused-paper`를 명시합니다. 빌드 전후와 앱 종료 후 장부를 다시 확인하며 폐장까지 30분 미만이면 거부합니다. 자동 종료 타이머는 유지합니다.
+
+```bash
+sudo bash /tmp/sessionquant-update.sh "$SQ_REV" --paused-paper < /dev/null
+```
+
+이 예시는 앞서 다운로드·해시 검증한 파일을 `/tmp/sessionquant-update.sh`에 보관하고, 현재 셸의 `SQ_REV`에 검토한 전체 커밋 SHA를 지정한 경우입니다. 파일과 커밋이 일치해야 합니다. 실행 중인 엔진에 별도 연결 검사로 새 토스 토큰을 발급하지 않습니다. `preopen_check.sh`는 업데이트처럼 앱을 멈춘 점검 절차에서 사용합니다.
+
+복구 형식 v3는 v2를 읽고 첫 저장에서 분봉/시세 메타데이터를 분리합니다. 구버전은 v3를 거부합니다. 코드만 되돌리지 말고 업데이트 전 DB 백업과 대응 코드 버전을 함께 **별도 복구 환경에서** 확인합니다. 업데이트 뒤 생긴 기록도 먼저 별도 백업합니다. `reset --hard`, DB 디렉터리 삭제, `docker compose down -v`로 문제를 덮지 않습니다.
+
+## 종료와 다음 날 백업 확인
+
+일반 거래일에는 거래소 폐장 5분 후부터 **앱 저장·중지 → 백업 → 오래된 자료 정리 → DB·VM 종료**를 실행합니다. 한국시간 겨울에는 다음 날 06:05, 서머타임에는 05:05부터이며 조기 폐장은 달력을 따릅니다. 백업 시간만큼 실제 VM 종료는 늦어집니다.
+
+- 휴장일 또는 뉴욕 현지 날짜의 종료 시각 이후 켜면 새 수집 없이 1분 후 종료합니다. 한국시간 오후라도 뉴욕 날짜가 아직 전날이면 이 조건에 해당할 수 있습니다.
+- 달력 확인 실패는 새 거래를 시작하지 않고 15분 후 종료합니다. 비용 방지 타이머는 부팅 20시간 후 종료하며 월 비용 상한은 아닙니다.
+- 앱 오류 후에도 장 마감 타이머는 남습니다. 자동 종료는 전량 체결 보장이 아니며 잔량을 저장합니다.
+- 종료 백업은 최대 30분, 바깥 종료 서비스는 40분을 허용합니다. 실패하면 원본 DB·완료 백업을 보존하고 종료하며, 다음 앱 시작은 백업 성공 확인 전까지 차단합니다.
+
+장중에 수동으로 종료하려면 대시보드에서 청산과 잔량을 확인한 뒤 **운영 VM에서** 실행합니다. 이 명령은 프로그램만 끄는 것이 아니라 백업 후 VM 전원도 끕니다.
+
+```bash
+sudo bash /opt/sessionquant/deploy/gcp/stop.sh
+```
+
+종료 알림 뒤 SSH가 `Broken pipe`로 끝나는 것은 예상할 수 있습니다. **Cloud Shell**로 돌아와 다음을 확인합니다.
+
+```bash
+gcloud compute instances describe sessionquant-paper --project=sessionquant --zone=us-central1-a --format='yaml(status,lastStartTimestamp,lastStopTimestamp)'
+gcloud storage ls -l 'gs://sessionquant-sq-backups/daily/' --project=sessionquant
+```
+
+`TERMINATED`는 VM 중지입니다. 새 백업 파일이 해당 종료 시각에 생성됐는지는 따로 봅니다. 날짜·파일명의 `Z`는 UTC이며 한국시간은 9시간을 더합니다. 종료 전 VM 또는 다음 정상 점검에서 `/etc/sessionquant/backup-status`의 `UPLOADED` 시각·파일명이 버킷과 일치하는지도 확인합니다. VM이 꺼졌다는 것만으로 백업 성공을 단정하지 않습니다.
 
 ## 구성과 비용
 
-| 항목 | 현재 운영 구성 |
+| 항목 | 이 안내의 구성 |
 | --- | --- |
-| 서버 | `e2-standard-2` · 2 vCPU·메모리 8GB · Ubuntu 24.04 · `us-central1-a` |
-| DB | 같은 서버의 MySQL, 외부 접속 차단 |
-| 데이터 | 40GB 표준 영구 디스크. 서버 중지 후에도 보존 |
-| 화면 | SSH/IAP 터널을 통한 `localhost:8501` 접속 |
-| 백업 | 종료 시 SQL과 앱 자료를 묶음. 서버 안 최근 3개, 비공개 Cloud Storage 7일 보관 |
-| 시작 | GCP에서 서버를 수동 시작 → 예열 → 화면에서 매매 시작 |
-| 종료 | 뉴욕 거래소 달력의 폐장 + 5분. 저장·백업 소요 시간만큼 실제 VM 종료는 늦어질 수 있음 |
+| VM | `e2-standard-2` · 2 vCPU·8GB · Ubuntu 24.04 · `us-central1-a` |
+| DB | 같은 VM의 MySQL 8.4, 외부 포트 차단. Cloud SQL 사용 안 함 |
+| 디스크 | 40GB 표준 영구 디스크. 중지 후에도 보존 |
+| 화면 | IAP/SSH 터널의 8501. 인터넷 공개 포트 없음 |
+| 백업 | SQL+앱 자료, 로컬 최근 3개·비공개 Cloud Storage 7일 |
 
-서버를 사용한 시간의 CPU·메모리·외부 IPv4, 영구 디스크, 백업 저장/요청·전송량이 비용 항목이다. 고정 IP·Cloud SQL·Cloud NAT·로드밸런서·Cloud Scheduler는 만들지 않는다. 서버를 중지하면 계산 자원 요금은 멈추지만 디스크와 백업 비용은 남는다. 임시 외부 IP는 중지 후 반납되며 다시 켜면 달라질 수 있다.
+초기 2GB·20GB 구성에서 CPU 포화와 저장 공간 부족을 겪어 위 기준으로 확장했습니다. 더 큰 VM이 모든 API·DB 지연을 해결하지는 않으므로 처리 시간을 보고 판단합니다. 중지하면 VM 계산 요금은 멈추지만 디스크·백업·예약 IP 등 남는 자원의 비용은 확인해야 합니다. 무료 크레딧의 잔액·만료일은 결제 화면에서 확인하며 OpenAI 요금은 GCP 크레딧과 별개입니다.
 
-초기 2GB·20GB 구성에서 장중 CPU 포화와 저장 공간 부족을 확인해 위 사양으로 변경했다. 무료 사용량 대상 `e2-micro`와는 다르다. 추가 증설은 처리 시간 기록을 확인한 뒤 판단한다. 무료 크레딧의 남은 금액·만료일·사용 가능 서비스는 결제 화면에서 확인한다. 이는 확정 월 견적이나 비용 상한이 아니다. 비용은 실행 시간과 사용량으로 확인한다.
+새 설치 명령은 Cloud SQL·Cloud NAT·로드밸런서·Scheduler를 만들지 않습니다. 외부 IP를 고정할지는 별도 운영 선택입니다. [VM 중지/시작](https://cloud.google.com/compute/docs/instances/stop-start-instance), [무료 사용량](https://cloud.google.com/free/docs/free-cloud-features)을 참고하세요.
 
-OpenAI API 비용은 GCP 크레딧과 별개다. 기존 AI 월 한도 설정을 유지한다.
+## 고급: 최초 설치
 
-참고: [VM 중지와 시작](https://cloud.google.com/compute/docs/instances/stop-start-instance), [무료 크레딧·무료 사용량](https://cloud.google.com/free/docs/free-cloud-features).
+다음은 새 자원을 만드는 절차입니다. 이미 운영 서버가 있다면 반복하지 않습니다. 프로젝트 결제 계정과 예상 비용을 확인한 뒤 진행합니다.
 
-## 1. 프로젝트와 서버 만들기
+### Cloud Shell: 프로젝트와 VM 생성
 
 GCP 콘솔 상단의 프로젝트 선택 → **새 프로젝트**에서 이름을 `sessionquant`로 정하고 생성된 **프로젝트 ID**를 확인한다. 결제 메뉴에서 무료 크레딧이 있는 계정을 연결한다. ID는 비밀값이 아니지만 API 키·비밀번호는 채팅이나 Git에 올리지 않는다.
 
@@ -51,13 +210,13 @@ gcloud compute ssh sessionquant-paper --zone=us-central1-a --tunnel-through-iap
 
 VM 서비스 계정은 해당 백업 버킷에 새 파일을 쓰는 권한만 가진다. JSON 서비스 계정 키를 발급하지 않는다. 별도 사용자가 SSH를 이용할 때에는 IAP 터널·OS Login·서비스 계정 사용 권한을 추가로 확인해야 한다.
 
-## 2. 서버 안에서 설치
+### 운영 VM: 설치와 비밀값 입력
 
-SSH로 들어간 **서버 안에서** 실행한다. 새 Ubuntu 서버에는 Git이 없을 수 있으므로 먼저 설치한다. 프로젝트 ID는 GCE 메타데이터에서 읽고, 1단계의 기본 이름으로 만든 백업 버킷을 사용한다. 버킷 이름을 직접 다르게 정했다면 마지막 인자를 해당 이름으로 바꾼다.
+SSH로 들어간 **서버 안에서** 실행한다. 새 Ubuntu 서버에는 Git이 없을 수 있으므로 먼저 설치한다. 프로젝트 ID는 GCE 메타데이터에서 읽고, 생성 단계의 기본 이름으로 만든 백업 버킷을 사용한다. 버킷 이름을 직접 다르게 정했다면 마지막 인자를 해당 이름으로 바꾼다.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git curl ca-certificates
+sudo apt-get install -y git curl ca-certificates tmux
 sudo git clone --branch main https://github.com/taegyoo1104/pennyquant.git /opt/sessionquant
 cd /opt/sessionquant
 SQ_PROJECT_ID="$(curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/project/project-id)"
@@ -69,7 +228,37 @@ sudo nano /etc/sessionquant/app.env
 
 설치 스크립트는 기존 비밀번호·DB를 초기화하지 않는다. 이 단계에서는 자동 실행·종료를 아직 활성화하지 않으므로 키 입력·자료 이전을 마칠 수 있다. 서버가 켜진 동안에는 사용 시간이 누적된다.
 
-## 3. 기존 DB 이전
+**기존 DB를 가져오지 않는 완전히 새 설치만** 첫 앱 실행 전에 `sudo nano /etc/sessionquant/app.env`에서 생성된 `SQ_DB_NAMESPACE` 한 줄을 바꾸고 `SQ_SESSION_CONFIG`를 추가합니다. 같은 키를 중복으로 추가하지 않습니다.
+
+```dotenv
+SQ_SESSION_CONFIG=config/sessionquant.strategy-lab-websocket.example.yaml
+SQ_DB_NAMESPACE=sessionquant-strategy-lab-ws-v1
+```
+
+기존 DB를 이전한다면 먼저 아래 이전 절차에서 **원래 프로필·namespace를 유지**해 검증합니다. 장부가 확인되기 전에 새 이름으로 바꾸지 않습니다. 설치 스크립트 자체의 기본값은 아직 이전 `realtime-paper`입니다.
+
+앱 자료 디렉터리에 S&P 500 목록이 없다면 앱을 시작하기 전에 운영 VM에서 준비합니다. 이미 있는 목록은 이 절차로 덮어쓰지 않습니다.
+
+```bash
+if ! sudo test -e /var/lib/sessionquant/app/sp500-universe.json; then
+  sudo docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml run --rm --no-deps -T app \
+    python -m sessionquant universe-refresh --output data/sp500-universe.json
+fi
+```
+
+설치·설정·필요한 자료 이전을 마친 **거래일 장전**에 운영 VM에서 자동 시작과 종료 보호를 활성화합니다.
+
+```bash
+sudo systemctl enable sessionquant.service sessionquant-cost-guard.timer
+sudo systemctl start sessionquant-cost-guard.timer
+sudo systemctl start sessionquant.service
+```
+
+이후 매일은 위의 VM 시작 절차를 사용합니다. 기존 서버의 프로필 전환은 이 최초 설정 편집을 반복하지 말고 전용 전환 스크립트를 사용합니다.
+
+## 고급: 기존 DB 이전
+
+아래는 이전 `realtime-paper` 원장의 이전 예시입니다. 웹소켓 원장을 이전할 때는 조회 명령의 `--config`와 서버의 두 프로필 설정을 원본과 같게 맞춥니다.
 
 PC에서 실행 중인 프로그램을 먼저 종료한다. 이후 PC와 클라우드에서 같은 모의 프로그램을 동시에 운영하지 않는다. 클라우드 DB에는 새로 생성된 비밀번호를 사용하며 기존 PC DB 비밀번호를 복사하지 않는다.
 
@@ -95,40 +284,13 @@ sudo docker compose -f deploy/gcp/compose.yaml run --rm --no-deps app python -m 
 sudo bash deploy/gcp/backup.sh
 ```
 
-`history-status` 결과가 PC의 준비 종목과 맞는지, 백업이 버킷에 실제로 생겼는지 확인한다. 기본 실행 공간은 `paper_local_sessionquant-realtime-paper-v1`이다. PC에서 다른 `SQ_DB_NAMESPACE`를 사용했다면 서버에도 동일한 실행 공간을 지정해야 한다. `prepare-paper`를 다시 실행하지 않는다. 분봉 재수집 대신 기존 SQL의 분봉·시총·모의 장부·뉴스 원장을 그대로 이전한다.
+`history-status` 결과가 PC의 준비 종목과 맞는지, 백업이 버킷에 실제로 생겼는지 확인한다. 이 이전 예시의 실행 공간은 `paper_local_sessionquant-realtime-paper-v1`이다. 웹소켓 원장은 `paper_local_sessionquant-strategy-lab-ws-v1`이다. PC에서 다른 `SQ_DB_NAMESPACE`를 사용했다면 서버에도 동일한 실행 공간을 지정해야 한다. `prepare-paper`를 다시 실행하지 않는다. 분봉 재수집 대신 기존 SQL의 분봉·시총·모의 장부·뉴스 원장을 그대로 이전한다.
 
 `check-connections`는 GCP에서 실제 API의 읽기 연결을 확인하지만 주문·유료 AI 생성은 하지 않는다. 토스·DB와 사용하는 뉴스 공급자 연결을 확인한 뒤 진행한다. 이전과 백업 확인 후 평문 SQL 전송 파일은 PC와 서버에서 삭제하고 비공개 백업만 보관한다. PC의 원본 DB는 이전 검증이 끝날 때까지 보존한다.
 
-## 4. 수동 시작·자동 종료 활성화
+## 고급: 오래된 자료 정리
 
-**실제 거래일에 사용할 준비가 끝난 뒤** 서버 안에서 실행한다.
-
-```bash
-sudo systemctl enable sessionquant.service sessionquant-cost-guard.timer
-sudo systemctl start sessionquant-cost-guard.timer
-sudo systemctl start sessionquant.service
-```
-
-이후에는 GCP 콘솔 → Compute Engine → VM → `sessionquant-paper` → **시작**만 누르면 DB와 프로그램이 실행된다. 모의매매는 예열 후 대시보드에서 **매매 시작**을 눌러야 한다.
-
-PC의 Google Cloud CLI에서 아래 터널을 연 뒤 `http://localhost:8501`에 접속한다.
-
-```powershell
-gcloud compute ssh sessionquant-paper --project=YOUR_PROJECT_ID --zone=us-central1-a --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501
-```
-
-시작을 누른 뒤 PC나 터널을 꺼도 서버의 프로그램은 계속 실행된다. 정규장 종료 5분 뒤 자동으로 프로그램을 정리하고 백업 후 VM을 중지한다. 일반 거래일 한국시간으로 겨울에는 다음 날 06:05, 서머타임에는 다음 날 05:05부터 종료 처리를 시작한다. 조기 폐장은 거래소 달력을 따른다.
-
-- 휴장일 또는 그날 종료 시각 이후에 켜면 수집을 시작하지 않고 1분 뒤 꺼진다. 다음 거래일까지 켜 두지 않는다.
-- 달력을 읽지 못하면 거래를 시작하지 않고 15분 뒤 종료한다. 별도 비용 방지 타이머는 부팅 20시간 후 서버를 종료한다. 월 비용 상한 기능은 아니다.
-- 자동 종료는 체결 보장이 아니다. 미청산 모의 수량은 저장해 다음 실행에 복구하며 청산 완료로 바꾸지 않는다.
-- 프로그램 오류가 나도 마감 타이머는 남는다. 자동 재매매 시작은 하지 않는다.
-- 종료 백업은 최대 30분, 이를 감싸는 종료 서비스는 최대 40분을 허용한다. 먼저 끝나면 바로 VM 종료로 진행한다. DB 내보내기·검증·파일 묶기·업로드별 시간과 실패 단계를 기록한다.
-- 백업 실패 시 원본 DB와 기존 완료 백업을 보존하고 VM을 종료한다. 파일 묶기까지 끝났다면 새 로컬 백업도 남지만, 그 전에 실패하면 새 완료 파일은 없다. 다음 실행은 백업 성공 확인 전까지 차단한다. VM이 꺼졌다는 사실만으로 백업 성공을 판단하지 않는다.
-
-### 오래된 자료 정리
-
-실시간 Paper 예제 설정은 `retention.enabled: true`다. **프로그램 저장·중지 → 새 Cloud Storage 백업 업로드 성공 → 오래된 자료 정리 → DB·VM 종료** 순서로 실행한다. 업데이트용 백업이나 로컬 프로그램 종료에는 자동 정리를 붙이지 않는다. 이전 백업의 성공 기록만 남아 있거나 이번 백업이 실패하면 정리하지 않는다. 적용은 새 코드·이미지를 배포한 뒤 시작된다.
+권장 웹소켓 및 두 REST Paper 예제 설정은 `retention.enabled: true`다. **프로그램 저장·중지 → 새 Cloud Storage 백업 업로드 성공 → 오래된 자료 정리 → DB·VM 종료** 순서로 실행한다. 업데이트용 백업이나 로컬 프로그램 종료에는 자동 정리를 붙이지 않는다. 이전 백업의 성공 기록만 남아 있거나 이번 백업이 실패하면 정리하지 않는다. 적용은 새 코드·이미지를 배포한 뒤 시작된다.
 
 | 자료 | 기본 보관 기준 |
 | --- | --- |
@@ -148,7 +310,7 @@ gcloud compute ssh sessionquant-paper --project=YOUR_PROJECT_ID --zone=us-centra
 ```bash
 cd /opt/sessionquant
 sudo docker compose -f deploy/gcp/compose.yaml run --rm --no-deps -T app \
-  python -m sessionquant data-retention --config config/sessionquant.realtime-paper.example.yaml
+  sh -c 'exec python -m sessionquant data-retention --config "${SQ_SESSION_CONFIG:-config/sessionquant.realtime-paper.example.yaml}"'
 ```
 
 다음 기동 때 최근 자동 정리 결과를 확인한다. 명령은 **운영 VM 안에서** 실행한다.
@@ -163,76 +325,14 @@ sudo journalctl -u sessionquant-market-close.service --no-pager -n 60
 
 기본 보관 기간을 지나는 자료부터 적용하므로 새로 쌓인 자료가 당일 없어지지는 않는다. MySQL의 `DELETE`는 내부 공간을 재사용하게 하며 `.ibd` 파일을 즉시 축소하지 않을 수 있다. 자동 `OPTIMIZE TABLE`은 수행하지 않는다. 전략 재생·분봉·비용 근거는 계속 쌓일 수 있으므로 저장 공간 경보를 함께 유지한다. 정리 전 백업에도 이전 자료가 남고, 별도 정책에 따라 서버 최근 3개·Cloud Storage 7일 보관된다.
 
-## 5. 확인·업데이트·복구
+## 고급: 백업 실패와 복구
 
-서버 안에서 상태를 확인한다. `paper-status`, `news-status`는 외부 API를 호출하지 않는다.
+`/etc/sessionquant/backup-status`의 `UPLOADED` 시각·파일명과 버킷의 객체가 일치해야 업로드 완료입니다. 실패하면 앱 시작을 차단하고 원본 디스크를 유지합니다. 로그의 `phase`와 단계별 소요 시간을 확인하세요. 실패 표시를 지워 앱만 다시 켜지 않습니다. 원인을 해결한 뒤 DB가 실행 중인 점검 상태에서 `backup.sh`를 성공시켜야 합니다.
 
-```bash
-sudo systemctl list-timers 'sessionquant-*'
-sudo journalctl -u sessionquant.service -u sessionquant-market-close.service -u sessionquant-cost-guard.service --since today
-cd /opt/sessionquant
-sudo docker compose -f deploy/gcp/compose.yaml logs --tail=100 app
-sudo docker compose -f deploy/gcp/compose.yaml run --rm --no-deps app python -m sessionquant paper-status --config config/sessionquant.realtime-paper.example.yaml
-```
+새 백업은 압축 SQL `database.sql.gz`와 `app/`을 담은 `tar.gz`입니다. 옛 백업의 `database.sql`도 가져오기 도구가 지원합니다. 바깥 `tar.gz`는 압축률 0으로 묶어 이미 압축한 SQL을 다시 압축하는 시간을 줄입니다. 30분 제한은 모든 크기의 백업 완료를 보장하지 않습니다.
 
-점검·주말 뉴스 확인 때문에 자동 종료를 잠시 끄려면 실행 중 VM에서 다음을 적용한다. **서버가 계속 켜져 있으므로 점검 후 직접 중지하거나 자동 종료 설정을 다시 활성화해야 한다.**
+복구는 자동 실행을 끈 **별도의 빈 서버·DB**에서 합니다. 관리자 계정으로 비공개 버킷에서 내려받아 새 임시 폴더에 풀고, 위 DB 이전 절차로 SQL을 가져옵니다. `app/`은 `/var/lib/sessionquant/app`에 복원하고 소유자를 `1000:1000`으로 맞춥니다. 장부·분봉·뉴스·프로필과 대응 코드 버전을 확인한 뒤 운영 전환을 판단합니다. 운영 DB 위에 덮어쓰거나 기존 디스크를 삭제하지 않습니다.
 
-```bash
-sudo systemctl disable --now sessionquant.service sessionquant-cost-guard.timer
-sudo systemctl stop sessionquant-market-close.timer
-```
+백업 실패 단계에 따라 새 로컬 완료 파일이 없을 수 있습니다. 묶기까지 끝났다면 업로드에 실패해도 로컬 파일은 남지만, 그 이전에 실패했다면 완료 백업이 생성되지 않습니다. 기존 완료 백업과 원본 DB는 별도로 보존합니다.
 
-기존 운영 서버 업데이트는 아래 장전 절차를 사용한다. 서버에 수동 복구 수정이 남아 있을 수 있으므로 `reset --hard`나 강제 덮어쓰기를 하지 않는다. DB 디렉터리를 삭제하거나 `down -v`를 실행하지 않는다.
-
-새 백업은 압축한 `database.sql.gz`와 `app/`을 담은 `tar.gz`다. 이전 백업은 `database.sql`일 수 있으며 두 형식을 가져오기 도구가 지원한다. 복구는 자동 실행을 끈 **별도 빈 서버**에서만 한다. 관리자 계정으로 버킷에서 백업을 내려받아 임시 폴더에 풀고, 3단계와 같은 방식으로 SQL을 빈 DB에 가져온 뒤 `app/`을 `/var/lib/sessionquant/app`에 복사하고 소유자를 `1000:1000`으로 맞춘다. 최신 백업의 장부·분봉·뉴스 기록을 확인한 뒤 실행한다. 기존 운영 DB 위에 덮어쓰지 않는다. 이 설치의 버킷과 디스크는 VM을 삭제해도 별도로 남으므로 프로젝트를 종료할 때 잔여 저장 비용도 확인한다.
-
-압축 SQL을 다시 압축하는 시간을 줄이기 위해 바깥 `tar.gz`는 압축률 0으로 묶는다. 파일 형식과 복원 경로는 그대로다. `/etc/sessionquant/backup-status`가 `UPLOADED`이고 버킷에 같은 이름의 파일이 있어야 업로드 완료다. `FAILED`이면 로그의 `phase`와 소요 시간을 확인한다. 30분 제한도 모든 크기의 백업 완료를 보장하지는 않는다. [11월 18일 백업 시간 초과 기록](GCP_STORAGE_RECOVERY.md#2026-11-18-백업-시간-초과)을 참고한다.
-
-## 장전 업데이트와 확인
-
-앱의 최초 HTTP 응답은 DB·장부 복원 뒤 늦게 열릴 수 있다. 시작 후 3분은 상태 검사 실패를 유예하고, 정상 응답이 오면 즉시 준비된 것으로 판정한다. DB 시작을 포함한 Compose 준비 확인은 최대 8분, 바깥 systemd 시작 제한은 10분이다. 매번 그 시간을 기다리는 것은 아니며 예열 완료·매매 허가와도 별개다. 제한을 넘기거나 앱이 종료되면 실패를 표시하고 자동 종료 예약은 유지한다. 과거 버전에서 서비스가 실패로 남았어도 앱 컨테이너가 나중에 healthy가 될 수 있으므로 상태·로그를 함께 확인한다.
-
-2026-11-17 장은 한국시간 **23:30 개장**, 현재 전략의 신규 매수 판단은 다음 날 **00:45부터**다. 22:00~22:30에 VM을 켜서 업데이트·예열을 시작하는 것을 권장한다. 실제 소요 시간은 API 응답에 따라 달라지며 자료 준비 완료를 보장하는 시각은 아니다. 휴장일·폐장 이후 부팅은 자동 종료하므로 장전 작업 시간에 실행한다.
-
-1. **Cloud Shell**에서 운영 VM을 시작하고 외부 IP를 확인한다. IP가 달라졌다면 토스 API 허용 IP를 수정한다. 복구 VM은 켜지 않는다.
-
-```bash
-gcloud compute instances start sessionquant-paper --project=sessionquant --zone=us-central1-a
-gcloud compute instances describe sessionquant-paper --project=sessionquant --zone=us-central1-a --format='value(networkInterfaces[0].accessConfigs[0].natIP)'
-gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap
-```
-
-2. **운영 VM**에서 검사가 통과하고 main에 병합된 커밋의 `deploy/gcp/update_preopen.sh`를 별도 임시 파일로 내려받아 실행한다. 실행 인자는 해당 전체 커밋 SHA다. 릴리스 안내에 제공한 고정 주소와 SHA256 검증 명령을 사용한다. 실행 중 SSH 창은 열어 둔다. 이 스크립트는 미국 정규장 시작 전에만 동작한다.
-
-업데이트는 알려진 복구 파일 변경만 허용하며 원본을 `/var/lib/sessionquant/update-backups/`에 보관한다. 다른 수정·준비된 Git 변경이 있으면 덮지 않고 중단한다. `.env`·서버 환경 파일·DB·앱 자료는 보존한다. 배포된 Git 체크아웃은 검토한 커밋으로 고정되며 기존 브랜치 이력은 남는다. 이후 업데이트도 같은 도구를 사용한다.
-
-새 이미지 빌드 후 앱을 멈추고 새 Cloud Storage 백업을 만든다. DB 변경 로그 OFF, 전송 크기 64MiB 이상, 테이블 준비, 백업 성공, 토스 인증·AAPL 조회를 확인한 뒤 앱을 다시 실행한다. 실패하면 오류를 해결하고 재실행한다. 자동으로 매매 시작을 누르거나 초기 모의 장부를 만들지 않는다. 저장 공간 장애를 처음 복구하는 서버라면 [저장 공간 복구 안내](GCP_STORAGE_RECOVERY.md)가 먼저 필요하다.
-
-3. **완료 출력**에서 `sessionquant-market-close.timer`와 `sessionquant-storage-guard.timer`가 활성 상태인지 확인한다. 일반 거래일 겨울 기준 다음 날 06:05부터 종료·백업하고 VM도 꺼진다. 실제 전원 종료까지는 몇 분 더 걸릴 수 있다.
-
-4. 대시보드에서 예열 완료와 운영 종목 수를 확인하고 **매매 시작**을 직접 누른다. 장전에는 장중 시세·집중 종목·전략 판단이 대기일 수 있다. 개장 뒤 시장·종목에서 종목/SPY 비교 가격과 거래대금이 모이는지, 집중 제외 이유와 처리 속도 기록이 갱신되는지 본다. **ETF 관측 가격 표시만으로 분석 검증 완료를 판단하지 않는다.**
-
-서버 안에서 연결 점검만 다시 할 때는 `sudo bash /opt/sessionquant/deploy/gcp/preopen_check.sh`를 사용한다. 이 점검은 DB를 읽고 토스 인증·현재가만 조회한다. 주문·유료 LLM 생성은 하지 않으며 뉴스 분석의 의미적 정확성이나 전략 체결을 보증하지 않는다. 실행 중인 엔진은 별도로 설정된 뉴스 수집·분석을 계속할 수 있다.
-
-Cloud Shell에서 화면 터널은 별도 터미널에 연다.
-
-```bash
-gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap -- -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8501:127.0.0.1:8501
-```
-
-웹 미리보기 포트는 8501이다. 이미 사용 중이면 기존 터널을 이용한다. 미리보기 호스트가 바뀌었을 때만 `STREAMLIT_BROWSER_SERVER_ADDRESS`를 새 호스트와 맞춘다. 터널을 닫아도 VM의 엔진은 계속 실행된다.
-# 장중 수집 개선 버전 업데이트
-
-2026-11-18 개선 버전은 반복 시총 조회, 호가마다 전체 분봉 재저장, 참고 ETF 뒤에서 밀리는 분봉 순환을 줄인다. 모든 종목의 실시간성이나 매수 성립을 보장하지 않는다. 운영 결과는 시장·종목의 처리 속도 표와 종목별 계산 기준 시각으로 확인한다.
-
-업데이트할 커밋이 main에 일반 병합된 뒤 해당 커밋의 `deploy/gcp/update_preopen.sh`를 내려받아 실행한다. 기본 실행은 장전만 허용한다. 장중은 대시보드에서 매매 종료가 완료되고 보유·미체결이 없는 경우에만 `--paused-paper`를 명시한다. 도구는 종료 상태를 빌드 전후와 프로그램 종료 후 다시 검증한다. 폐장까지 30분 미만이면 중단하며 자동 종료 예약을 해제하지 않는다.
-
-```bash
-sudo bash /tmp/sessionquant-update.sh <검토한_전체_커밋_SHA> --paused-paper
-```
-
-프로그램 중단 전에 이미지를 만들고, DB와 앱 자료의 Cloud Storage 백업 성공 후 코드·이미지를 변경한다. 완료 후 자동 매매는 대기 상태로 시작하므로 자료 준비와 기존 상태를 확인하고 매매 시작을 직접 누른다. 오류가 발생하면 DB·환경 파일은 보존되지만 프로그램이 중지된 상태일 수 있으므로 완료 문구 없이 재개됐다고 판단하지 않는다.
-
-**복구 형식 v3 안내:** 새 버전은 v2 상태를 읽고 첫 저장에서 분봉/시세 메타데이터 분리 형식 v3로 전환한다. 구버전은 이를 거부한다. 코드만 구버전으로 바꾸지 말고, 롤백이 필요하면 업데이트 전 DB 백업과 해당 코드 버전을 함께 복원한다. 업데이트 뒤 생성된 모의거래 기록을 잃지 않도록 먼저 별도 백업한다.
-
-모바일 앱을 전환하면 SSH가 끊길 수 있다. `tmux new-session -A -s sq-update` 안에서 실행하고 재접속 시 `tmux attach -t sq-update`로 기존 작업을 확인한다. 같은 업데이트를 중복 실행하지 않는다.
+VM을 삭제해도 보존한 디스크·스냅샷·버킷·예약 IP는 남을 수 있습니다. 복구 자원을 정리할 때는 현재 연결 관계와 필요한 백업을 먼저 확인합니다. 과거 장애와 복구 근거는 [저장 공간 복구 기록](GCP_STORAGE_RECOVERY.md), 특히 [백업 시간 초과 기록](GCP_STORAGE_RECOVERY.md#2026-11-18-백업-시간-초과)을 참고하세요.
