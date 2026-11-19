@@ -165,3 +165,6 @@ def render_benchmarks(view, context, *, now=None):
         return
     st.markdown('<div class="sq-section"><h2>시장 흐름</h2><p>참고용 · 매수 조건과 별개</p></div>',unsafe_allow_html=True)
     st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols)),unsafe_allow_html=True)
+    st.caption('현재 연결한 토스 API에서 해당 미국 지수를 직접 제공하지 않아 ETF로 시장 흐름을 보여드려요. '
+        'SPY는 S&P 500, QQQ는 나스닥 100, SOXX는 미국 반도체 업종을 살펴보는 용도입니다. '
+        '지수 자체의 수치는 아니며, SOXX는 필라델피아 반도체 지수와 구성 종목·비중이 달라요.')
