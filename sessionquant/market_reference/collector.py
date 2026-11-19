@@ -12,11 +12,12 @@ from .store import ReferenceStore
 class MarketReferenceMonitor:
     """주문·적격성 인터페이스가 없다. 공급자 권한 증거 미등록은 UNKNOWN이다."""
     def __init__(self,repo,*,permissions=None,clock,price_seconds=30,candle_seconds=180,calls_per_cycle=2,synthetic=False,
-                 symbols=None,display_only=False):
+                 symbols=None,display_only=False,stream_prices=False):
         from .settings import reference_settings
         config=reference_settings({'symbols':list(DEFAULT_REFERENCE_SYMBOLS) if symbols is None else symbols,'display_only':display_only})
         self.symbols=tuple(config['symbols'])
         self.display_only=config['display_only']
+        self.stream_prices=bool(stream_prices and self.display_only)
         self.store = ReferenceStore(repo)
         self.permissions = permissions or {}
         self.clock = clock
@@ -43,10 +44,11 @@ class MarketReferenceMonitor:
             return self.store.publish(now,symbols=self.symbols)
         schedules = self.store.state['schedule']
         jobs = [('prices','*',self.price_seconds)] if self.display_only else [('stocks','*',86400),('prices','*',self.price_seconds)]
+        if self.stream_prices:jobs=[]
         for symbol in self.symbols:
             # A failed optional request must not hide the daily comparison all day.
             daily_interval = 300 if self.display_only and self.store.state['capabilities'].get(symbol,{}).get('daily',{}).get('status') != 'OBSERVED' else 86400
-            jobs += [('candle',symbol,self.candle_seconds),('daily',symbol,daily_interval)] if self.display_only else [
+            jobs += [('daily',symbol,daily_interval)] if self.stream_prices else [('candle',symbol,self.candle_seconds),('daily',symbol,daily_interval)] if self.display_only else [
                 ('orderbook',symbol,60),('candle',symbol,self.candle_seconds),('daily',symbol,86400)]
         due = [(stream,symbol,interval) for stream,symbol,interval in jobs
                if not schedules.get(stream+':'+symbol) or (now-utc(schedules[stream+':'+symbol])).total_seconds()>=interval

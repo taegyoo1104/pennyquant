@@ -70,6 +70,7 @@ llm:
 market_filter_enabled: false
 market_reference:
   enabled: true
+  websocket_chart: true
   symbols: [SPY, QQQ, SOXX]
   display_only: true
   price_seconds: 30

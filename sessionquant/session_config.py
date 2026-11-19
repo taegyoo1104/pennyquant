@@ -168,7 +168,9 @@ class SessionConfig:
         from .portfolio.selection import CandidateSettings
         if not isinstance(self.candidate_selection,dict):raise ValueError('후보 선정 설정은 객체여야 합니다.')
         CandidateSettings(**self.candidate_selection)
-        reference_settings(self.market_reference)
+        refs=reference_settings(self.market_reference)
+        if refs['websocket_chart'] and (self.source!='toss' or self.quote_transport!='websocket'):
+            raise ValueError('실시간 참고 차트는 토스 웹소켓 프로필에서 사용하세요.')
         from .market_reference.risk import filter_settings
         filter_settings(self.macro_reference_filter)
         from .news.catalog import merge_companies

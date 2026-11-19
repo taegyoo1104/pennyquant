@@ -52,6 +52,7 @@ class DashboardData:
     watchlist_rvol: dict = field(default_factory=dict)
     history_backfill: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
+    benchmark_stream: dict = field(default_factory=dict)
     fred_references: list = field(default_factory=list)
     news_status: dict = field(default_factory=dict)
     strategy_explanation: dict = field(default_factory=dict)
@@ -583,7 +584,7 @@ def main() -> None:
         page=st.radio('화면',PAGES,key='dashboard_page',label_visibility='collapsed')
         st.divider()
         refresh = st.toggle("자동 갱신", value=True, key='dashboard_auto_refresh',
-                            help='시세·보유 5초 · 선택한 시장 표 10초 · 메인 뉴스 집계 60초. 꺼도 수집과 매매는 계속됩니다.')
+                            help='시장 흐름 차트 2초 · 시세·보유 5초 · 선택한 시장 표 10초 · 메인 뉴스 집계 60초. 꺼도 수집과 매매는 계속됩니다.')
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
         st.toggle('원본 기록도 보기', value=False, key='dashboard_raw_data',
@@ -598,7 +599,7 @@ def main() -> None:
     interval = refresh_interval(page, refresh, panel=panel)
     st.sidebar.caption(f'현재 상태는 {interval}초마다 갱신합니다.' if interval else '현재 표는 수동으로 갱신합니다.')
     if page == '대시보드' and refresh:
-        st.sidebar.caption('뉴스·AI 요약은 60초마다 갱신합니다.')
+        st.sidebar.caption('시장 흐름 차트는 2초, 뉴스·AI 요약은 60초마다 갱신합니다.')
 
     @st.fragment(run_every=interval)
     def monitor() -> None:
