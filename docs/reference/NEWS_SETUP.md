@@ -16,7 +16,7 @@
 python -m sessionquant news-status --config config/sessionquant.strategy-lab-websocket.example.yaml --output data/news-check-01.json
 ```
 
-`validated_responses`는 응답 검증 통과 건수이며 분류 정답률이 아니다. 기사 본문·인용 근거·분류·후보 가점을 대조해야 한다. 전략 판단 설명은 DB 제어 상태 `strategy_explanation_v1`에 따로 저장되므로 기사 분류 건수와 같은 값으로 해석하지 않는다. 추천 전략 실험 예시 두 가지는 설명 간격 최소 5분·하루 최대 80회 시도로 설정한다. 입력된 판단이 바뀌지 않으면 다시 생성하지 않으며, 뉴스 분석과 공유하는 호출·비용 한도도 적용한다.
+`validated_responses`는 응답 검증 통과 건수이며 분류 정답률이 아니다. 기사 본문·인용 근거·분류·후보 가점을 대조해야 한다. 전략 판단 설명은 DB 제어 상태 `strategy_explanation_v1`에 따로 저장되므로 기사 분류 건수와 같은 값으로 해석하지 않는다. 추천 전략 실험 예시 두 가지는 정규장 중 설명 간격 최소 5분·하루 최대 80회 시도로 설정한다. 장 전 별도 브리핑 호출은 쉬며 뉴스 수집·분석은 계속한다. 입력된 판단이 바뀌지 않으면 다시 생성하지 않으며, 뉴스 분석과 공유하는 호출·비용 한도도 적용한다.
 
 ## 발급할 키와 필요 없는 키
 
@@ -76,17 +76,18 @@ llm:
   primary_model: gpt-4.1-mini
   enable_escalation: false
   format_retry_limit: 0
-  daily_primary_call_cap: 150
-  hourly_primary_call_cap: 30
-  monthly_soft_budget_usd: '2.0'
+  daily_primary_call_cap: 600
+  hourly_primary_call_cap: 120
+  monthly_soft_budget_usd: '3.0'
   monthly_hard_budget_usd: '3.0'
 strategy_explanation:
   enabled: true
+  regular_session_only: true
   min_interval_seconds: 300
   max_attempts_per_day: 80
 ```
 
-뉴스 분석과 AI 브리핑을 합쳐 시간당 최대 30회, 하루 최대 150회 요청한다. 브리핑의 하루 80회 시도 한도는 이와 별도로 적용하며 요청 횟수를 추가로 보장하지 않는다. 시간·날짜 경계는 UTC 기준이므로 한국시간에는 매시 정각과 오전 9시에 새 구간이 시작된다. 월간 비용 제한은 기존 2달러·3달러를 유지한다. OpenAI 충전 잔액과 별개인 프로그램 내부 한도다. 설정 파일 변경은 실행 중인 프로그램에 즉시 반영되지 않으며, 업데이트 후 재시작할 때 읽는다. 저장된 사용량은 재시작해도 유지된다.
+뉴스 분석과 AI 브리핑을 합쳐 시간당 최대 120회, 하루 최대 600회 요청한다. 브리핑의 하루 80회 시도 한도는 이와 별도로 적용하며 요청 횟수를 추가로 보장하지 않는다. 시간·날짜 경계는 UTC 기준이므로 한국시간에는 매시 정각과 오전 9시에 새 구간이 시작된다. 월간 소프트·하드 비용 제한은 모두 3달러다. 기존 2달러 조기 제한을 없애되 월 3달러 상한은 유지한다. OpenAI 충전 잔액과 별개인 프로그램 내부 한도다. 설정 파일 변경은 실행 중인 프로그램에 즉시 반영되지 않으며, 업데이트 후 재시작할 때 읽는다. 저장된 사용량은 재시작해도 유지된다. 실패·한도 도달 시 마지막 성공 브리핑과 그 기준 시각을 유지하며, 시간당·하루·월 금액·제공 서비스 대기 사유를 구분한다.
 
 새 엔진에서 `.env`의 `OPENAI_MODEL`만 변경해도 이 모델 설정은 바뀌지 않는다. `OPENAI_MODEL`은 이전 호환 분석 경로에서 사용한다. 다른 모델을 시험하려면 접근·생성 검증 후 YAML의 `primary_model`을 변경한다. 모델별 단가는 코드의 알려진 표 또는 명시 설정값으로 계산하며 실제 청구액을 확정한 것으로 간주하지 않는다.
 

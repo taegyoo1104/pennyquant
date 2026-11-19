@@ -36,9 +36,10 @@ class ExplanationSettings:
     enabled: bool = False
     min_interval_seconds: int = 600
     max_attempts_per_day: int = 20
+    regular_session_only: bool = False
 
     def __post_init__(self):
-        if type(self.enabled) is not bool:
+        if type(self.enabled) is not bool or type(self.regular_session_only) is not bool:
             raise ValueError('AI 설명 활성화는 불리언이어야 합니다.')
         if type(self.min_interval_seconds) is not int or not 60<=self.min_interval_seconds<=86400:
             raise ValueError('AI 설명 간격은 60~86400초입니다.')
@@ -114,8 +115,25 @@ class StrategyExplainer:
         self.settings=ExplanationSettings(**(settings or {}))
         self.state=repo.get_control(STATE,{})
 
+    def _publish(self, result):
+        # Keep one successful explanation, with its own facts/time, across failed
+        # refreshes and process restarts. Never retain a recursive history.
+        if result['status'] != 'SUCCEEDED':
+            previous = self.repo.get_control(VIEW, {}) or {}
+            saved = previous if previous.get('status') == 'SUCCEEDED' else previous.get('last_success', {})
+            if saved.get('status') == 'SUCCEEDED':
+                result['last_success'] = {k:v for k,v in saved.items() if k != 'last_success'}
+        self.repo.set_control(VIEW, result)
+        return result
+
     async def refresh(self, data, now):
-        now=utc(now);key=fingerprint(data);state=self.state
+        now=utc(now)
+        if self.settings.regular_session_only:
+            from .market.bars import session_bounds
+            bounds = session_bounds(now)
+            if not bounds or not bounds[0] <= now < bounds[1]:
+                return None
+        key=fingerprint(data);state=self.state
         if not self.settings.enabled or state.get('success_key')==key:return None
         if state.get('last_attempt_at') and now<utc(state['last_attempt_at'])+timedelta(seconds=self.settings.min_interval_seconds):
             return None
@@ -130,7 +148,7 @@ class StrategyExplainer:
             self.state['attempts']=attempts+1
         self.repo.set_control(STATE,self.state)
         if result['status']!='PENDING':
-            self.repo.set_control(VIEW,result);return result
+            return self._publish(result)
         metadata={'logical_analysis_id':key,'source_kind':'strategy_snapshot','prompt_version':VERSION,
                   'content_hash':key,'article_id':'strategy-snapshot:'+key,'role':'EXPLANATION_ONLY'}
         try:
@@ -146,7 +164,8 @@ class StrategyExplainer:
                     response.raise_for_status()
                     parsed,_=parse_completion(response)
                     result.update(status='SUCCEEDED',sections=validate(parsed,data),generated_at=utc(self.analyzer._clock()).isoformat())
-                except BudgetBlocked:result.update(status='BUDGET_BLOCKED',error='budget_or_provider_cooldown')
+                except BudgetBlocked as exc:
+                    result.update(status='BUDGET_BLOCKED',error='budget_or_provider_cooldown',limit_reason=exc.code)
                 except ValidationFailure as exc:
                     result.update(status='INVALID_RESPONSE',validation_error_code=exc.code,failed_field=exc.field)
                 except Exception as exc:
@@ -159,5 +178,4 @@ class StrategyExplainer:
         if result['status']=='SUCCEEDED':
             self.state['success_key']=key
             self.repo.set_control(STATE,self.state)
-        self.repo.set_control(VIEW,result)
-        return result
+        return self._publish(result)

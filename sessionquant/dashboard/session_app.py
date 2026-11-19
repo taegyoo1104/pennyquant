@@ -244,13 +244,18 @@ def build_view(data: DashboardData, now: datetime | None = None) -> dict:
         value = qty * mark if mark is not None else None
         weight = value / equity * 100 if value is not None and equity is not None and equity > 0 else None
         stop = decimal_value(row.get("stop_price"))
+        entry_fee = decimal_value(row.get("entry_fee", "0"))
+        cost = qty * avg + entry_fee if avg is not None and avg > 0 and entry_fee is not None and entry_fee >= 0 else None
+        pnl = value - cost if value is not None and mark > 0 and cost is not None else None
+        return_pct = pnl / cost * 100 if pnl is not None and cost > 0 else None
         position_view.append({
             "종목": symbol, "보유 수량": str(qty), "평균 매수가": usd(avg), "평가액": usd(value),
             "비중": f"{weight:.1f}%" if weight is not None else "—",
             "최초 진입 금액": usd(row.get("initial_amount", row.get("initial_notional"))),
             "추가매수 금액": usd(row.get("add_amount", row.get("add_notional"))),
             "추가매수 횟수": row.get("add_count", row.get("adds", row.get("additions", 0))), "손절 기준": usd(stop),
-            "평가 손익": usd((mark - avg) * qty - decimal_value(row.get("entry_fee"), Decimal(0))) if mark is not None and avg is not None else "—",
+            "평가 손익": usd(pnl),
+            "평가 수익률": f"{return_pct:+.2f}%" if return_pct is not None else "—",
             "가격 기준": "최근 매수호가" if mark is not None else "시세 미확인/만료",
         })
     usage = data.tables.get("llm_usage", [])

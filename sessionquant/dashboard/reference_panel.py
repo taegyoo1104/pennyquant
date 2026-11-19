@@ -1,10 +1,10 @@
 """기존 시장 탭에 거래 후보와 구분된 참고 ETF를 표시한다."""
-from ..market_reference.contracts import REFERENCES
+from ..market_reference.contracts import DEFAULT_REFERENCE_SYMBOLS, REFERENCES
 
 
 def reference_benchmarks_visible(context):
     return (context.get('benchmark_collection_enabled') is not False
-            or bool({'SPY','QQQ'} & set(context.get('market_reference_symbols') or [])))
+            or bool({'SPY','QQQ','SOXX'} & set(context.get('market_reference_symbols') or [])))
 
 
 def observed_price(item, symbol, now, quotes=None):
@@ -44,9 +44,9 @@ def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True):
     now = now or datetime.now(timezone.utc)
     rows = []
     for symbol, (_, label) in REFERENCES.items():
-        if 'active_symbols' in view and symbol not in view['active_symbols']:
+        if symbol not in view.get('active_symbols', DEFAULT_REFERENCE_SYMBOLS):
             continue
-        if not show_benchmarks and symbol in {'SPY', 'QQQ'}:
+        if not show_benchmarks and symbol in {'SPY', 'QQQ', 'SOXX'}:
             continue
         item = (view.get('items') or {}).get(symbol) or {}
         windows = item.get('windows') or {}

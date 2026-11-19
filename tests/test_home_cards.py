@@ -24,6 +24,7 @@ def test_current_focus_shows_observed_price_and_three_steps_without_buy_permissi
     state,assessment=snapshots();before=deepcopy((state,assessment))
     card=focus_cards(state,assessment,now=NOW)[0]
     assert card['price']=='$191.25' and card['price_kind']=='관측가'
+    assert card['name']=='애플'
     assert card['price_fresh'] and card['stage_fresh'] and card['monitored']
     assert card['title']=='반등 확인'
     assert [s['state'] for s in card['steps']]==['done']*3
@@ -96,7 +97,7 @@ def test_stage_does_not_lock_in_and_order_approval_is_not_fill():
 
 def test_html_escapes_dynamic_values_and_has_only_allowlisted_classes():
     malicious='<img src=x onerror="alert(1)">'
-    card={'symbol':malicious,'price':malicious,'price_kind':malicious,'price_status':malicious,
+    card={'symbol':malicious,'name':malicious,'price':malicious,'price_kind':malicious,'price_status':malicious,
           'time_label':malicious,'title':malicious,'explanation':malicious,
           'steps':[{'label':malicious,'state':'done" onclick="alert(1)'}]}
     html=focus_cards_html([card])
@@ -136,3 +137,12 @@ def test_preopen_message_requires_confirmed_session_and_current_focus(monkeypatc
     assert focus_cards(state,assessment,now=NOW)[0]['title']=='판단 대기'
     state['updated_at']=(NOW-timedelta(hours=1)).isoformat()
     assert focus_cards(state,assessment,now=NOW)[0]['title']=='목록 갱신 대기'
+
+
+def test_korean_provider_name_overrides_alias_and_unknown_symbols_are_not_guessed():
+    state,assessment=snapshots()
+    state['items'][0]['name']='애플 보통주'
+    card=focus_cards(state,assessment,now=NOW)[0]
+    assert card['name']=='애플 보통주' and '애플 보통주' in focus_cards_html([card])
+    state['items'][0].update(ticker='UNLISTED',name='Unlisted Company')
+    assert focus_cards(state,assessment,now=NOW)[0]['name']==''

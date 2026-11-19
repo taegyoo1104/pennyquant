@@ -1,4 +1,4 @@
-"""Two informational ETF cards; no strategy, order, or network calls."""
+"""Informational ETF cards; no strategy, order, or network calls."""
 from datetime import datetime, timedelta, timezone
 from html import escape
 from decimal import Decimal
@@ -9,7 +9,7 @@ from ..models import utc
 from .home_cards import CARD_STYLE, _positive
 from .reference_panel import observed_price
 
-BENCHMARKS = {'SPY':'S&P 500', 'QQQ':'나스닥 100'}
+BENCHMARKS = {'SPY':'S&P 500', 'QQQ':'나스닥 100', 'SOXX':'미국 반도체 ETF'}
 COLORS = {'up':'#f87171', 'down':'#60a5fa', 'flat':'#94a3b8'}
 NY, KST = ZoneInfo('America/New_York'), ZoneInfo('Asia/Seoul')
 
@@ -22,12 +22,17 @@ def _previous_day(now):
     return None
 
 
-def benchmark_cards(view, now=None):
+def benchmark_cards(view, now=None, *, symbols=None):
     now = utc(now or datetime.now(timezone.utc))
     bounds = session_bounds(now)
     previous_day = _previous_day(now)
     cards = []
+    selected = symbols if symbols is not None else (view or {}).get('active_symbols')
+    if selected is None:
+        selected = ('SPY', 'QQQ')  # Older profiles did not collect SOXX.
     for symbol, name in BENCHMARKS.items():
+        if symbol not in selected:
+            continue
         item = ((view or {}).get('items') or {}).get(symbol) or {}
         latest = observed_price(item, symbol, now)
         price = _positive(latest['price']) if latest else None
@@ -117,12 +122,13 @@ def _chart(points, reference, symbol):
         ' 전일 종가 대비 등락 흐름"><path d="M8 16H292 M8 112H292" stroke="#26354a" stroke-width="1"/>'+
         '<path d="M8 64H292" stroke="#8192a7" stroke-width="1" stroke-dasharray="4 4"/>'+strokes+''.join(dots)+'</svg></div>'+
         '<div class="sq-benchmark-axis"><span>'+first.astimezone(KST).strftime('%H:%M')+'</span><span>'+
-        last.astimezone(KST).strftime('%H:%M')+' KST</span></div>')
+        last.astimezone(KST).strftime('%H:%M')+' KST</span></div>'+
+        ('<div class="sq-benchmark-trend">분봉 일부 없음 · 빈 구간은 잇지 않아요.</div>' if len(parts)>1 else ''))
 
 
 def benchmark_cards_html(cards):
     style = '''<style>
-.sq-benchmark-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0 20px}
+.sq-benchmark-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:14px 0 20px}
 .sq-benchmark-name{color:var(--sq-muted,#a7b8ca);font-size:.78rem;margin-top:3px}
 .sq-benchmark-change{font-size:.95rem;font-weight:650;margin-top:10px;font-variant-numeric:tabular-nums}
 .sq-benchmark-change small{font-size:.7rem;font-weight:400;color:var(--sq-muted,#a7b8ca);margin-left:6px}
@@ -134,11 +140,11 @@ def benchmark_cards_html(cards):
 .sq-benchmark-axis{margin-left:40px;display:flex;justify-content:space-between;font-size:.68rem;color:var(--sq-muted,#a7b8ca)}
 .sq-benchmark-empty{height:128px;display:flex;align-items:center;justify-content:center;color:var(--sq-muted,#a7b8ca);font-size:.78rem;text-align:center}
 .sq-benchmark-trend{font-size:.7rem;color:var(--sq-muted,#a7b8ca);margin-top:10px}
-@media(max-width:540px){.sq-benchmark-grid{gap:10px}.sq-benchmark-change small{display:block;margin:3px 0}}
+@media(max-width:540px){.sq-benchmark-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sq-benchmark-card:last-child:nth-child(odd){grid-column:1/-1}.sq-benchmark-change small{display:block;margin:3px 0}}
 @media(max-width:359px){.sq-benchmark-grid{grid-template-columns:1fr}}
 </style>'''
     elements = []
-    for card in cards[:2]:
+    for card in cards:
         e = lambda key: escape(str(card.get(key,'')),quote=True)
         color = COLORS.get(card.get('tone'), COLORS['flat'])
         badge = ' fresh' if card.get('price_fresh') else ''
@@ -158,4 +164,4 @@ def render_benchmarks(view, context, *, now=None):
     if symbols is not None and not set(BENCHMARKS).intersection(symbols):
         return
     st.markdown('<div class="sq-section"><h2>시장 흐름</h2><p>참고용 · 매수 조건과 별개</p></div>',unsafe_allow_html=True)
-    st.markdown(benchmark_cards_html(benchmark_cards(view,now)),unsafe_allow_html=True)
+    st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols)),unsafe_allow_html=True)

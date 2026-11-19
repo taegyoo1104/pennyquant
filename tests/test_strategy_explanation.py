@@ -143,3 +143,53 @@ def test_saved_explanation_is_visible_with_source_time_and_call_id(tmp_path,monk
     repo=Repository(path,backend='sqlite')
     assert repo.get_control(VIEW)['sections']==sections
     repo.close()
+
+
+async def test_saved_success_survives_limits_restart_and_next_success(tmp_path):
+    from sessionquant.macro.budget import BudgetBlocked
+    from sessionquant.dashboard.explanation_panel import saved_explanation, explanation_status
+    repo=Repository(tmp_path/'retained.db',backend='sqlite')
+    data=inputs();clock=[NOW];fault=[None]
+    async def handler(req):
+        return httpx.Response(200,json=response(data))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:clock[0])
+        reserve=analyzer.ledger.reserve
+        async def maybe_block(*args,**kwargs):
+            if fault[0]:raise BudgetBlocked('secret-should-not-be-persisted',code=fault[0])
+            return await reserve(*args,**kwargs)
+        analyzer.ledger.reserve=maybe_block
+        config={'enabled':True,'min_interval_seconds':60,'max_attempts_per_day':10}
+        first=deepcopy(await StrategyExplainer(repo,analyzer,config).refresh(data,NOW))
+        for code in ('HOURLY_CALL_CAP','DAILY_CALL_CAP','MONTHLY_COST_CAP','PROVIDER_COOLDOWN'):
+            clock[0]+=timedelta(minutes=2);fault[0]=code
+            data['strategy'][0]['blockers']=[code];data['as_of']=clock[0].isoformat()
+            result=await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0])
+            assert result['status']=='BUDGET_BLOCKED' and result['limit_reason']==code
+            assert saved_explanation(result)==first
+            assert result['as_of']!=first['as_of'] and 'last_success' not in result['last_success']
+            assert 'secret-should-not-be-persisted' not in json.dumps(result)
+            assert explanation_status(result)!=explanation_status({'status':'BUDGET_BLOCKED'})
+        clock[0]+=timedelta(minutes=2);fault[0]=None
+        final=await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0])
+        assert final['status']=='SUCCEEDED' and 'last_success' not in final
+        assert repo.get_control(VIEW)==final
+    assert not repo.all('orders') and not repo.all('executions')
+    repo.close()
+
+
+async def test_session_only_explanation_preserves_budget_until_regular_open(tmp_path):
+    repo=Repository(tmp_path/'hours.db',backend='sqlite');calls=[];clock=[NOW.replace(hour=13)]
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200,json=response(inputs()))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:clock[0])
+        service=StrategyExplainer(repo,analyzer,{'enabled':True,'regular_session_only':True})
+        for at in (NOW.replace(hour=13),NOW.replace(hour=21),NOW+timedelta(days=1)):
+            assert await service.refresh(inputs(),at) is None
+        assert not calls and not service.state
+        clock[0]=NOW.replace(hour=14,minute=30)
+        assert (await service.refresh(inputs(),clock[0]))['status']=='SUCCEEDED'
+        assert len(calls)==1
+    repo.close()

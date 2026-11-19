@@ -7,7 +7,7 @@ import pytest
 
 from sessionquant.database.repository import Repository
 from sessionquant.market_reference.collector import MarketReferenceMonitor
-from sessionquant.market_reference.contracts import REFERENCES, observation
+from sessionquant.market_reference.contracts import DEFAULT_REFERENCE_SYMBOLS, REFERENCES, observation
 from sessionquant.market_reference.store import ReferenceStore, OBSERVATIONS, METRICS
 
 NOW = datetime(2026, 11, 13, 17, tzinfo=timezone.utc)
@@ -217,7 +217,7 @@ async def test_managed_source_delivers_held_data_before_references_and_shrinks_b
             events = []
             class Client(Market):
                 async def stocks(self, symbols):
-                    if symbols == list(REFERENCES): events.append('references')
+                    if symbols == list(DEFAULT_REFERENCE_SYMBOLS): events.append('references')
                     return await super().stocks(symbols)
                 async def orderbook(self, symbol): return {}
                 async def reference_candles(self, symbol, **kwargs): return {'candles': []}

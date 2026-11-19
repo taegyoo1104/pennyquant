@@ -182,7 +182,7 @@ def render_operations(data, view, path, *, panel=None):
     st.markdown('<div class="sq-section"><h2>보유 종목</h2><p>모의 장부 기준</p></div>', unsafe_allow_html=True)
     if view['positions']:
         holdings = ''.join('<div class="sq-holding"><strong>'+escape(str(r['종목']))+'</strong>'
-            '<span>평가액 '+escape(r['평가액'])+'</span><span>평가 손익 '+escape(r['평가 손익'])+'</span></div>'
+            '<span>평가액 '+escape(r['평가액'])+'</span><span>평가 손익 '+escape(r['평가 손익'])+' ('+escape(r['평가 수익률'])+')</span></div>'
             for r in view['positions'])
         st.markdown('<div class="sq-holdings">'+holdings+'</div>', unsafe_allow_html=True)
     else:
@@ -197,7 +197,7 @@ def render_operations(data, view, path, *, panel=None):
     with footer[0]:
         link('매매 전체 보기','매매 내역')
     with footer[1]:
-        link('종목과 대기 이유 보기','시장·종목')
+        link('종목과 대기 이유 보기','시장·종목',panel='매수 판단')
     if panel is None:
         render_home_news(data)
 

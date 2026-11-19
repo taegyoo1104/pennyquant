@@ -55,8 +55,8 @@ class ReferenceStore:
 
     def publish(self,now,*,symbols=None):
         from .metrics import build_metrics
-        from .contracts import REFERENCES
-        symbols=list(REFERENCES) if symbols is None else list(symbols)
+        from .contracts import DEFAULT_REFERENCE_SYMBOLS
+        symbols=list(DEFAULT_REFERENCE_SYMBOLS) if symbols is None else list(symbols)
         result = {'updated_at':utc(now).isoformat(),'purpose':'MARKET_REFERENCE','live_orders_enabled':False,
                   'active_symbols':symbols,
                   'duplicate_count':self.state['duplicate_count'],'capabilities':self.state['capabilities'],'items':{}}
