@@ -326,7 +326,7 @@ class Review:
                              'changes': changes[:100], 'changes_total': len(changes)}
         return {'since_kst': korean(self.since), 'until_kst_exclusive': korean(self.until),
                 'entry_since_kst': korean(self.entry_since), 'entry_until_kst_exclusive': korean(self.entry_until),
-                'report_version': 2,
+                'report_version': 3,
                 'missing_tables': sorted({'pq_' + x for x in TABLES} - self.tables), 'namespaces': self.spaces,
                 'limitations': ['Controls are latest snapshots, not a complete warmup timeline.',
                     'Order rows describe retained order records, not every status transition.',
@@ -343,23 +343,81 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
-def json_query(expression, source):
-    # Send ASCII hex over the mysql CLI pipe, independent of locale/client decoding.
-    # Conversion before HEX preserves Korean, accented text, and four-byte Unicode.
-    return f'SELECT HEX(CONVERT({expression} USING utf8mb4)) FROM {source};'
+RESEARCH_FIELDS = ('kind', 'available_at', 'data.control_state', 'data.scope_blockers', 'data.manual_halt',
+                   'data.decisions', 'data.quality_rows', 'data.portfolio_selection')
 
 
-def decode_row(line):
-    return json.loads(bytes.fromhex(line.decode('ascii').strip()).decode('utf-8'))
+class RowDecodeError(ValueError):
+    """Only location/size metadata; never retain the failed JSON or decoder message."""
+    def __init__(self, field, error_type, encoded_bytes, position=None):
+        self.details = {'field': field, 'error_type': error_type, 'encoded_bytes': encoded_bytes,
+                        'json_position': position}
+        super().__init__('review_row_decode_failed')
 
 
-def research_projection():
-    # Do not transfer raw events/news/credentials from research rows to the reviewer.
-    fields = ('control_state', 'scope_blockers', 'manual_halt', 'decisions', 'quality_rows', 'portfolio_selection')
-    pairs = ','.join(f"'{key}',payload->'$.data.{key}'" for key in fields)
-    return ("JSON_OBJECT('kind',payload->'$.kind','available_at',payload->'$.available_at','data',"
-            "IF(payload->>'$.kind'='engine_batch',JSON_OBJECT("+pairs+
-            ",'decision_count',JSON_LENGTH(payload->'$.data.decisions')),JSON_OBJECT()))")
+def read_query(kind):
+    """Hex-encoded TSV columns avoid rebuilding a large nested JSON_OBJECT in MySQL."""
+    def hex_json(expression): return f'HEX(CONVERT({expression} USING utf8mb4))'
+    if kind == 'controls':
+        names = ','.join("'"+key+"'" for key in CONTROLS)
+        return ('SELECT HEX(name),HEX(namespace),HEX(CAST(updated_at AS CHAR)),'+hex_json('payload')+
+                f' FROM pq_controls WHERE name IN ({names}) ORDER BY name;')
+    if kind not in TABLES: raise ValueError('unknown_review_table')
+    payload = [hex_json(f"payload->'$.{key}'") for key in RESEARCH_FIELDS] if kind == 'research_events' else [hex_json('payload')]
+    return ('SELECT seq,HEX(namespace),HEX(CAST(captured_at AS CHAR)),'+','.join(payload)+
+            f' FROM pq_{kind} ORDER BY seq;')
+
+
+def decode_columns(line, kind):
+    cells = line.rstrip(b'\r\n').split(b'\t')
+    expected = 3+len(RESEARCH_FIELDS) if kind == 'research_events' else 4
+    if len(cells) != expected: raise RowDecodeError('columns', 'column_count_mismatch', len(line))
+
+    def cell(index, field, *, as_json=False):
+        raw = cells[index]
+        if raw == b'NULL': return None
+        try:
+            text = bytes.fromhex(raw.decode('ascii')).decode('utf-8')
+            return json.loads(text) if as_json else text
+        except json.JSONDecodeError as exc:
+            raise RowDecodeError(field, 'JSONDecodeError', len(raw), exc.pos) from None
+        except (UnicodeError, ValueError):
+            raise RowDecodeError(field, 'InvalidHexOrUTF8', len(raw)) from None
+
+    row = {'kind': kind, 'namespace': cell(1, 'namespace'), 'captured_at': cell(2, 'captured_at')}
+    if not isinstance(row['namespace'], str): raise RowDecodeError('namespace', 'missing_namespace', len(cells[1]))
+    if kind == 'controls': row['name'] = cell(0, 'name')
+    if kind == 'research_events':
+        fields = {key: cell(index+3, key, as_json=True) for index, key in enumerate(RESEARCH_FIELDS)}
+        body = {key.removeprefix('data.'): value for key, value in fields.items() if key.startswith('data.')}
+        decisions = body.get('decisions')
+        body['decision_count'] = len(decisions) if isinstance(decisions, list) else 0
+        row['data'] = {'kind': fields['kind'], 'available_at': fields['available_at'], 'data': body}
+    else:
+        row['data'] = cell(3, 'payload', as_json=True)
+        if not isinstance(row['data'], dict): raise RowDecodeError('payload', 'expected_object', len(cells[3]))
+    return row
+
+
+def consume_stream(lines, kind, review, transport):
+    counters = transport['tables'].setdefault(kind, {'rows_seen': 0, 'rows_decoded': 0, 'rows_failed': 0})
+    for line in lines:
+        if not line.strip(): continue
+        counters['rows_seen'] += 1
+        try:
+            row = decode_columns(line, kind)
+        except RowDecodeError as exc:
+            counters['rows_failed'] += 1
+            transport['rows_failed'] += 1
+            if len(transport['samples']) < 20:
+                first = line.split(b'\t', 1)[0]
+                # seq is numeric; controls use an ordinal so an arbitrary name cannot leak.
+                seq = int(first) if kind != 'controls' and first.isdigit() and len(first) < 20 else None
+                transport['samples'].append({'table': kind, 'row_ordinal': counters['rows_seen'],
+                                             'seq': seq, **exc.details})
+            continue
+        review.consume(row)
+        counters['rows_decoded'] += 1
 
 
 def review_backup(backup, since, until, entry_since=None, entry_until=None):
@@ -376,7 +434,7 @@ def review_backup(backup, since, until, entry_since=None, entry_until=None):
                               "df -Pk /var/lib/mysql | awk 'NR==2 {print $4}'", timeout=30).stdout.strip())
             if free_kib < 2*1024*1024: raise RuntimeError('temporary_disk_needs_2GiB_free')
             mysql = ['docker', 'exec', '-i', name, 'sh', '-c',
-                     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -u root --default-character-set=utf8mb4 --batch --raw --skip-column-names sessionquant']
+                     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -u root --default-character-set=utf8mb4 --max-allowed-packet=128M --quick --batch --raw --skip-column-names sessionquant']
             deadline = time.monotonic()+180
             while True:
                 try:
@@ -403,28 +461,25 @@ def review_backup(backup, since, until, entry_since=None, entry_until=None):
                         if proc.poll() is None: proc.kill(); proc.wait()
             tables = run(*mysql, input=b'SHOW TABLES;', timeout=30).stdout.decode('utf-8').splitlines()
             review = Review(since, until, tables, entry_since, entry_until)
-            queries = []
-            for kind in TABLES:
-                table = 'pq_' + kind
-                if table not in tables: continue
-                payload = 'payload'
-                if kind == 'research_events':
-                    payload = research_projection()
-                queries.append(json_query(f"JSON_OBJECT('kind','{kind}','namespace',namespace,'captured_at',captured_at,'data',{payload})", f'{table} ORDER BY seq'))
-            if 'pq_controls' in tables:
-                names = ','.join("'"+key+"'" for key in CONTROLS)
-                queries.append(json_query("JSON_OBJECT('kind','controls','name',name,'namespace',namespace,'captured_at',updated_at,'data',payload)", f'pq_controls WHERE name IN ({names})'))
-            sql_path = Path(directory)/'review.sql'; sql_path.write_text('\n'.join(queries), encoding='utf-8')
+            kinds = [kind for kind in TABLES if 'pq_'+kind in tables]
+            if 'pq_controls' in tables: kinds.append('controls')
+            transport = {'rows_failed': 0, 'samples': [], 'tables': {}}
             print('기록 요약 중…', flush=True)
-            with sql_path.open('rb') as source, tempfile.TemporaryFile() as errors:
-                proc = subprocess.Popen(mysql, stdin=source, stdout=subprocess.PIPE, stderr=errors)
-                try:
-                    for line in proc.stdout:
-                        if line.strip(): review.consume(decode_row(line))
-                    if proc.wait(timeout=60): raise RuntimeError('backup_read_failed')
-                finally:
-                    if proc.poll() is None: proc.kill(); proc.wait()
+            for kind in kinds:
+                print('표 읽기: pq_'+kind, flush=True)
+                sql_path = Path(directory)/'review.sql'; sql_path.write_text(read_query(kind), encoding='utf-8')
+                with sql_path.open('rb') as source, tempfile.TemporaryFile() as errors:
+                    proc = subprocess.Popen(mysql, stdin=source, stdout=subprocess.PIPE, stderr=errors)
+                    try:
+                        consume_stream(proc.stdout, kind, review, transport)
+                        if proc.wait(timeout=60): raise RuntimeError('backup_read_failed')
+                    finally:
+                        if proc.poll() is None: proc.kill(); proc.wait()
             result = review.finish()
+            result['transport'] = transport
+            result['report_status'] = 'PARTIAL' if transport['rows_failed'] else 'COMPLETE'
+            if transport['rows_failed']:
+                result['limitations'].append('Some records could not be read; totals are incomplete and zero does not establish no activity.')
             result['read_only_production'] = True
             result['application_started'] = False
             result['provider_calls'] = result['llm_calls_by_reviewer'] = result['order_writes_by_reviewer'] = 0
@@ -462,9 +517,12 @@ def main():
         result = review_backup(args.backup, since, until, entry_since, entry_until)
         with args.output.open('x', encoding='utf-8') as stream:
             json.dump(result, stream, ensure_ascii=False, indent=2, allow_nan=False)
-        print('점검 완료: '+str(args.output))
+        if result['report_status'] == 'PARTIAL':
+            print('일부 기록 읽기 실패: '+str(result['transport']['rows_failed'])+'건 · 결과를 정상 완료로 해석하지 마세요.')
+        print('점검 결과 저장: '+str(args.output))
         for namespace, data in result['namespaces'].items():
             print(namespace, json.dumps({'counts':data['counts_in_window'], 'focus_max':data['focus']['max_count']}, ensure_ascii=False))
+        if result['report_status'] == 'PARTIAL': raise SystemExit(2)
     except Exception as exc:
         # Do not print Docker command env values, SQL, or server exception text.
         known = {'temporary_mysql_start_failed', 'backup_sql_member_invalid', 'backup_import_failed',

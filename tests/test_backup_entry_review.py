@@ -1,7 +1,10 @@
 import copy
 import json
+import io
 
-from scripts.review_paper_backup import Review, decode_row, research_projection, stamp
+import pytest
+
+from scripts.review_paper_backup import Review, RESEARCH_FIELDS, consume_stream, decode_columns, read_query, stamp
 
 
 def reviewer():
@@ -101,10 +104,64 @@ def test_warning_source_and_strategy_wait_are_sanitized_and_samples_bounded():
     assert 'SECRET' not in json.dumps(result)
 
 
+def encode_cells(row):
+    head=[b'42',row['namespace'].encode().hex().encode(),b'NULL']
+    if row['kind']=='research_events':
+        values=[]
+        for key in RESEARCH_FIELDS:
+            value=row['data']
+            for part in key.split('.'):value=value.get(part) if isinstance(value,dict) else None
+            values.append(value)
+    else:values=[row['data']]
+    return b'\t'.join(head+[json.dumps(v,ensure_ascii=False).encode().hex().encode() for v in values])+b'\n'
+
+
 def test_unicode_transport_and_projection_keep_required_entry_fields():
-    row={'message':'한글과 café 🚀'}
-    assert decode_row(json.dumps(row,ensure_ascii=False).encode().hex().encode())==row
-    sql=research_projection()
+    row=batch()
+    row['data']['data']['decisions'][0]['indicators']['message']='한글과 café 🚀\n\t\\"' * 100000
+    decoded=decode_columns(encode_cells(row),'research_events')
+    assert decoded['data']['kind']==row['data']['kind']
+    assert decoded['data']['data']['decisions']==row['data']['data']['decisions']
+    assert decoded['data']['data']['decision_count']==1
+    sql=read_query('research_events')
     assert "payload->'$.data.decisions'" in sql and "payload->'$.data.quality_rows'" in sql
     assert "payload->'$.data.portfolio_selection'" in sql
     assert "payload->'$.data.events'" not in sql and "payload->'$.data.news_contexts'" not in sql
+    assert 'JSON_OBJECT' not in sql
+
+
+def test_failed_json_row_is_counted_with_safe_location_and_next_row_is_read():
+    review=reviewer();transport={'rows_failed':0,'samples':[],'tables':{}}
+    bad=encode_cells(batch()).split(b'\t')
+    bad[8]=b'{"SECRET":'.hex().encode()  # decisions column, deliberately incomplete
+    stream=io.BytesIO(b'\t'.join(bad)+encode_cells(batch()))
+    consume_stream(stream,'research_events',review,transport)
+    assert transport['rows_failed']==1
+    assert transport['tables']['research_events']=={'rows_seen':2,'rows_decoded':1,'rows_failed':1}
+    assert transport['samples'][0]['field']=='data.decisions'
+    assert transport['samples'][0]['seq']==42
+    assert transport['samples'][0]['error_type']=='JSONDecodeError'
+    assert review.finish()['namespaces']['paper_test']['entry_review']['all_in_window']['evaluations']==1
+    assert 'SECRET' not in json.dumps(transport)
+
+
+def test_bad_column_count_and_invalid_hex_are_bounded_and_never_exported():
+    transport={'rows_failed':0,'samples':[],'tables':{}}
+    line=b'1\tSECRET\tNULL\t7B7D\n'
+    consume_stream(io.BytesIO(line*25+b'SECRET\n'),'system_logs',reviewer(),transport)
+    assert transport['rows_failed']==26 and len(transport['samples'])==20
+    assert 'SECRET' not in json.dumps(transport)
+    with pytest.raises(ValueError):read_query('SECRET; DROP TABLE any')
+
+
+def test_partial_report_is_saved_but_cli_exits_nonzero(tmp_path,monkeypatch,capsys):
+    from scripts import review_paper_backup as module
+    backup=tmp_path/'backup.tar.gz';backup.write_bytes(b'fixture')
+    output=tmp_path/'result.json'
+    result={'report_status':'PARTIAL','transport':{'rows_failed':1},'namespaces':{}}
+    monkeypatch.setattr(module,'review_backup',lambda *args:result)
+    monkeypatch.setattr('sys.argv',['review','--backup',str(backup),'--output',str(output),
+        '--since','2026-11-18T13:00Z','--until','2026-11-18T21:20Z'])
+    with pytest.raises(SystemExit) as exc:module.main()
+    assert exc.value.code==2 and json.loads(output.read_text())==result
+    assert '일부 기록 읽기 실패' in capsys.readouterr().out
