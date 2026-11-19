@@ -42,8 +42,8 @@ candidate_selection:
   fail_closed_diversification: true
 portfolio:
   initial_cash: '100'
-  preferred_positions: 2
-  max_positions: 5
+  preferred_positions: 3
+  max_positions: 3  # 보유와 미체결 매수 종목을 합산한 상한
   initial_weight: '0.20'
   add_weight: '0.20'
   max_symbol_weight: '0.40'

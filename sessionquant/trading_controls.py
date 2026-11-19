@@ -153,7 +153,7 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     with columns[2].popover('전체 매도',width='stretch') if compact else st.expander('일괄 매매 종료·청산 확인'):
         st.caption('신규 매수 차단 → 미체결 매수 취소 → 전략 관리 포지션 시장가 청산. 시장 시간·유동성에 따라 부분체결/미체결될 수 있습니다.')
         if expected=='paper':st.caption('보유 수량과 미체결 주문이 모두 정리되면 매매 재개를 누를 수 있습니다.')
-        st.caption('대상: '+(', '.join(str(r.get('symbol'))+' '+str(r.get('qty')) for r in positions) or '관리 포지션 없음/미확인'))
+        st.caption('대상: '+(', '.join(str(r.get('symbol'))+' '+str(r.get('qty'))+'주' for r in positions) or '관리 포지션 없음/미확인'))
         confirm=st.checkbox('시스템 관리 포지션 전량 청산 위험을 확인했습니다.',key='confirm-stop-'+run)
         live_ok=st.checkbox('마스킹된 실제 계좌 **의 청산 요청을 추가 확인합니다.',key='confirm-live-'+run) if expected=='live' else True
         if st.button('일괄 매매 종료·청산 요청',disabled=not active or not confirm or not live_ok or any(r.get('action')=='stop_all' for r in unresolved),key='trading-stop'):submit('stop_all')
@@ -163,7 +163,9 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
         if not symbol:continue
         try:positive=decimal(qty)>0
         except (ValueError,TypeError):positive=False
-        with st.expander(f'{symbol} 전량 매도 · 전략 관리 {qty}'):
+        quantity_label = '모의 보유' if expected=='paper' else '전략 관리'
+        with st.expander(f'{symbol} 전량 매도 · {quantity_label} {qty}주'):
+            if expected=='paper':st.caption('주 단위의 모의 보유 수량입니다. 금액에 맞춰 매수하므로 1주보다 적을 수 있어요.')
             st.caption(label(environment)+' · 시장가 위험/미체결 수량은 엔진에서 다시 확인합니다.')
             confirm=st.checkbox(f'{symbol} 전략 관리 수량 전량 시장가 매도를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
             if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or symbol in selling or any(r.get('symbol')==symbol and r.get('status')=='pending' for r in requests)):
