@@ -6,6 +6,8 @@
 
 새로운 기본 안내는 [전략 실험 모드](docs/STRATEGY_LAB.md)입니다. 기존 운영 설정과 장부는 비교·복구용으로 유지합니다.
 
+[웹소켓 전환](docs/WEBSOCKET_ROLLOUT.md)의 1·2단계(호가 수신·모의매매 엔진 연결)를 구현했습니다. 별도 웹소켓 프로필에서는 후보 50개를 구독하고 집중 10개·보유 종목의 최신값을 묶어서 처리합니다. 단절 시 신규 매수를 막고 위험 관리 종목을 REST로 대체 조회합니다. 기존 설정은 REST를 유지하며 화면 개선과 GCP 처리량 측정은 다음 단계입니다.
+
 ```bash
 # API 키 없이 기획한 동작 확인: 새 폴더에 report.html 생성
 python -m sessionquant strategy-lab --out data/strategy-lab-check-01

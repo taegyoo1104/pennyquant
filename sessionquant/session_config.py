@@ -16,6 +16,7 @@ class SessionConfig:
     strategy: str = "pullback"
     market_filter_enabled: bool = True
     source: str = "toss"
+    quote_transport: str = "rest"
     input_path: Path | None = None
     poll_seconds: float = 10.0
     news_refresh_seconds: float = 600.0
@@ -64,6 +65,12 @@ class SessionConfig:
     candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        if self.quote_transport not in {"rest", "websocket"}:
+            raise ValueError("quote_transport는 rest 또는 websocket입니다.")
+        if self.quote_transport == "websocket" and (self.source != "toss" or not self.watchlist_enabled
+                or self.watchlist_size > 50 or self.strategy != "pullback_simple"
+                or self.paper_data_policy != "observed_paper_v1"):
+            raise ValueError("웹소켓 시험 운영은 토스·감시 50개 이하·단순 눌림목·observed Paper 프로필에서 사용합니다.")
         from .strategy_explanation import ExplanationSettings
         if not isinstance(self.strategy_explanation,dict):
             raise ValueError('AI 설명 설정은 객체여야 합니다.')

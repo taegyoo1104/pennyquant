@@ -103,6 +103,7 @@ def frame(engine, events, now, *, manual_halt):
         'candidate_scope_symbols':engine._batch_candidate_scope,'portfolio_selection':engine.selection_frame,
         'news_contexts': engine._batch_news_contexts, 'scope_blockers': engine._batch_scope_blockers,
         'decisions': engine._batch_decisions,
+        'quote_entry_allowed':engine._batch_quote_entry_allowed if engine.quote_entry_guard is not None else None,
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars',
                          'strategy_bars','strategy_rvol','strategy_rvol_status','collection_warnings')}
                          for symbol,row in engine.market.quality_rows.items() if symbol in {item['symbol'] for item in engine._batch_decisions}],
