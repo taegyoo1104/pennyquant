@@ -108,7 +108,8 @@ async def test_slow_model_does_not_block_engine_order_and_fill(tmp_path):
     repo.close()
 
 
-def test_saved_explanation_is_visible_with_source_time_and_call_id(tmp_path,monkeypatch):
+@pytest.mark.parametrize('has_decision', [True, False])
+def test_saved_explanation_is_visible_with_source_time_and_call_id(tmp_path,monkeypatch,has_decision):
     from streamlit.testing.v1 import AppTest
     from pathlib import Path
     from sessionquant.strategy_lab import demonstrate
@@ -116,15 +117,29 @@ def test_saved_explanation_is_visible_with_source_time_and_call_id(tmp_path,monk
     path=tmp_path/'app/entry_exit.db'
     repo=Repository(path,backend='sqlite')
     data=inputs()
+    if not has_decision:
+        data['strategy']=[{'id':'strategy:none','status':'NO_RECORDED_DECISION'}]
+    sections=json.loads(response(data)['choices'][0]['message']['content'])
+    sections['strategy']['text']=("현재 전략 'pullback_simple'의 반등 조건을 확인 중입니다." if has_decision
+        else "현재 전략 'pullback_simple'은 기록된 결정이 없고 부정적 뉴스 때문에 매매가 막혔습니다.")
     repo.set_control(VIEW,{'status':'SUCCEEDED','as_of':NOW.isoformat(),'generated_at':NOW.isoformat(),
         'model':'test-model','llm_call_ids':['test-call'],'facts':data,
-        'sections':json.loads(response(data)['choices'][0]['message']['content'])})
+        'sections':sections})
     repo.close()
     monkeypatch.setenv('SQ_DB',str(path));monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setenv('PQ_DB_BACKEND','sqlite')
     app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30).run()
     assert not app.exception
     assert any('AI 브리핑' in e.value and '입력 기준' in e.value for e in app.markdown)
+    summary=next(e.value for e in app.markdown if '<h3>AI 브리핑</h3>' in e.value)
+    expected='단순 눌림목' if has_decision else '기록된 전략 판단이 없습니다'
+    assert expected in summary and 'pullback_simple' not in summary
+    assert '부정적 뉴스 때문에' not in summary
     app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
     assert not app.exception
     assert any('AI 설명 · 시장' in e.label for e in app.expander)
     assert any('test-call' in c.value for c in app.caption)
+    assert any(expected in text.value for text in app.text)
+    assert not any('pullback_simple' in text.value for text in app.text)
+    repo=Repository(path,backend='sqlite')
+    assert repo.get_control(VIEW)['sections']==sections
+    repo.close()

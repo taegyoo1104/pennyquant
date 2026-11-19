@@ -10,9 +10,11 @@ def style():
     import streamlit as st
     st.markdown('''<style>
     :root {--sq-card-bg:#111e30;--sq-card-border:#26354a;--sq-text:#edf4fc;
-      --sq-muted:#9baec4;--sq-accent:#55dec5}
+      --sq-muted:#9baec4;--sq-accent:#55dec5;
+      --sq-content-top:calc(4.5rem + env(safe-area-inset-top, 0px))}
     .stApp {background:#091321;color:var(--sq-text)}
-    .stMainBlockContainer {max-width:1440px;padding-top:2rem;padding-bottom:3rem}
+    /* Leave room for Streamlit's fixed toolbar above every page's first label. */
+    .stMainBlockContainer {max-width:1440px;padding-top:var(--sq-content-top);padding-bottom:3rem}
     [data-testid="stSidebar"] {background:#0d1a2b;border-right:1px solid #223148}
     [data-testid="stSidebar"] h1 {font-size:1.45rem;letter-spacing:-.04em}
     [data-testid="stMetricValue"] {color:var(--sq-text);font-size:1.8rem;letter-spacing:-.04em}
@@ -44,7 +46,7 @@ def style():
     @media(max-width:900px){[data-testid="stHorizontalBlock"]{flex-wrap:wrap}
     [data-testid="stColumn"]{min-width:45%!important}}
     @media(max-width:540px){[data-testid="stColumn"]{min-width:100%!important}
-    .stMainBlockContainer{padding:4rem 1rem 3rem}.sq-hero{align-items:flex-start}
+    .stMainBlockContainer{padding:var(--sq-content-top) 1rem 3rem}.sq-hero{align-items:flex-start}
     .sq-hero p{max-width:240px}.sq-section{align-items:flex-start;flex-direction:column;gap:3px}
     .sq-ai{padding:18px}.sq-holding{flex-wrap:wrap}}
     @media(max-width:540px){.st-key-home_metrics [data-testid="stColumn"]{min-width:44%!important;flex:1 1 44%!important}
@@ -245,9 +247,10 @@ def render_system(data,view):
     if data.tables['pipeline_status']:
         with st.expander('처리 기록 원본 보기'):
             st.json(data.tables['pipeline_status'])
-    from .reference_panel import reference_rows
+    from .reference_panel import reference_rows, reference_benchmarks_visible
     st.subheader('시장 참고 지표')
-    _table(reference_rows(data.market_reference))
+    _table(reference_rows(data.market_reference,
+                          show_benchmarks=reference_benchmarks_visible(data.context)))
     from .news_panel import provider_rows
     st.subheader('뉴스 수집 상태')
     _table(provider_rows(data.news_status))

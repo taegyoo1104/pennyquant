@@ -170,6 +170,7 @@ async def test_slow_priority_delivery_and_reference_work_cannot_starve_focus_inp
             order.append('risk_delivered')
             elapsed.seconds+=16  # Slower than the old whole-cycle 15s deadline.
     class References:
+        symbols=('SHY','IEF','TLT','USO','SPY','QQQ')
         async def poll(self,read,*,limit):
             order.append('references')
             elapsed.seconds+=16

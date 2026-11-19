@@ -489,9 +489,9 @@ class TossSessionSource:
             state['focus_phase_seconds'] = round(monotonic()-focus_started,3)
             if self.reference_monitor is not None:
                 async def reference_read(stream,symbol):
-                    from ..market_reference.contracts import REFERENCES
-                    methods = {'stocks':(self.client.stocks,(list(REFERENCES),),{}),
-                               'prices':(self.client.prices,(list(REFERENCES),),{}),
+                    reference_symbols=list(self.reference_monitor.symbols)
+                    methods = {'stocks':(self.client.stocks,(reference_symbols,),{}),
+                               'prices':(self.client.prices,(reference_symbols,),{}),
                                'orderbook':(self.client.orderbook,(symbol,),{}),
                                'candle':(self.client.reference_candles,(symbol,),{}),
                                'daily':(self.client.reference_candles,(symbol,),{'interval':'1d','count':5})}

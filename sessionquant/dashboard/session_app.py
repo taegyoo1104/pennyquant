@@ -311,6 +311,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         news_section = st.radio('뉴스 상세', tuple(NEWS_SECTIONS), horizontal=True, key='news_detail')
     data=load_database(path,page=page,news_section=news_section,panel=panel)
     view=build_view(data)
+    show_benchmarks = data.context.get('benchmark_collection_enabled') is not False
     if page == '대시보드' and panel == 'news' and not data.error and view['environment'] != 'PAPER_LOCAL':
         return
     if page == '대시보드' and panel == 'live' and not data.error and view['environment'] != 'PAPER_LOCAL':
@@ -375,7 +376,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     def market_section(name):
         return page == '시장·종목' and panel in {None, name}
 
-    if market_section('시장 참고') and available('market_regimes', 'quote_snapshots'):
+    if market_section('시장 참고') and show_benchmarks and available('market_regimes', 'quote_snapshots'):
         st.subheader("시장 방향과 데이터 상태")
         st.write(f"**{view['regime_label']}**")
         reason = view["regime_detail"].get("reason", view["regime_detail"].get("reasons", ""))
@@ -394,9 +395,10 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
     if market_section('시장 참고'):
         if available('market_reference'):
-            from sessionquant.dashboard.reference_panel import render_references
+            from sessionquant.dashboard.reference_panel import render_references, reference_benchmarks_visible
             render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,
-                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable)
+                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable,
+                show_benchmarks=reference_benchmarks_visible(data.context))
         if available('economic_events'):
             from sessionquant.dashboard.news_panel import calendar_rows
             schedule = calendar_rows(data.tables['economic_events'])
@@ -408,14 +410,16 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
             if market_section('시세·품질') and available('market_quality'):
-                render_quality(data.market_quality,performance=data.market_performance,details=panel is None)
+                render_quality(data.market_quality,performance=data.market_performance,details=panel is None,
+                               show_benchmarks=show_benchmarks)
             if panel == '처리 속도' and available('market_quality', 'market_performance'):
                 from sessionquant.dashboard.market_quality_panel import render_quality_details
-                render_quality_details(data.market_quality, data.market_performance)
+                render_quality_details(data.market_quality, data.market_performance, show_benchmarks=show_benchmarks)
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
             if market_section('거래량 비교') and available('watchlist_rvol', 'history_backfill'):
                 render_watchlist_rvol(data.watchlist_rvol,data.history_backfill,
-                                     paper_policy=data.context.get('paper_data_policy'))
+                                     paper_policy=data.context.get('paper_data_policy'),
+                                     strategy=data.context.get('strategy'))
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
             if market_section('감시·집중 종목') and available('watchlist_state'):
@@ -424,7 +428,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             if market_section('매수 판단') and available('portfolio_selection'):
                 render_selection(data.portfolio_selection)
         else:
-            st.caption('시총 감시·집중 분석 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
+            st.caption('시총 감시·집중 분석 정책은 모의매매에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
     if market_section('분석 이력'):
         st.subheader("기술 분석 이력과 진입 근거")
         if not available('candidates'):
