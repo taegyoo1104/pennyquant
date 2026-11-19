@@ -249,7 +249,8 @@ def render_system(data,view):
             st.json(data.tables['pipeline_status'])
     from .reference_panel import reference_rows
     st.subheader('시장 참고 지표')
-    _table(reference_rows(data.market_reference))
+    _table(reference_rows(data.market_reference,
+                          show_benchmarks=data.context.get('benchmark_collection_enabled') is not False))
     from .news_panel import provider_rows
     st.subheader('뉴스 수집 상태')
     _table(provider_rows(data.news_status))

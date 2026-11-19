@@ -54,7 +54,7 @@ def coverage_display(report, key):
     return f"{metric['verified']} / {required}"
 
 
-def render_quality(state, *, performance=None, details=True):
+def render_quality(state, *, performance=None, details=True, show_benchmarks=True):
     import streamlit as st
     from datetime import datetime, timezone
     from ..models import utc
@@ -65,7 +65,8 @@ def render_quality(state, *, performance=None, details=True):
     times = sorted({utc(row['observed_at']) for row in report['items'] if row.get('evaluation_age_seconds') is not None})
     evaluated = timestamp(times[0]) if times else '—'
     if len(times)>1:evaluated += ' ~ '+timestamp(times[-1])
-    st.caption('종목 평가 시각: '+evaluated+' · 대상: 집중·보유·미체결 종목. SPY·QQQ는 별도 참조입니다.')
+    st.caption('종목 평가 시각: '+evaluated+' · 대상: 집중·보유·미체결 종목.'+
+               (' SPY·QQQ는 별도 참조입니다.' if show_benchmarks else ''))
     st.caption('현재 확인 수입니다. 마지막 평가와 실제 매수 판단은 각각 상세 표와 ‘매수 판단’에서 확인하세요.')
     stale_count = sum(any(reason in row.get('blockers',[]) for reason in
                           ('quality_observation_stale', 'symbol_not_yet_evaluated')) for row in report['items'])
@@ -106,20 +107,25 @@ def render_quality(state, *, performance=None, details=True):
             '제한 사유':', '.join(item.get('blockers',[]))})
     _table(rows)
     if details:
-        render_quality_details(report, performance)
+        render_quality_details(report, performance, show_benchmarks=show_benchmarks)
     st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. 관측 시세 기반 모의거래 정책에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
 
 
-def render_quality_details(report, performance=None):
+def render_quality_details(report, performance=None, *, show_benchmarks=True):
     import streamlit as st
     from .session_app import _table, timestamp
     with st.expander('우선 조회·요청 지연·과거 봉 보충 근거'):
         source = report.get('source_state') or {}
         st.caption('토스 호가 시각은 마지막 호가 변동 시각입니다. 오래된 시각만으로 통신 지연·중단을 확정할 수 없습니다.')
         st.caption('위험 호가 전달: '+timestamp(source.get('priority_delivered_at'))+' · 후보보다 먼저 엔진에 전달합니다. 네트워크 오류·거래소 지연까지 성공을 보장하지 않습니다.')
-        _table(source.get('read_measurements',[]),'수집 주기 계측 자료가 없습니다.')
-        _table(history_progress_rows(source.get('history_progress',{})),'과거 봉 보충 이력이 없습니다.')
-        _table([{'종목':s,**row} for s,row in report.get('market_reference_quality',{}).items()])
+        hidden = set() if show_benchmarks else {'SPY', 'QQQ'}
+        _table([r for r in source.get('read_measurements',[]) if r.get('symbol') not in hidden],
+               '수집 주기 계측 자료가 없습니다.')
+        _table(history_progress_rows({s:r for s,r in source.get('history_progress',{}).items() if s not in hidden}),
+               '과거 봉 보충 이력이 없습니다.')
+        reference_rows = [{'종목':s,**row} for s,row in report.get('market_reference_quality',{}).items() if s not in hidden]
+        if reference_rows:
+            _table(reference_rows)
     with st.expander('처리 속도 확인'):
         latest = (performance or {}).get('latest',{})
         st.caption('마지막 수집: '+timestamp(latest.get('observed_at'))+

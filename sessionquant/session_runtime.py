@@ -186,11 +186,15 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 watchlist = WatchlistManager(repo, universe, config,
                     history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' and config.strategy != 'pullback_simple' else None)
             from .market_reference.risk import MacroReferenceRiskMonitor
+            from .market_reference.settings import reference_settings
+            reference_config = reference_settings(config.market_reference)
+            include_benchmarks = config.market_filter_enabled or config.focus_selection!='turnover' or reference_config['enabled']
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
                                    strict_market_data=True, use_market_filter=config.market_filter_enabled, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
-                                   candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy)
+                                   candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy,
+                                   benchmark_collection_enabled=include_benchmarks if config.source=='toss' else None)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)
@@ -212,8 +216,6 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                         delayed_quotes=config.quote_transport=="websocket")
                     engine.apply_batch(raw,observed_at)
                 from .market_reference.collector import MarketReferenceMonitor
-                from .market_reference.settings import reference_settings
-                reference_config = reference_settings(config.market_reference)
                 reference = MarketReferenceMonitor(repo,clock=lambda:datetime.now(timezone.utc),
                     price_seconds=reference_config['price_seconds'],candle_seconds=reference_config['candle_seconds'],
                     calls_per_cycle=reference_config['calls_per_cycle']) if reference_config['enabled'] else None
@@ -222,7 +224,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
                     history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference,
                     history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup,
-                    include_benchmarks=config.market_filter_enabled or config.focus_selection!='turnover' or reference_config['enabled'],
+                    include_benchmarks=include_benchmarks,
                     current_session_only=config.strategy=='pullback_simple')
                 if config.quote_transport == 'websocket':
                     from .collectors.toss_quote_feed import TossQuoteFeed

@@ -311,6 +311,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         news_section = st.radio('뉴스 상세', tuple(NEWS_SECTIONS), horizontal=True, key='news_detail')
     data=load_database(path,page=page,news_section=news_section,panel=panel)
     view=build_view(data)
+    show_benchmarks = data.context.get('benchmark_collection_enabled') is not False
     if page == '대시보드' and panel == 'news' and not data.error and view['environment'] != 'PAPER_LOCAL':
         return
     if page == '대시보드' and panel == 'live' and not data.error and view['environment'] != 'PAPER_LOCAL':
@@ -375,7 +376,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     def market_section(name):
         return page == '시장·종목' and panel in {None, name}
 
-    if market_section('시장 참고') and available('market_regimes', 'quote_snapshots'):
+    if market_section('시장 참고') and show_benchmarks and available('market_regimes', 'quote_snapshots'):
         st.subheader("시장 방향과 데이터 상태")
         st.write(f"**{view['regime_label']}**")
         reason = view["regime_detail"].get("reason", view["regime_detail"].get("reasons", ""))
@@ -396,7 +397,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         if available('market_reference'):
             from sessionquant.dashboard.reference_panel import render_references
             render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,
-                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable)
+                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable,
+                show_benchmarks=show_benchmarks)
         if available('economic_events'):
             from sessionquant.dashboard.news_panel import calendar_rows
             schedule = calendar_rows(data.tables['economic_events'])
@@ -408,10 +410,11 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
             if market_section('시세·품질') and available('market_quality'):
-                render_quality(data.market_quality,performance=data.market_performance,details=panel is None)
+                render_quality(data.market_quality,performance=data.market_performance,details=panel is None,
+                               show_benchmarks=show_benchmarks)
             if panel == '처리 속도' and available('market_quality', 'market_performance'):
                 from sessionquant.dashboard.market_quality_panel import render_quality_details
-                render_quality_details(data.market_quality, data.market_performance)
+                render_quality_details(data.market_quality, data.market_performance, show_benchmarks=show_benchmarks)
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
             if market_section('거래량 비교') and available('watchlist_rvol', 'history_backfill'):
                 render_watchlist_rvol(data.watchlist_rvol,data.history_backfill,
