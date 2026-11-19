@@ -179,18 +179,21 @@ async def test_file_missing_value_keeps_issuer_validation(tmp_path):
     finally:repo.close()
 
 
-def test_dashboard_does_not_show_subset_rank_as_full_universe_rank():
+@pytest.mark.parametrize('universe_source,scope',[('sp500','전체 S&P 500'),('toss_us','미국 시장 전체')])
+def test_dashboard_does_not_show_subset_rank_as_full_universe_rank(universe_source,scope):
     from datetime import datetime,timezone
     from streamlit.testing.v1 import AppTest
     now=datetime.now(timezone.utc).isoformat()
-    state={'status':'VALID','updated_at':now,'watchlist_limit':50,'operating_count':1,
+    state={'status':'VALID','updated_at':now,'watchlist_limit':50,'operating_count':1,'universe_source':universe_source,
            'snapshot':{'as_of_at':now,'ranking_verified':False,'excluded_market_cap_symbols':['MISSING']},
            'items':[{'ticker':'AAPL','rank':1}]}
     app=AppTest.from_string('from sessionquant.dashboard.watchlist_panel import render_watchlist\n'
                             f'render_watchlist({state!r},[])').run()
     assert not app.exception
     assert any(m.label=='유효 운영 종목' and m.value=='1 / 50' for m in app.metric)
-    assert any('MISSING' in row.value and '전체 S&P 500 상위 순위는 미확정' in row.value for row in app.info)
+    assert any(scope+' 상위 순위는 미확정' in row.value for row in app.info)
+    assert any('시총 미확인 종목: MISSING' in row.value for row in app.caption)
+    assert app.metric[0].label==('미국 주식 · 토스 제공' if universe_source=='toss_us' else 'S&P 500 전체')
     table=app.dataframe[0].value
     assert table['시총 순위'].isna().all() and table['검증자료 내 순위'][0]==1
 
