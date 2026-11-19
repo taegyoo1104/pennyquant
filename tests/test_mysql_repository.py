@@ -246,3 +246,30 @@ def test_size_report_distinguishes_namespace_payload_from_physical_table_scope(c
     assert report["namespace"] == "system" and report["namespace_rows"]["orders"] == 3
     assert report["namespace_payload_bytes"] > 0
     assert "all namespaces" in report["physical_scope"]
+
+
+def test_ordered_json_readers_use_namespace_sequence_index(connection):
+    repo = repository(connection)
+    connection.calls.clear()
+    repo.all('news_analysis')
+    repo.recent('macro_analysis', 20)
+    list(repo.iter_records('economic_events', batch_size=3))
+    repo.recent_llm_attempts(7)
+    ordered = [(sql, params) for sql, params in connection.calls if 'ORDER BY seq' in sql]
+    assert len(ordered) == 4
+    assert all('FORCE INDEX (ix_namespace_seq)' in sql and 'WHERE namespace=%s' in sql
+               and params[0] == repo.namespace for sql, params in ordered)
+    assert ordered[1][1][-1] == 20 and ordered[-1][1][-1] == 7
+    assert not any(sql.startswith(('ALTER', 'SET GLOBAL', 'SET PERSIST')) for sql, _ in connection.calls)
+    repo.close()
+
+
+def test_sort_memory_error_is_specific_without_sql_or_data(connection):
+    repo = repository(connection)
+    connection.failure = 'ORDER BY seq'
+    connection.failure_code = 1038
+    with pytest.raises(RuntimeError) as exc:
+        repo.recent('news_analysis')
+    assert '코드 1038' in str(exc.value) and '정렬 메모리' in str(exc.value)
+    assert 'PRIVATE' not in str(exc.value) and 'pq_news_analysis' not in str(exc.value)
+    repo.close()
