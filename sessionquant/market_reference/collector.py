@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from ..models import utc
 from ..market.bars import session_bounds
-from .contracts import REFERENCES, observation
+from .contracts import DEFAULT_REFERENCE_SYMBOLS, observation
 from .store import ReferenceStore
 
 
@@ -14,7 +14,7 @@ class MarketReferenceMonitor:
     def __init__(self,repo,*,permissions=None,clock,price_seconds=30,candle_seconds=180,calls_per_cycle=2,synthetic=False,
                  symbols=None,display_only=False):
         from .settings import reference_settings
-        config=reference_settings({'symbols':list(REFERENCES) if symbols is None else symbols,'display_only':display_only})
+        config=reference_settings({'symbols':list(DEFAULT_REFERENCE_SYMBOLS) if symbols is None else symbols,'display_only':display_only})
         self.symbols=tuple(config['symbols'])
         self.display_only=config['display_only']
         self.store = ReferenceStore(repo)

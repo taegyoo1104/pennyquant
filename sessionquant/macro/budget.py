@@ -11,7 +11,9 @@ CONTROL='session_llm_budget_v1'
 
 
 class BudgetBlocked(RuntimeError):
-    pass
+    def __init__(self, message='', *, code='UNKNOWN_LIMIT'):
+        super().__init__(message)
+        self.code = code
 
 
 class BudgetLedger:
@@ -40,12 +42,12 @@ class BudgetLedger:
             counts=month['days'].setdefault(day,{'primary':0,'escalation':0})
             hourly=month.setdefault('hours',{}).setdefault(hour,{'primary':0,'escalation':0})
             if counts[stage]>=getattr(self.settings,'daily_'+stage+'_call_cap'):
-                raise BudgetBlocked('일일 LLM 호출 한도에 도달했습니다')
+                raise BudgetBlocked('일일 LLM 호출 한도에 도달했습니다', code='DAILY_CALL_CAP')
             if hourly[stage]>=getattr(self.settings,'hourly_'+stage+'_call_cap'):
-                raise BudgetBlocked('시간당 LLM 호출 한도에 도달했습니다')
+                raise BudgetBlocked('시간당 LLM 호출 한도에 도달했습니다', code='HOURLY_CALL_CAP')
             total=Decimal(month['spent'])+sum((Decimal(row['amount']) for row in month['reservations'].values()),Decimal(0))
             cap=self.settings.monthly_soft_budget_usd if stage=='primary' else self.settings.monthly_hard_budget_usd
-            if total+amount>min(cap,self.settings.monthly_hard_budget_usd):raise BudgetBlocked('월간 LLM 비용 한도에 도달했습니다')
+            if total+amount>min(cap,self.settings.monthly_hard_budget_usd):raise BudgetBlocked('월간 LLM 비용 한도에 도달했습니다', code='MONTHLY_COST_CAP')
             if token in month['reservations']:raise ValueError('LLM 예약 식별자가 중복됩니다.')
             month['reservations'][token]={'amount':str(amount),'stage':stage,'created_at':now.isoformat(),**(metadata or {})}
             counts[stage]+=1;hourly[stage]+=1

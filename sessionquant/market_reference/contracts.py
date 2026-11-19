@@ -13,7 +13,10 @@ REFERENCES = {
     'TLT':('LONG_TREASURY','미국 20년 초과 국채 ETF'),
     'USO':('OIL_FUTURES_PROXY','원유 선물 노출 ETF·WTI 현물 아님'),
     'SPY':('INDEX','S&P 500 ETF'), 'QQQ':('INDEX','나스닥 100 ETF'),
+    'SOXX':('SEMICONDUCTOR_ETF','미국 반도체 ETF·SOX 지수 아님'),
 }
+# Optional display ETFs must not expand the legacy risk filter or default reads.
+DEFAULT_REFERENCE_SYMBOLS = ('SHY', 'IEF', 'TLT', 'USO', 'SPY', 'QQQ')
 REFERENCE_SYMBOLS = frozenset(REFERENCES)
 SOURCE = 'toss:market_reference:v1.2.28'
 

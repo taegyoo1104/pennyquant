@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from sessionquant.dashboard.explanation_panel import explanation_text, missing_strategy_decision
+from sessionquant.dashboard.explanation_panel import explanation_items, explanation_text, missing_strategy_decision
 
 
 @pytest.mark.parametrize('code,name', [
@@ -40,3 +40,48 @@ def test_missing_or_real_facts_do_not_get_replaced_with_an_empty_decision_claim(
     view = {'facts': facts, 'sections': {'strategy': {'text': 'pullback_simple은 반등 조건을 기다립니다.'}}}
     assert not missing_strategy_decision(view)
     assert explanation_text(view, 'strategy') == '단순 눌림목은 반등 조건을 기다립니다.'
+
+
+def test_saved_paragraph_is_split_without_cutting_prices_quantities_or_last_sentence():
+    text = 'AMD 0.040426주를 494.72423달러에 매수했습니다. 종이 거래 모드의 기록입니다. 끝까지 표시합니다.'
+    view = {'sections': {'trades': {'text': text}}}
+    assert explanation_items(explanation_text(view, 'trades')) == [
+        'AMD 0.040426주를 494.72423달러에 매수했습니다.',
+        '모의매매의 기록입니다.', '끝까지 표시합니다.',
+    ]
+    assert view['sections']['trades']['text'] == text
+
+
+def test_explicit_news_lines_keep_each_company_and_uncertainty_together():
+    text = 'TSLA · 생산 확대가 언급됐습니다. 일정은 미확인입니다.\nMSFT · 새 모델을 발표했습니다. 수익 영향은 미확인입니다.'
+    assert explanation_items(text) == text.splitlines()
+
+
+@pytest.mark.parametrize('status', ['SUCCEEDED', 'BUDGET_BLOCKED'])
+def test_home_briefing_renders_complete_long_saved_text_as_escaped_items(status):
+    from html import escape
+    from streamlit.testing.v1 import AppTest
+    text = ('TSLA · 생산량 확대 소식이 있습니다. 구체적인 일정과 수치는 확인되지 않았습니다.\n'
+            'MSFT · 새 제품을 발표했습니다. 제공된 기록에는 재무 영향이 명시되어 있지 않습니다.\n'
+            'AMZN · 관련 소식이 있습니다. 이 내용만으로 주가가 어떻게 움직일지는 알 수 없습니다.\n'
+            'AVGO · 기존 화면에서 잘렸던 마지막 설명도 전부 표시합니다. '
+            '이 문장은 화면 표시를 검증하기 위한 합성 자료입니다. <script>untrusted</script> & 원문 끝.')
+    assert len(text) > 220
+    saved = {'status': 'SUCCEEDED', 'as_of': '2026-11-19T17:00:34+00:00',
+             'sections': {'market': {'text': text}, 'strategy': {'text': '반등을 기다립니다.'},
+                          'trades': {'text': '모의매매 체결 기록입니다.'}}}
+    view = saved if status == 'SUCCEEDED' else {
+        'status': status, 'limit_reason': 'HOURLY_CALL_CAP',
+        'as_of': '2026-11-19T17:05:34+00:00', 'last_success': saved}
+    script = ('from sessionquant.dashboard.explanation_panel import render_explanation_summary\n'
+              f'render_explanation_summary({view!r})')
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+    card = next(e.value for e in app.markdown if '<h3>AI 브리핑</h3>' in e.value)
+    for line in text.splitlines():
+        assert '<li>'+escape(line)+'</li>' in card
+    assert '<script>' not in card and '…' not in card
+    assert all(label in card for label in ('시장 뉴스', '전략 상태', '최근 모의매매', '11.20 02:00:34 KST'))
+    assert card.count('<section') == 3
+    if status != 'SUCCEEDED':
+        assert any('이전 분석 시점' in c.value for c in app.caption)

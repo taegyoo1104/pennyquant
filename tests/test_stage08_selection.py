@@ -65,6 +65,36 @@ def test_full_scope_is_ranked_and_only_two_new_symbols_are_reserved(tmp_path):
     repo.close()
 
 
+@pytest.mark.parametrize('profile', ['strategy-lab', 'strategy-lab-websocket'])
+def test_lab_allows_three_symbols_counts_pending_buys_and_restores_without_duplicates(tmp_path, profile):
+    from sessionquant.session_config import load_session_config
+    config = load_session_config('config/sessionquant.'+profile+'.example.yaml')
+    settings = PortfolioSettings(**config.portfolio)
+    repo, engine, market = session(tmp_path, settings=settings, options=config.candidate_selection)
+    try:
+        engine.apply_batch(batch_for(market), NOW)
+        frame = repo.get_control(VIEW)
+        assert frame['approved_new_count'] == 3
+        orders = engine.broker.get_open_orders()
+        assert len(orders) == 3 and not engine.broker.positions
+        fourth = next(row for row in frame['rows'] if not row['approved'])
+        assert 'position_limit' in fourth['blockers']
+        assert engine.broker.reserved_cash <= settings.initial_cash
+        assert sum(o.intent.amount for o in orders) <= settings.initial_cash * 3 * settings.initial_weight
+        later = NOW+timedelta(seconds=1)
+        engine.apply_batch([{'kind':'quote', 'data':jsonable(replace(market.quotes[o.intent.symbol],
+            timestamp=later, received_at=later))} for o in orders[:2]], later)
+        assert len(engine.broker.positions) == 2 and len(engine.broker.get_open_orders()) == 1
+        restored = SessionEngine(repo, market.universe, settings=settings, synthetic=True,
+            candidate_settings=config.candidate_selection, restore=True)
+        assert len(restored.broker.positions) == 2 and len(restored.broker.get_open_orders()) == 1
+        assert len(repo.all('order_intents')) == 3
+        assert restored.broker.reconcile()['ok']
+        assert restored.broker.settings.max_positions == restored.broker.settings.preferred_positions == 3
+    finally:
+        repo.close()
+
+
 def test_same_time_focus_compares_symbols_without_new_quotes_in_that_batch(tmp_path):
     repo,engine,market=session(tmp_path,symbols=('AAPL','MSFT'))
     engine.market=market

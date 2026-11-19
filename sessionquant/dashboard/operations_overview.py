@@ -182,7 +182,7 @@ def render_operations(data, view, path, *, panel=None):
     st.markdown('<div class="sq-section"><h2>보유 종목</h2><p>모의 장부 기준</p></div>', unsafe_allow_html=True)
     if view['positions']:
         holdings = ''.join('<div class="sq-holding"><strong>'+escape(str(r['종목']))+'</strong>'
-            '<span>평가액 '+escape(r['평가액'])+'</span><span>평가 손익 '+escape(r['평가 손익'])+'</span></div>'
+            '<span>평가액 '+escape(r['평가액'])+'</span><span>평가 손익 '+escape(r['평가 손익'])+' ('+escape(r['평가 수익률'])+')</span></div>'
             for r in view['positions'])
         st.markdown('<div class="sq-holdings">'+holdings+'</div>', unsafe_allow_html=True)
     else:
@@ -190,14 +190,19 @@ def render_operations(data, view, path, *, panel=None):
     fills=data.tables.get('executions',[])
     if fills:
         latest=max(fills,key=lambda r:str(r.get('timestamp') or r.get('filled_at') or ''))
-        st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
+        side={'buy':'매수', 'sell':'매도'}.get(str(latest.get('side')).lower(), '방향 미확인')
+        st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' '+side+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
+        if str(latest.get('side')).lower()=='sell':
+            from .trade_reasons import execution_reasons
+            explained=execution_reasons([latest],orders=data.tables.get('orders',[]),state=data.state)[0]
+            st.caption('매도 이유: '+explained['매도 이유'])
     else:
         st.caption('조회 범위에 모의 체결 기록이 없습니다.')
     footer = st.columns(2)
     with footer[0]:
         link('매매 전체 보기','매매 내역')
     with footer[1]:
-        link('종목과 대기 이유 보기','시장·종목')
+        link('종목과 대기 이유 보기','시장·종목',panel='매수 판단')
     if panel is None:
         render_home_news(data)
 

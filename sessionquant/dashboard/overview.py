@@ -36,6 +36,13 @@ def style():
       border-radius:18px;padding:22px 24px;margin:8px 0 12px}
     .sq-ai h3 {margin:0 0 8px;font-size:1rem;padding:0;color:#b1f1df}
     .sq-ai p {color:#dde8f1;line-height:1.8;font-size:.92rem;white-space:pre-wrap;overflow-wrap:anywhere}
+    .sq-ai-section {padding:16px 0;border-top:1px solid #365046;margin-top:16px;min-width:0}
+    .sq-ai-section h4 {color:#b1f1df;font-size:.9rem;padding:0;margin:0 0 12px;font-weight:650}
+    .sq-ai-items {padding-left:1.15rem!important;margin:0!important;list-style:disc}
+    .sq-ai-items li {color:#dde8f1;font-size:.92rem;line-height:1.75;padding-left:4px;
+      margin:0 0 12px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+    .sq-ai-items li:last-child {margin-bottom:0}
+    .sq-ai-items li::marker {color:#6acbb7}
     .sq-ai small {color:var(--sq-muted)}
     .sq-holdings {display:grid;gap:8px}
     .sq-holding {display:flex;gap:16px;justify-content:space-between;padding:14px 18px;
@@ -57,14 +64,18 @@ def style():
     </style>''',unsafe_allow_html=True)
 
 
-def go(page):
+def go(page, panel=None):
     import streamlit as st
-    st.session_state['dashboard_page']=page
+    # Widget state is applied before the sidebar is constructed on the full rerun.
+    st.session_state['_dashboard_navigation'] = {'page':page, 'panel':panel}
 
 
-def link(label,page):
+def link(label,page,panel=None):
     import streamlit as st
-    st.button(label,on_click=go,args=(page,),key='go-'+label)
+    if st.button(label,on_click=go,args=(page,panel),key='go-'+label):
+        # A fragment-only refresh keeps its captured page unchanged. Navigation
+        # needs an app rerun, outside the callback where rerun is a no-op.
+        st.rerun(scope='app')
 
 
 def main_news(data,view,now):
@@ -193,7 +204,7 @@ def render_account_overview(data,view,path,usage_path=None,usage_environment=Non
     cols[3].caption('총 충전액(수동 입력): '+usd(summary.get('deposited')))
     st.subheader('보유 종목')
     if actual:st.info('실계좌 관리 포지션 연결은 미확인입니다. 전체 계좌 보유와 자동 합산하지 않습니다.')
-    else:_table([{k:r[k] for k in ('종목','보유 수량','평균 매수가','평가액','평가 손익')} for r in view['positions'][:5]],'보유 종목이 없습니다.')
+    else:_table([{k:r[k] for k in ('종목','보유 수량','평균 매수가','평가액','평가 손익','평가 수익률')} for r in view['positions'][:5]],'보유 종목이 없습니다.')
     link('보유 전체 보기','매매 내역')
     st.subheader('최근 거래')
     _table(recent_trades(data.tables['executions'],now))
@@ -225,7 +236,8 @@ def render_strategies(data,view):
     render_research_report()
     st.caption('Momentum / Pullback / Gap Breakout / VWAP · 합성 데모와 실제 외표본 검증을 구분합니다.')
     render_asset_curve(data)
-    _table(data.tables['daily_performance'],'비교 가능한 전략 성과 기록 미확인 · 수익률/MDD/PF/기대수익/MFE·MAE/외표본은 N/A')
+    from .performance_display import performance_rows
+    _table(performance_rows(data.tables['daily_performance']),'비교 가능한 전략 성과 기록 미확인 · 수익률/MDD/PF/기대수익/MFE·MAE/외표본은 N/A')
     risk=data.context.get('macro_reference_risk') or {}
     st.write('시장 참고 위험 필터: '+str(risk.get('mode','미확인')))
     st.caption('필터 ON/OFF 성과 비교·표본 수·외표본 기간은 연구 보고서가 없으면 N/A입니다.')
@@ -274,6 +286,10 @@ def filter_trades(data):
     import streamlit as st
     import pandas as pd
     from ..models import utc
+    from .trade_reasons import execution_reasons
+    # Resolve an older order before applying the date filter to its later fill.
+    data.tables['executions'] = execution_reasons(data.tables['executions'],
+        orders=data.tables['orders'], state=data.state)
     symbol=st.text_input('종목 필터',key='trade_symbol').strip().upper()
     strategy=st.text_input('전략 필터',key='trade_strategy').strip()
     days=st.selectbox('기간',[1,7,30,365,0],format_func=lambda d:f'최근 {d}일' if d else '조회 범위 전체',key='trade_days')
@@ -306,8 +322,9 @@ def render_research_report():
         rows=report['results'][period]
         if not isinstance(rows,dict):raise ValueError()
         from .session_app import _table
-        _table([{'전략/정책':name,'검증':r.get('evaluation_status','UNKNOWN'),**(r.get('diagnostic_simulation') or {}),
-            '최초 매수 보류 비교':r.get('entry_block_comparison'),'차단/미검증 사유':r.get('blocking_reasons')} for name,r in rows.items()])
+        from .performance_display import performance_rows
+        _table(performance_rows([{'전략/정책':name,'검증':r.get('evaluation_status','UNKNOWN'),**(r.get('diagnostic_simulation') or {}),
+            '최초 매수 보류 비교':r.get('entry_block_comparison'),'차단/미검증 사유':r.get('blocking_reasons')} for name,r in rows.items()]))
         st.caption('진단 시뮬레이션입니다. 실제 운영 성과로 확정하지 않습니다. 구간: '+period)
         st.caption('실제 외표본 검증: '+str(report.get('actual_out_of_sample_validated',False)))
         with st.expander('표본·자료 품질·분할 계획'):
@@ -317,18 +334,12 @@ def render_research_report():
 
 def render_asset_curve(data):
     import streamlit as st
-    from .session_app import decimal_value
-    from ..models import utc
-    now=datetime.now(timezone.utc);points=[]
-    for row in data.tables['account_snapshots']:
-        try:
-            stamp=utc(row.get('timestamp') or row.get('observed_at'))
-            value=decimal_value((row.get('account') or row).get('equity'))
-            if stamp<=now and value is not None:points.append({'시각':stamp,'장부 평가자산':float(value)})
-        except (ValueError,TypeError,AttributeError):continue
+    from .performance_display import asset_curve_points, asset_chart_spec
+    points = asset_curve_points(data.tables['account_snapshots'], datetime.now(timezone.utc))
     if points:
         import pandas as pd
-        frame=pd.DataFrame(points).sort_values('시각').set_index('시각')
-        st.line_chart(frame)
-        st.line_chart((frame/frame.cummax()-1).rename(columns={'장부 평가자산':'장부 낙폭'}))
+        frame = pd.DataFrame(points)
+        for field in ('장부 평가자산', '장부 낙폭'):
+            st.vega_lite_chart(frame, asset_chart_spec(field), width='stretch')
+        st.caption('금액·비율은 소수점 둘째 자리까지 버림 표시합니다. 차트 선과 원본 계산값은 정밀도를 유지합니다. 낙폭은 최고 평가자산 대비 하락률(%)입니다.')
     else:st.caption('자산곡선·낙폭: 시각이 검증된 자산 스냅샷 없음 · N/A')

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from ..models import utc
 from .watchlist_panel import current_status, focus_is_monitored
+from .instrument_names import korean_name
 
 
 STAGES = {
@@ -103,7 +104,7 @@ def focus_cards(state, assessments=None, *, quotes=None, now=None):
         elif fresh and saved.get('order_status')=='APPROVED':
             explanation='모의 주문 승인 · 체결은 별도로 확인해요.'
         price=_observed_price(row,(quotes or {}).get(symbol) or {},state.get('updated_at'),now,limit)
-        result.append({'symbol':symbol,**price,'monitored':monitored,'stage_fresh':fresh,
+        result.append({'symbol':symbol,'name':korean_name(symbol,row),**price,'monitored':monitored,'stage_fresh':fresh,
             'stage':stage,'title':title,'explanation':explanation,
             'steps':[{'label':label,'state':value} for label,value in zip(('상승','조정','반등'),steps)]})
         if len(result)>=10:break
@@ -114,6 +115,8 @@ CARD_STYLE='''<style>
 .sq-focus-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:14px 0 20px}
 .sq-focus-card{border:1px solid var(--sq-card-border,#29374a);background:var(--sq-card-bg,#111c2d);border-radius:18px;padding:20px;color:var(--sq-text,#e9f1f7);min-width:0}
 .sq-focus-top{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:15px}
+.sq-focus-identity{min-width:0}
+.sq-focus-name{font-size:.73rem;line-height:1.4;margin-top:4px;color:var(--sq-muted,#a7b8ca);overflow-wrap:anywhere}
 .sq-focus-symbol{font-size:1.08rem;letter-spacing:.035em;font-weight:750}
 .sq-focus-badge{font-size:.73rem;border-radius:20px;padding:4px 9px;background:var(--sq-soft,#1b2b3d);color:var(--sq-muted,#a7b8ca);white-space:nowrap}
 .sq-focus-badge.fresh{color:var(--sq-accent,#55dec5)}
@@ -141,7 +144,8 @@ def focus_cards_html(cards):
         e=lambda key:escape(str(card.get(key,'')),quote=True)
         badge=' fresh' if card.get('price_fresh') is True else ''
         steps=''.join('<li class="'+(s['state'] if s.get('state') in {'done','wait','pending','warn'} else 'pending')+'">'+escape(str(s.get('label','')),quote=True)+'</li>' for s in card.get('steps',[]))
-        elements.append('<article class="sq-focus-card"><div class="sq-focus-top"><span class="sq-focus-symbol">'+e('symbol')+'</span><span class="sq-focus-badge'+badge+'">'+e('price_status')+'</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div><div class="sq-focus-time">'+e('time_label')+'</div><ol class="sq-focus-steps" aria-label="현재 전략 단계">'+steps+'</ol><p class="sq-focus-title">'+e('title')+'</p><p class="sq-focus-explanation">'+e('explanation')+'</p></article>')
+        name='<div class="sq-focus-name">'+e('name')+'</div>' if card.get('name') else ''
+        elements.append('<article class="sq-focus-card"><div class="sq-focus-top"><div class="sq-focus-identity"><div class="sq-focus-symbol">'+e('symbol')+'</div>'+name+'</div><span class="sq-focus-badge'+badge+'">'+e('price_status')+'</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div><div class="sq-focus-time">'+e('time_label')+'</div><ol class="sq-focus-steps" aria-label="현재 전략 단계">'+steps+'</ol><p class="sq-focus-title">'+e('title')+'</p><p class="sq-focus-explanation">'+e('explanation')+'</p></article>')
     return CARD_STYLE+'<div class="sq-focus-grid">'+''.join(elements)+'</div>'
 
 

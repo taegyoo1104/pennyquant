@@ -70,6 +70,9 @@ for path in deploy/gcp/sessionquant*.service deploy/gcp/sessionquant*.timer; do
 done
 systemctl daemon-reload
 "${compose[@]}" up -d --wait --wait-timeout 180 db < /dev/null
+# The app is stopped and its original ledger has been backed up. Preserve the
+# strict restart-settings guard; upgrade only the reviewed, flat Paper profile.
+"${compose[@]}" run --rm --no-deps -T app python -m sessionquant.portfolio.position_limit_upgrade < /dev/null
 bash deploy/gcp/preopen_check.sh < /dev/null
 systemctl enable sessionquant.service sessionquant-cost-guard.timer
 systemctl start sessionquant-cost-guard.timer

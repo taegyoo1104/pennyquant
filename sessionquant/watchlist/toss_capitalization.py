@@ -118,7 +118,7 @@ def select_toss(batch, universe, now, *, size=100, allow_synthetic=False, missin
             prior=observations.get(symbol)
             if prior and Decimal(prior['market_cap_value'])!=amount:
                 issues.append({'ticker':symbol,'code':'sector_cap_conflict'});continue
-            observations[symbol]={'ticker':symbol,'market_cap_value':str(amount),'market_cap_usd':None,
+            observations[symbol]={'ticker':symbol,'name':row.get('name') if isinstance(row.get('name'),str) else None,'market_cap_value':str(amount),'market_cap_usd':None,
                 'currency':'KRW','sector_ids':sorted(set((prior or {}).get('sector_ids',[])+[sector])),
                 'issuer_id':None,'issuer_verified':False,'provider_as_of_at':None}
     issues += [{'ticker':s,'code':'market_cap_missing'} for s in sorted(set(members)-set(observations))]

@@ -235,6 +235,7 @@ class FractionalFill:
     quote_received_at: datetime | None = None
     observed_latency: Decimal | None = None
     execution_mode: str = 'paper'
+    reason: str = ''  # Copy the originating order reason, including partial fills.
 
 
 @dataclass(frozen=True)

@@ -244,13 +244,18 @@ def build_view(data: DashboardData, now: datetime | None = None) -> dict:
         value = qty * mark if mark is not None else None
         weight = value / equity * 100 if value is not None and equity is not None and equity > 0 else None
         stop = decimal_value(row.get("stop_price"))
+        entry_fee = decimal_value(row.get("entry_fee", "0"))
+        cost = qty * avg + entry_fee if avg is not None and avg > 0 and entry_fee is not None and entry_fee >= 0 else None
+        pnl = value - cost if value is not None and mark > 0 and cost is not None else None
+        return_pct = pnl / cost * 100 if pnl is not None and cost > 0 else None
         position_view.append({
             "종목": symbol, "보유 수량": str(qty), "평균 매수가": usd(avg), "평가액": usd(value),
             "비중": f"{weight:.1f}%" if weight is not None else "—",
             "최초 진입 금액": usd(row.get("initial_amount", row.get("initial_notional"))),
             "추가매수 금액": usd(row.get("add_amount", row.get("add_notional"))),
             "추가매수 횟수": row.get("add_count", row.get("adds", row.get("additions", 0))), "손절 기준": usd(stop),
-            "평가 손익": usd((mark - avg) * qty - decimal_value(row.get("entry_fee"), Decimal(0))) if mark is not None and avg is not None else "—",
+            "평가 손익": usd(pnl),
+            "평가 수익률": f"{return_pct:+.2f}%" if return_pct is not None else "—",
             "가격 기준": "최근 매수호가" if mark is not None else "시세 미확인/만료",
         })
     usage = data.tables.get("llm_usage", [])
@@ -459,8 +464,18 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         cols = st.columns(3)
         cols[0].metric("실현 손익", usd(account.get("realized_pnl")))
         cols[1].metric("일일 기준 자산", usd(account.get("day_start_equity")))
-        cols[2].metric("초기 계획", "2종목 중심")
-        st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
+        limits = (data.state.get('broker') or {}).get('settings') or {}
+        maximum, preferred = limits.get('max_positions'), limits.get('preferred_positions')
+        policy = data.state.get('candidate_selection') or {}
+        if type(maximum) is int and type(preferred) is int and 1 <= preferred <= maximum <= 5:
+            limit = maximum if policy.get('allow_above_preferred') or policy.get('enabled') is False else preferred
+            cols[2].metric("동시 보유 한도", f"{limit}종목")
+        else:
+            cols[2].metric("동시 보유 한도", "확인 대기")
+        if data.context.get('strategy', data.state.get('strategy')) == 'pullback_simple':
+            st.caption('현재 단순 눌림목 전략: 추가매수 없음. 최초 매수 목표는 자산의 20%이며, 손절 기준 가격에 도달하면 매도합니다. 실제 매수 금액은 현금·손절 거리·비용에 따라 줄어들 수 있습니다.')
+        else:
+            st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
         if view['environment'] == 'PAPER_LOCAL':
             st.caption('현재 한 전략만 단독 평가합니다. 10%는 고정 대기 조건이 아닌 설정 목표이며, 이익 보호·악재·손절·시간 청산이 먼저 작동할 수 있습니다. 일일 2%는 신규 매수 중단 기준으로 갭·장애 손실을 보장하지 않습니다.')
             risk = data.context.get('risk_snapshot') or {}
@@ -521,7 +536,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                     '수수료 항목':row.get('fee_breakdown'),'미체결 사유':row.get('unfilled_reason'),
                     '접수 시각':timestamp(row.get('accepted_at'))} for row in data.tables['orders']])
         with st.expander("체결 기록"):
-            _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "수량": str(row.get("qty", "")),
+            st.caption('매도 이유는 해당 주문에 기록된 사유입니다. 과거 체결은 연결된 주문에서 확인하며, 근거가 없으면 기록 없음으로 표시합니다.')
+            _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "매도 이유": row.get('매도 이유', '기록 없음') if str(row.get('side')).lower()=='sell' else '—', "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
                      '체결 모델':row.get('fill_model_version','실제 브로커' if row.get('execution_mode')=='live' else 'UNKNOWN'),
                      '예상 가격':usd(row.get('expected_price')),'가격 차이(bps)':row.get('slippage_bps'),

@@ -42,8 +42,8 @@ candidate_selection:
   fail_closed_diversification: true
 portfolio:
   initial_cash: '100'
-  preferred_positions: 2
-  max_positions: 5
+  preferred_positions: 3
+  max_positions: 3  # 보유와 미체결 매수 종목을 합산한 상한
   initial_weight: '0.20'
   add_weight: '0.20'
   max_symbol_weight: '0.40'
@@ -61,19 +61,20 @@ llm:
   primary_model: gpt-4.1-mini
   enable_escalation: false
   format_retry_limit: 0
-  daily_primary_call_cap: 150
-  hourly_primary_call_cap: 30
-  monthly_soft_budget_usd: '2'
+  daily_primary_call_cap: 600
+  hourly_primary_call_cap: 120
+  monthly_soft_budget_usd: '3'
   monthly_hard_budget_usd: '3'
 market_filter_enabled: false
 market_reference:
   enabled: true
-  symbols: [SPY, QQQ]
+  symbols: [SPY, QQQ, SOXX]
   display_only: true
   price_seconds: 30
   candle_seconds: 60
   calls_per_cycle: 2
 strategy_explanation:
   enabled: true
+  regular_session_only: true
   min_interval_seconds: 300
   max_attempts_per_day: 80

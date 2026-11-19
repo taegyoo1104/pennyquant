@@ -92,6 +92,7 @@ def test_gaps_future_invalid_and_conflicting_points_do_not_form_a_fake_continuou
     cards=benchmark_cards(view,NOW)
     html=benchmark_cards_html(cards[:1])
     assert len(cards[0]['points'])==2 and '<polyline' not in html and html.count('<circle')==2
+    assert '분봉 일부 없음' in html
     rows.append({**rows[0],'price':'77'})
     assert len(benchmark_cards(view,NOW)[0]['points'])==1
 
@@ -157,3 +158,37 @@ async def test_failed_daily_read_retries_within_budget_then_refreshes_at_next_op
 def test_invalid_reference_scope_is_rejected(value):
     from sessionquant.market_reference.settings import reference_settings
     with pytest.raises(ValueError):reference_settings(value)
+
+
+async def test_soxx_is_optional_display_only_and_preserves_legacy_risk_scope(tmp_path):
+    from sessionquant.market_reference.settings import reference_settings
+    from sessionquant.market_reference.risk import MacroReferenceRiskMonitor
+    from sessionquant.market_reference.contracts import REFERENCE_SYMBOLS
+    from sessionquant.session_config import load_session_config
+    repo = Repository(tmp_path/'semiconductors.db',backend='sqlite')
+    calls = []
+    symbols = ['SPY','QQQ','SOXX']
+    for profile in ('strategy-lab','strategy-lab-websocket'):
+        config = load_session_config('config/sessionquant.'+profile+'.example.yaml')
+        assert config.market_reference['symbols'] == symbols
+        assert not config.market_filter_enabled
+    assert 'SOXX' in REFERENCE_SYMBOLS  # Never a stock trading candidate.
+    assert 'SOXX' not in reference_settings({})['symbols']
+    monitor = MarketReferenceMonitor(repo,clock=lambda:NOW,symbols=symbols,display_only=True,calls_per_cycle=2)
+    async def read(stream,symbol):
+        calls.append((stream,symbol))
+        return {'data':None,'error':'fixture_missing'}
+    for _ in range(4):
+        before = len(calls)
+        view = await monitor.poll(read)
+        assert len(calls)-before <= 2
+    assert ('daily','SOXX') in calls and ('candle','SOXX') in calls
+    cards = benchmark_cards(view,NOW)
+    assert [c['symbol'] for c in cards] == symbols
+    assert cards[-1]['name'] == '미국 반도체 ETF' and cards[-1]['price'] == '—'
+    assert benchmark_cards_html(cards).count('<article ') == 3
+    assert len(benchmark_cards(view,NOW,symbols=['SPY','QQQ'])) == 2
+    measurements,_ = MacroReferenceRiskMonitor(repo)._measure(view,NOW)
+    assert 'SOXX' not in measurements
+    assert not repo.all('orders') and not repo.all('executions')
+    repo.close()

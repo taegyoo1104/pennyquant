@@ -176,3 +176,17 @@ async def test_actual_account_task_reuses_market_client_without_blocking_ticks(t
     if not slow: assert repo.get_control('account_monitor_status')['status'] == 'error'
     assert repo.load_state()['environment'] == 'PAPER_LOCAL'
     repo.close()
+
+
+@pytest.mark.parametrize('config,reason', [
+    ({'daily_primary_call_cap':0},'DAILY_CALL_CAP'),
+    ({'hourly_primary_call_cap':0},'HOURLY_CALL_CAP'),
+    ({'monthly_soft_budget_usd':'0','monthly_hard_budget_usd':'0'},'MONTHLY_COST_CAP'),
+])
+async def test_budget_block_codes_identify_the_limit_without_reserving(repo,config,reason):
+    ledger=BudgetLedger(repo,LLMSettings(**config))
+    with pytest.raises(BudgetBlocked) as caught:
+        await ledger.reserve('primary',{'messages':[]},NOW)
+    assert caught.value.code==reason
+    assert ledger.snapshot(NOW)['reserved_usd']=='0'
+    assert not repo.all('llm_usage')

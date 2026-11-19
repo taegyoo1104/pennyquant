@@ -12,6 +12,13 @@ PANEL_TOKENS = {
 
 def restore_navigation(params, state):
     """URL 변경과 위젯 변경을 구분한다. 새 세션·뒤로 가기도 지원한다."""
+    pending = state.pop('_dashboard_navigation', None)
+    if isinstance(pending,dict) and pending.get('page') in PAGE_TOKENS:
+        params['page'] = PAGE_TOKENS[pending['page']]
+        if pending['page'] == '시장·종목':
+            params['panel'] = PANEL_TOKENS.get(pending.get('panel'), 'quality')
+        elif 'panel' in params:
+            del params['panel']
     page_token = params.get('page', 'home')
     pages = {value: key for key, value in PAGE_TOKENS.items()}
     if page_token not in pages:
