@@ -230,8 +230,13 @@ def test_lab_dashboard_displays_intent_and_news_provenance(tmp_path, monkeypatch
     monkeypatch.setenv('PQ_DB_BACKEND','sqlite')
     app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30).run()
     assert not app.exception
-    assert any('전략 실험' in element.value for element in app.info)
-    assert any(e.label=='전략 → LLM → 주문 기록' for e in app.expander)
+    # Home is a concise view; decision provenance remains reachable in Market.
+    assert not any('주문 상세 기록' in e.label for e in app.expander)
+    assert any('집중 감시' in element.value for element in app.markdown)
+    app.radio(key='dashboard_page').set_value('시장·종목').run()
+    app.radio(key='market_detail').set_value('매수 판단').run()
+    assert not app.exception
+    assert any(e.label=='전략 → AI → 주문 상세 기록' for e in app.expander)
 
 
 def test_quality_screen_does_not_show_optional_rvol_as_missing_requirement():

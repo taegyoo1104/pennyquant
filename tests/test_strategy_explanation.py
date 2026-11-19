@@ -123,5 +123,8 @@ def test_saved_explanation_is_visible_with_source_time_and_call_id(tmp_path,monk
     monkeypatch.setenv('SQ_DB',str(path));monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setenv('PQ_DB_BACKEND','sqlite')
     app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30).run()
     assert not app.exception
+    assert any('AI 브리핑' in e.value and '입력 기준' in e.value for e in app.markdown)
+    app.radio(key='dashboard_page').set_value('뉴스·LLM').run()
+    assert not app.exception
     assert any('AI 설명 · 시장' in e.label for e in app.expander)
     assert any('test-call' in c.value for c in app.caption)
