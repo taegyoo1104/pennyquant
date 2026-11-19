@@ -151,6 +151,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
     market = news = market_task = news_task = account_task = dashboard = None
     explainer = explanation_task = explanation_owner = None
     quote_feed = quote_task = quote_delivery = None
+    benchmark_feed = benchmark_task = None
     quote_batch_seconds=0.
     notifier = DesktopNotifier(enabled=desktop_notifications)
     engine = None
@@ -223,7 +224,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 reference = MarketReferenceMonitor(repo,clock=lambda:datetime.now(timezone.utc),
                     price_seconds=reference_config['price_seconds'],candle_seconds=reference_config['candle_seconds'],
                     calls_per_cycle=reference_config['calls_per_cycle'],symbols=reference_config['symbols'],
-                    display_only=reference_config['display_only']) if reference_config['enabled'] else None
+                    display_only=reference_config['display_only'],stream_prices=reference_config['websocket_chart']) if reference_config['enabled'] else None
                 market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
@@ -241,6 +242,14 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     engine.quote_entry_guard=lambda symbol,stamp: quote_delivery.entry_allowed(
                         symbol,stamp,known_quotes=engine.market.quotes)
                     quote_task=asyncio.create_task(quote_feed.run())
+                    if reference_config['websocket_chart']:
+                        from .market_reference.trade_feed import BenchmarkTradeFeed, VIEW as BENCHMARK_VIEW
+                        benchmark_feed=BenchmarkTradeFeed(market.client,symbols=reference_config['symbols'],
+                            restored=repo.get_control(BENCHMARK_VIEW,{}))
+                        benchmark_task=asyncio.create_task(benchmark_feed.run())
+                if not benchmark_feed:
+                    from .market_reference.trade_feed import VIEW as BENCHMARK_VIEW
+                    repo.set_control(BENCHMARK_VIEW,{'enabled':False})
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:
@@ -261,6 +270,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
             cycles, next_market, next_news, next_tick, next_universe = 0, 0., 0., 0., time.monotonic() + 86400
             next_explanation=0.
             next_quotes=next_quote_status=0.
+            next_benchmarks=0.
             while max_cycles is None or cycles < max_cycles:
                 current, monotonic = datetime.now(timezone.utc), time.monotonic()
                 if quote_delivery and monotonic >= next_quotes:
@@ -281,6 +291,11 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                             'transport':'websocket','rest_role':'bootstrap_and_risk_fallback'})
                         next_quote_status=time.monotonic()+10
                     next_quotes=time.monotonic()+2
+                if benchmark_feed and monotonic >= next_benchmarks:
+                    # Publish after the priority trading quotes. Bounded display
+                    # cache only; never inject ETF trades into the strategy engine.
+                    repo.set_control(BENCHMARK_VIEW,benchmark_feed.snapshot())
+                    next_benchmarks=time.monotonic()+2
                 if market and market_task is None and monotonic >= next_market:
                     priority = list(dict.fromkeys([*engine.broker.positions, *engine.broker.exit_intents,
                         *(o.intent.symbol for o in engine.broker.get_open_orders())]))
@@ -381,9 +396,11 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     next_universe = monotonic + 86400
                 await asyncio.sleep(.1)
         finally:
+            if benchmark_feed:
+                benchmark_feed.stop()
             if quote_feed:
                 quote_feed.stop()
-            for task in (quote_task, market_task, news_task, account_task, explanation_task):
+            for task in (quote_task, benchmark_task, market_task, news_task, account_task, explanation_task):
                 if task and not task.done():
                     task.cancel()
                 if task:
@@ -403,6 +420,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     dashboard.wait(timeout=5)
             if engine and not engine.failed:
                 with repo.transaction():
+                    if benchmark_feed:
+                        repo.set_control(BENCHMARK_VIEW,benchmark_feed.snapshot())
                     if quote_feed:
                         from .market.live_quotes import VIEW
                         repo.set_control(VIEW,{**repo.get_control(VIEW,{}),**quote_feed.snapshot(),

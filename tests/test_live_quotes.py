@@ -159,14 +159,15 @@ async def test_source_skips_candidate_rest_books_but_rotates_candles_and_falls_b
     finally:repo.close()
 
 
-async def test_runtime_delivers_while_rest_poll_is_blocked_and_cleans_shared_client(tmp_path,monkeypatch):
+@pytest.mark.parametrize('chart_enabled',[False,True])
+async def test_runtime_delivers_while_rest_poll_is_blocked_and_cleans_shared_client(tmp_path,monkeypatch,chart_enabled):
     from sessionquant.market.universe import UniverseStore
     from sessionquant.session_runtime import run_session
     from sessionquant.watchlist.selection import WatchlistManager
     now=datetime.now(timezone.utc)
     universe=tmp_path/'universe.json'
     UniverseStore(universe).refresh(['AAPL'],source='SYNTHETIC_FIXTURE',observed_at=now)
-    delivered=asyncio.Event();closed=[];feeds=[];frames=[]
+    delivered=asyncio.Event();closed=[];feeds=[];frames=[];display_feeds=[]
     class Market:
         def __init__(self):self.client=self
         async def poll(self,*a,**k):
@@ -183,6 +184,19 @@ async def test_runtime_delivers_while_rest_poll_is_blocked_and_cleans_shared_cli
                         'asks':[{'price':'100.01','volume':'1000'}]}}
             await asyncio.Event().wait()
     market=Market()
+    from sessionquant.market_reference.trade_feed import BenchmarkTradeFeed
+    class DisplayStream:
+        async def stream(self,symbols,**kwargs):
+            assert kwargs['trades'] is True and kwargs['orderbook'] is False
+            yield {'type':'subscriptions','subscribed':[f'trade:us:{s}' for s in symbols],'rejected':[]}
+            stamp=datetime.now(timezone.utc).isoformat()
+            yield {'type':'message','topic':'trade:us:SPY','received_at':stamp,
+                   'data':{'timestamp':stamp,'currency':'USD','price':'100','volume':'1'}}
+            await asyncio.Event().wait()
+    def make_display(client,**kwargs):
+        assert client is market.client
+        feed=BenchmarkTradeFeed(client,stream=DisplayStream(),**kwargs)
+        display_feeds.append(feed);return feed
     def make_feed(client,**kwargs):
         assert client is market.client
         feed=TossQuoteFeed(client,stream=Stream(),**kwargs);feeds.append(feed);return feed
@@ -193,21 +207,29 @@ async def test_runtime_delivers_while_rest_poll_is_blocked_and_cleans_shared_cli
         return result
     monkeypatch.setattr('sessionquant.session_runtime.TossSessionSource',lambda **k:market)
     monkeypatch.setattr('sessionquant.collectors.toss_quote_feed.TossQuoteFeed',make_feed)
+    monkeypatch.setattr('sessionquant.market_reference.trade_feed.BenchmarkTradeFeed',make_display)
     monkeypatch.setattr(WatchlistManager,'light_symbols',lambda self,t:['AAPL'])
     monkeypatch.setattr(WatchlistManager,'focus',lambda self,t:['AAPL'])
     monkeypatch.setattr(SessionEngine,'apply_batch',capture)
     c=SessionConfig(database_backend='sqlite',db_path=tmp_path/'runtime.db',universe_path=universe,
         quote_transport='websocket',strategy='pullback_simple',paper_data_policy='observed_paper_v1',
-        news_enabled=False,actual_account_monitor_enabled=False,market_filter_enabled=False,focus_selection='turnover')
+        news_enabled=False,actual_account_monitor_enabled=False,market_filter_enabled=False,focus_selection='turnover',
+        market_reference={'websocket_chart':chart_enabled,'display_only':True,'symbols':['SPY','QQQ','SOXX']})
     await asyncio.wait_for(run_session(c,no_dashboard=True,max_cycles=1,desktop_notifications=False),12)
     assert frames and frames[0]['delivered_at']>frames[0]['data']['received_at']
     assert feeds[0].state=='STOPPED' and closed==[True]
+    assert len(display_feeds)==int(chart_enabled)
+    assert all(feed.state=='STOPPED' for feed in display_feeds)
+    assert all(row['data'].get('symbol')=='AAPL' for row in frames if row['kind']=='quote')
     repo=Repository(c.db_path,backend='sqlite')
     try:
         assert repo.get_control('sq_runtime')['identity']=='toss-readonly-websocket-v1'
         status=repo.get_control('websocket_quotes_v1')
         assert status['state']=='STOPPED' and status['delivery_batches']==1
         assert status['selected_fresh_count']==0
+        display=repo.get_control('benchmark_trade_view_v1')
+        assert display['enabled']==chart_enabled
+        if chart_enabled:assert display['state']=='STOPPED' and not display['latest']
     finally:repo.close()
 
 

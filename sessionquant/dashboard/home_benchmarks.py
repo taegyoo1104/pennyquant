@@ -22,7 +22,7 @@ def _previous_day(now):
     return None
 
 
-def benchmark_cards(view, now=None, *, symbols=None):
+def benchmark_cards(view, now=None, *, symbols=None, stream=None):
     now = utc(now or datetime.now(timezone.utc))
     bounds = session_bounds(now)
     previous_day = _previous_day(now)
@@ -72,12 +72,49 @@ def benchmark_cards(view, now=None, *, symbols=None):
             'change':f'{change:+.2f}%' if change is not None else '전일 대비 확인 중',
             'time_label':latest['event_at'].astimezone(KST).strftime('%m.%d %H:%M:%S KST') if price else '가격 수신을 기다려요.',
             'points':points, 'trend_status':'최근 1시간 · 1분봉 종가' if trend_fresh else '이전 분봉 기록' if points else '분봉 수집 중'})
+        if stream and stream.get('enabled'):
+            _stream_card(cards[-1],stream,now)
     return cards
 
 
-def _chart(points, reference, symbol):
+def _stream_card(card,stream,now):
+    from ..market_reference.trade_feed import samples, timestamp, MAX_AGE
+    symbol=card['symbol']
+    points=[]; latest=None; connected=False
+    try:
+        known=timestamp(stream['updated_at'])
+        if known<=now:
+            points=samples((stream.get('points') or {}).get(symbol,[]),now)
+            latest=(stream.get('latest') or {}).get(symbol)
+            connected=(stream.get('state')=='CONNECTED' and stream.get('acknowledged') is True
+                       and (now-known).total_seconds()<=10)
+    except (ValueError,TypeError,KeyError,AttributeError):pass
+    price=_positive(points[-1][1]) if points else None
+    event=datetime.fromtimestamp(points[-1][0]/1000,timezone.utc) if points else None
+    fresh=False
+    if latest and points:
+        try:
+            received=timestamp(latest['received_at'])
+            fresh=bool(connected and latest['at']==points[-1][0] and latest['segment']==points[-1][2]
+                       and _positive(latest['price'])==price and event<=received<=now
+                       and (now-event).total_seconds()<=MAX_AGE)
+        except (ValueError,TypeError,KeyError,AttributeError):pass
+    change=(price/card['reference']-1)*100 if price and card['reference'] else None
+    status='최근 수신' if fresh else '새 체결 대기' if connected else '재접속 중' if stream.get('state')=='BACKOFF' else '연결 대기'
+    if stream.get('state') in {'STOPPED','STOPPING'}:status='수신 중지'
+    card.update(price=f'${price:,.2f}' if price else '—',price_kind='체결가',price_status=status,price_fresh=fresh,
+        change=f'{change:+.2f}%' if change is not None else '전일 대비 확인 중',
+        tone='up' if change is not None and change>0 else 'down' if change is not None and change<0 else 'flat',
+        time_label=event.astimezone(KST).strftime('%m.%d %H:%M:%S KST') if event else '체결가 수신을 기다려요.',
+        points=[(datetime.fromtimestamp(r[0]/1000,timezone.utc),Decimal(r[1])) for r in points],
+        segments=[r[2] for r in points],chart_kind='trade',
+        trend_status='수신한 체결가 · 1초 표본 · 최대 1시간' if points else '실시간 체결가 수신 대기')
+
+
+def _chart(points, reference, symbol, *, segments=None, trade=False):
+    from ..market_reference.trade_feed import GAP_SECONDS
     if not points:
-        return '<div class="sq-benchmark-empty">분봉을 받으면 흐름이 표시돼요.</div>'
+        return '<div class="sq-benchmark-empty">'+('실시간 체결가를 기다려요.' if trade else '분봉을 받으면 흐름이 표시돼요.')+'</div>'
     if reference is None:
         return '<div class="sq-benchmark-empty">전일 종가 확인 후<br>등락 차트를 표시해요.</div>'
     first, last = points[0][0], points[-1][0]
@@ -86,11 +123,15 @@ def _chart(points, reference, symbol):
     scale = max(Decimal('0.01'), max(abs((v/reference-1)*100) for _,v in points))
     seconds = max(60, (last-first).total_seconds())
     parts, part, previous = [], [], None
-    for at, value in points:
+    for index,(at, value) in enumerate(points):
         x = 8+284*(at-first).total_seconds()/seconds
         delta = (value/reference-1)*100
         y = 64-48*float(delta/scale)
-        if previous is not None and (at-previous).total_seconds() != 60:
+        gap = False
+        if previous is not None:
+            elapsed = (at-previous).total_seconds()
+            gap = (elapsed > GAP_SECONDS or segments[index] != segments[index-1]) if trade else elapsed != 60
+        if gap:
             parts.append(part); part = []
         part.append((x,y,delta)); previous = at
     parts.append(part)
@@ -123,7 +164,7 @@ def _chart(points, reference, symbol):
         '<path d="M8 64H292" stroke="#8192a7" stroke-width="1" stroke-dasharray="4 4"/>'+strokes+''.join(dots)+'</svg></div>'+
         '<div class="sq-benchmark-axis"><span>'+first.astimezone(KST).strftime('%H:%M')+'</span><span>'+
         last.astimezone(KST).strftime('%H:%M')+' KST</span></div>'+
-        ('<div class="sq-benchmark-trend">분봉 일부 없음 · 빈 구간은 잇지 않아요.</div>' if len(parts)>1 else ''))
+        ('<div class="sq-benchmark-trend">'+('연결 끊김·수신 공백은 빈칸으로 표시해요.' if trade else '분봉 일부 없음 · 빈 구간은 잇지 않아요.')+'</div>' if len(parts)>1 else ''))
 
 
 def benchmark_cards_html(cards):
@@ -152,19 +193,34 @@ def benchmark_cards_html(cards):
             '</div><div class="sq-benchmark-name">'+e('name')+'</div></div><span class="sq-focus-badge'+badge+'">'+e('price_status')+
             '</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div>'+
             '<div class="sq-benchmark-change" style="color:'+color+'">'+e('change')+'<small>전일 종가 대비 · 참고</small></div>'+
-            _chart(card['points'],card.get('reference'),card['symbol'])+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
+            _chart(card['points'],card.get('reference'),card['symbol'],segments=card.get('segments'),trade=card.get('chart_kind')=='trade')+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
             '<div class="sq-focus-time">'+e('time_label')+'</div></article>')
     # Separate raw HTML blocks so Markdown does not absorb the cards into CSS.
     return CARD_STYLE+'\n\n'+style+'\n\n<div class="sq-benchmark-grid">'+''.join(elements)+'</div>'
 
 
-def render_benchmarks(view, context, *, now=None):
+def render_benchmarks(view, context, *, now=None, stream=None):
     import streamlit as st
     symbols = context.get('market_reference_symbols')
     if symbols is not None and not set(BENCHMARKS).intersection(symbols):
         return
     st.markdown('<div class="sq-section"><h2>시장 흐름</h2><p>참고용 · 매수 조건과 별개</p></div>',unsafe_allow_html=True)
-    st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols)),unsafe_allow_html=True)
+    st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols,stream=stream)),unsafe_allow_html=True)
+    if stream and stream.get('enabled'):
+        st.caption('미국 정규장에 수신한 체결가를 1초 단위로 모아 표시합니다. 연결 끊김·15초 넘는 수신 공백은 선으로 잇지 않습니다.')
     st.caption('현재 연결한 토스 API에서 해당 미국 지수를 직접 제공하지 않아 ETF로 시장 흐름을 보여드려요. '
         'SPY는 S&P 500, QQQ는 나스닥 100, SOXX는 미국 반도체 업종을 살펴보는 용도입니다. '
         '지수 자체의 수치는 아니며, SOXX는 필라델피아 반도체 지수와 구성 종목·비중이 달라요.')
+
+
+def render_live_benchmarks(path, *, refresh=True):
+    """Independent, small DB read; a chart tick does not rerun controls/news."""
+    import streamlit as st
+    from .session_app import load_database
+    @st.fragment(run_every=2 if refresh else None)
+    def chart():
+        data=load_database(path,page='대시보드',panel='benchmarks')
+        if data.error:
+            st.caption('시장 흐름 연결을 확인하고 있어요. 다음 갱신 때 다시 확인합니다.')
+        render_benchmarks(data.market_reference,data.context,stream=data.benchmark_stream)
+    chart()

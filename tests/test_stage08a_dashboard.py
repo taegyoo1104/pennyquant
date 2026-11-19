@@ -138,7 +138,7 @@ def test_market_fragment_refreshes_stored_values_and_toggle_disables_timer(tmp_p
     monkeypatch.setattr(st, 'fragment', fragment)
     try:
         app = AppTest.from_file(APP, default_timeout=30).run()
-        assert intervals[-2:] == [5, 60]
+        assert not app.exception and intervals[-3:] == [5, 2, 60]
         app.radio(key='dashboard_page').set_value('시장·종목').run()
         assert not app.exception and intervals[-1] == 10
         app.radio(key='market_detail').set_value('감시·집중 종목').run()
@@ -151,6 +151,8 @@ def test_market_fragment_refreshes_stored_values_and_toggle_disables_timer(tmp_p
         assert intervals[-1] == 30
         app.toggle(key='dashboard_auto_refresh').set_value(False).run()
         assert not app.exception and intervals[-1] is None
+        app.radio(key='dashboard_page').set_value('대시보드').run()
+        assert not app.exception and intervals[-3:] == [None, None, None]
         assert not writer.all('orders') and not writer.all('order_intents')
     finally:
         writer.close()

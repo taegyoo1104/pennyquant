@@ -170,8 +170,11 @@ def render_operations(data, view, path, *, panel=None):
         summary[2].metric('모의 총자산',usd(account.get('equity')),help='마지막 저장 장부 기준입니다. 새 시세를 받기 전에는 이전 평가가 남아 있을 수 있습니다.')
         summary[3].metric('매수 가능 금액',usd(cash-reserved) if cash is not None and reserved is not None else '—')
 
-    from .home_benchmarks import render_benchmarks
-    render_benchmarks(data.market_reference,data.context,now=now)
+    from .home_benchmarks import render_benchmarks, render_live_benchmarks
+    if panel == 'live':
+        render_live_benchmarks(path,refresh=st.session_state.get('dashboard_auto_refresh',True))
+    else:
+        render_benchmarks(data.market_reference,data.context,now=now,stream=data.benchmark_stream)
     st.markdown('<div class="sq-section"><h2>집중 감시</h2><p>가격과 전략 단계를 한눈에</p></div>', unsafe_allow_html=True)
     if (data.watchlist_state or {}).get('universe_source') == 'toss_us':
         roster = (data.watchlist_state or {}).get('snapshot') or {}
