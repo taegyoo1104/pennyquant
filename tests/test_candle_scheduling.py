@@ -31,6 +31,7 @@ async def test_slow_optional_references_do_not_starve_background_or_delay_candid
             events.append(('candle',symbol))
             return await super().candles(symbol,**kwargs)
     class References:
+        symbols=('IEF',)
         async def poll(self,read,*,limit):
             events.append(('reference',limit))
             seconds.value+=20
@@ -95,6 +96,7 @@ async def test_paced_full_sweep_includes_nonfocus_and_preserves_reference_slot(t
         async def reference_candles(self,symbol,**kwargs):
             return {'candles':[]}
     class References:
+        symbols=('IEF',)
         async def poll(self,read,*,limit):
             if limit:await read('orderbook','IEF')
     def deliver(batch):

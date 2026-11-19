@@ -2,6 +2,11 @@
 from ..market_reference.contracts import REFERENCES
 
 
+def reference_benchmarks_visible(context):
+    return (context.get('benchmark_collection_enabled') is not False
+            or bool({'SPY','QQQ'} & set(context.get('market_reference_symbols') or [])))
+
+
 def observed_price(item, symbol, now, quotes=None):
     """Display received prices without treating them as verified trading inputs."""
     from ..models import utc
@@ -39,6 +44,8 @@ def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True):
     now = now or datetime.now(timezone.utc)
     rows = []
     for symbol, (_, label) in REFERENCES.items():
+        if 'active_symbols' in view and symbol not in view['active_symbols']:
+            continue
         if not show_benchmarks and symbol in {'SPY', 'QQQ'}:
             continue
         item = (view.get('items') or {}).get(symbol) or {}
@@ -80,7 +87,7 @@ def render_references(view, risk=None, fred=None, *, quotes=None, fred_available
     st.subheader('시장 참고 ETF · 거래 후보 제외')
     st.caption('가격 수신과 분석 검증은 별개입니다. 과거 가격은 시각과 함께 표시하고, 호가 중간값은 체결 가격과 구분합니다.')
     _table(reference_rows(view,quotes=quotes,show_benchmarks=show_benchmarks))
-    symbols = 'SHY·IEF·TLT·USO'+('·SPY·QQQ' if show_benchmarks else '')
+    symbols = '·'.join(s for s in view.get('active_symbols',REFERENCES) if show_benchmarks or s not in {'SPY','QQQ'})
     st.caption(symbols+'는 감시·집중 종목 정원에서 제외됩니다. 권한·가격 비교 가능성이 미확인되면 UNKNOWN으로 표시합니다.')
     if risk:
         from .session_app import timestamp

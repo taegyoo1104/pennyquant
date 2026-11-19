@@ -188,13 +188,17 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
             from .market_reference.risk import MacroReferenceRiskMonitor
             from .market_reference.settings import reference_settings
             reference_config = reference_settings(config.market_reference)
-            include_benchmarks = config.market_filter_enabled or config.focus_selection!='turnover' or reference_config['enabled']
+            # Informational cards use the optional reference collector, not the
+            # priority trading-data path or the market-direction entry filter.
+            include_benchmarks = config.market_filter_enabled or config.focus_selection!='turnover'
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
                                    strict_market_data=True, use_market_filter=config.market_filter_enabled, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
                                    candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy,
-                                   benchmark_collection_enabled=include_benchmarks if config.source=='toss' else None)
+                                   benchmark_collection_enabled=include_benchmarks if config.source=='toss' else None,
+                                   market_reference_symbols=(reference_config['symbols'] if reference_config['enabled'] else [])
+                                   if config.source=='toss' else None)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)
@@ -218,7 +222,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 from .market_reference.collector import MarketReferenceMonitor
                 reference = MarketReferenceMonitor(repo,clock=lambda:datetime.now(timezone.utc),
                     price_seconds=reference_config['price_seconds'],candle_seconds=reference_config['candle_seconds'],
-                    calls_per_cycle=reference_config['calls_per_cycle']) if reference_config['enabled'] else None
+                    calls_per_cycle=reference_config['calls_per_cycle'],symbols=reference_config['symbols'],
+                    display_only=reference_config['display_only']) if reference_config['enabled'] else None
                 market = TossSessionSource(candidates_per_cycle=config.symbols_per_cycle, watchlist=watchlist,
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,

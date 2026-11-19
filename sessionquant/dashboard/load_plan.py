@@ -18,7 +18,7 @@ CONTROLS = {
 }
 
 PAGE_CONTROLS = {
-    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation'),
+    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation', 'market_reference'),
     '시장·종목': ('watchlist_state', 'market_quality', 'market_performance', 'watchlist_rvol',
                  'history_backfill', 'portfolio_selection', 'market_reference'),
     '전략·백테스트': (),
@@ -75,7 +75,7 @@ MARKET_SECTIONS = {
 def read_plan(page, *, news_section=None, panel=None):
     if panel is not None:
         if page == '대시보드' and panel == 'live':
-            return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup'), {
+            return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup', 'market_reference'), {
                 'executions': 1, 'quote_snapshots': 300}
         if page == '대시보드' and panel == 'news':
             return ('context', 'engine_state', 'news_status', 'strategy_explanation'), {'news_ingestions': 300}

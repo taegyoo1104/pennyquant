@@ -67,7 +67,12 @@ llm:
   monthly_hard_budget_usd: '3'
 market_filter_enabled: false
 market_reference:
-  enabled: false
+  enabled: true
+  symbols: [SPY, QQQ]
+  display_only: true
+  price_seconds: 30
+  candle_seconds: 60
+  calls_per_cycle: 2
 strategy_explanation:
   enabled: true
   min_interval_seconds: 300

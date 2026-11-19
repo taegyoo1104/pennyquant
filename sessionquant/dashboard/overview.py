@@ -247,10 +247,10 @@ def render_system(data,view):
     if data.tables['pipeline_status']:
         with st.expander('처리 기록 원본 보기'):
             st.json(data.tables['pipeline_status'])
-    from .reference_panel import reference_rows
+    from .reference_panel import reference_rows, reference_benchmarks_visible
     st.subheader('시장 참고 지표')
     _table(reference_rows(data.market_reference,
-                          show_benchmarks=data.context.get('benchmark_collection_enabled') is not False))
+                          show_benchmarks=reference_benchmarks_visible(data.context)))
     from .news_panel import provider_rows
     st.subheader('뉴스 수집 상태')
     _table(provider_rows(data.news_status))

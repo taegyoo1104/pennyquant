@@ -48,6 +48,7 @@ def build_metrics(store,symbol,now):
     prices = [r for r in store.rows(symbol,'price',now) if r['currency']=='USD' and r['quality_status'] not in {'INVALID','UNAVAILABLE','REVISION_PENDING'}]
     current = max(prices,key=lambda r:r['event_at']) if prices else last
     daily = [r for r in store.rows(symbol,'daily',now) if r['currency']=='USD' and r['price'] is not None
+             and r['quality_status'] not in {'INVALID','UNAVAILABLE','REVISION_PENDING'}
              and utc(r['event_at']).astimezone(ZoneInfo('America/New_York')).date() < now.astimezone(ZoneInfo('America/New_York')).date()]
     previous = max(daily,key=lambda r:r['event_at']) if daily else None
     opened = lookup.get(bounds[0]+timedelta(minutes=1)) if bounds else None
@@ -68,11 +69,15 @@ def build_metrics(store,symbol,now):
         'quality_status':'GOOD' if windows['30']['quality_status']=='GOOD' else 'UNKNOWN',
         'latency_class':last['latency_class'] if last else 'UNKNOWN','windows':windows,
         'current_price':current_value,'day_open':open_value,'previous_close':prior_value,
+        'previous_close_at':previous['event_at'] if previous else None,
         'day_return_pct':(current_value/prior_value-1)*100 if current_value is not None and prior_value else None,
         'opening_gap_pct':(open_value/prior_value-1)*100 if open_value is not None and prior_value else None,
         'cross_day_comparability':'VERIFIED' if previous and opened and series_verified([previous,opened],now) else 'UNKNOWN',
         'spread_pct':spread,'spread_valid_until':book.get('valid_until') if book else None,
         'quality_reasons':[] if fresh else ['closed_session_or_no_fresh_candle'],
+        # Bounded display snapshot, never evidence that a trading gate passed.
+        'trend_points':[{'at':at.isoformat(),'price':r['price'],'available_at':r['available_at']}
+                        for at,r in sorted(lookup.items()) if now-timedelta(hours=1)<=at<=now][-61:],
         'capabilities':store.state['capabilities'].get(symbol,{}),'latest_observations':{stream:store.state['latest'].get(symbol+':'+stream) for stream in ['price','orderbook','candle','daily']}}
     result['available_at'] = max((r['available_at'] for r in windows.values() if r['available_at']),default=result['available_at'])
     result = serialize(result)
