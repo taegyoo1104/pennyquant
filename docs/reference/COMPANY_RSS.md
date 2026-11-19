@@ -1,14 +1,18 @@
-# 시가총액 상위 100개 기업의 공식 RSS
+# 기업 RSS 기본 목록과 조사 기록
+
+어떤 회사의 공식 RSS를 기본 등록했는지와 제외 근거를 확인할 때 읽습니다. 목록에 있다고 매 주기 모든 피드를 요청하거나 모든 기사를 분석하는 것은 아닙니다. 수집 대상·본문·시각·중복·예산 검사를 통과한 기사에 LLM을 사용합니다. 추천 단순 전략에서 뉴스는 후보 가점이며, 별도의 전략 설명도 주문을 직접 실행하지 않습니다.
+
+[문서 목록](../README.md) · [매매 흐름](../TRADING_PROCESS.md) · [용어 설명](../GLOSSARY.md)
 
 확인일: 2026-11-14 KST · S&P 500 내 시가총액 **상위 100개 발행사** 대상 · **63개 발행사 / 64개 티커 등록**.
 
-이 목록은 RSS 기본 등록 당시의 시총 100개 발행사 기준이다. 이후 [단계 01](../archive/stages/STAGE01_WATCHLIST.md)에서 운영 감시·집중 정책을 별도로 구현했다. 전체 편입 원장은 유지하고 운영 선정에는 검증된 시총 입력과 대표 티커 근거를 사용한다. 이 RSS 스냅숏을 운영 감시목록으로 자동 전환하지 않는다.
+이 목록은 RSS 기본 등록 당시의 시총 100개 발행사 기준이다. 운영 감시·집중 정책은 이 목록과 별개다. 현재 추천 프로필은 확인 가능한 시총 기준 최대 50개에서 거래대금 중심 집중 10개를 선정한다. [단계 01](../archive/stages/STAGE01_WATCHLIST.md)은 이전 구현 기록이다. 전체 편입 원장은 유지하고 운영 선정에는 검증된 시총 입력과 대표 티커 근거를 사용한다. 이 RSS 스냅숏을 운영 감시목록으로 자동 전환하지 않는다.
 
 ## 시가총액 선정 기준
 
 [Stock Analysis의 S&P 500 목록](https://stockanalysis.com/list/sp-500-stocks/)에서 시가총액 열을 USD Decimal 값으로 변환해 내림차순 정렬했다. 페이지의 지수 비중 순서를 그대로 쓰지 않는다. 화면에 표시된 반올림 시총 수치 기준이며 정확한 실시간 시총 순위를 보증하지 않는다. 구성 여부는 [기존 유니버스와 같은 공개 CSV](https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv)와 대조했다. 지수 제공사의 공식 과거 이력 상품은 아니다.
 
-같은 CIK의 주식 클래스는 한 발행사로 계산한다. 클래스별로 제공된 기업 시총은 합산하지 않고 최댓값을 대표값으로 사용한다. 선정 결과는 100개 발행사·101개 티커이며 Alphabet의 GOOG·GOOGL을 함께 포함한다. 순위는 확인 시점의 고정 스냅숏이다. 운영 중 시총 순위나 거래 유니버스를 자동 변경하지 않는다.
+같은 CIK의 주식 클래스는 한 발행사로 계산한다. 클래스별로 제공된 기업 시총은 합산하지 않고 최댓값을 대표값으로 사용한다. 선정 결과는 100개 발행사·101개 티커이며 Alphabet의 GOOG·GOOGL을 함께 포함한다. 순위는 확인 시점의 고정 스냅숏이다. 이 RSS 목록 자체는 운영 중 시총 순위나 거래 유니버스를 자동 변경하지 않는다. 실행기의 시총 갱신·집중 선정 기능과는 별개다.
 
 순위·시총·복수 클래스·확인 시각은 `sessionquant/config/rss_top100.json`에 기록했다. 등록 피드·HTTP·파서·출처 증거는 `sessionquant/config/company_rss.json`, 전체 100개 발행사의 조사·제외 기록은 [COMPANY_RSS_AUDIT.json](COMPANY_RSS_AUDIT.json)에 보존했다.
 
@@ -20,10 +24,10 @@
 
 ## 적용 및 점검
 
-업데이트하면 기본 목록을 읽는다. `config/sessionquant.yaml`의 사용자 기업별 필드는 같은 기업 기본값보다 우선한다. 직접 등록한 NVDA 주소 등은 유지된다. 전체 기본 목록을 해제하려면 `company_rss_catalog: false`, 특정 기업의 RSS만 해제하려면 그 기업에 `rss_urls: []`를 지정한다. 등록되지 않은 종목의 차트·SEC·Alpaca 처리 경로는 기존 방식으로 동작한다.
+업데이트하면 기본 목록을 읽는다. 실제로 선택한 YAML의 사용자 기업별 필드는 같은 기업 기본값보다 우선한다. 직접 등록한 NVDA 주소 등은 유지된다. 전체 기본 목록을 해제하려면 `company_rss_catalog: false`, 특정 기업의 RSS만 해제하려면 그 기업에 `rss_urls: []`를 지정한다. 등록되지 않은 종목의 차트·SEC·Alpaca 처리 경로는 기존 방식으로 동작한다.
 
 ```powershell
-.\venv\Scripts\python.exe -m sessionquant check-news --connect --provider rss
+.\venv\Scripts\python.exe -m sessionquant check-news --config config/sessionquant.strategy-lab-websocket.example.yaml --connect --provider rss
 ```
 
 등록된 전체 피드를 최대 4개 동시 요청으로 확인한다. 같은 URL을 사용하는 복수 주식 클래스는 한 번만 조회하고 각 티커에 결과를 표시한다. 공급자별 요청 간격을 유지하며 LLM 생성·주문을 하지 않는다. 운영 뉴스 수집은 기존 보유·후보 종목 우선순위와 호출 예산을 유지한다.
@@ -98,6 +102,6 @@
 | 99 | STX | Seagate Technology | [RSS](https://investors.seagate.com/rss/pressrelease.aspx) | 2026-11-10 |
 
 
-## 검증 결과
+## 2026-11-14 당시 검증 결과
 
 전체 자동 테스트 631개가 통과했고, 선택 MySQL 검사 8개는 이번 실행에서 제외했다. Ruff·변경 형식 검사와 wheel 빌드를 통과했으며, 설치 패키지에 두 JSON 목록이 포함되는 것을 확인했다. 읽기 전용 실제 접속 검사에서는 등록된 64개 티커의 63개 고유 피드가 모두 조회됐다. LLM 텍스트 생성이나 실제 주문은 실행하지 않았다. 공급자의 이후 변경·장애가 있을 수 있으므로 사용자 PC에서도 같은 점검 명령으로 상태를 확인한다.
