@@ -117,7 +117,7 @@ def test_prepare_check_and_update_shells_parse_and_do_not_delete_runtime_data():
     assert 'news-refresh' not in check and 'llm' not in check.split('set -Eeuo',1)[-1].lower()
 
 
-@pytest.mark.parametrize('failure',['','build','backup','check','masked'])
+@pytest.mark.parametrize('failure',['','build','backup','upgrade','check','masked'])
 @pytest.mark.parametrize('paused',[False,True])
 def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,paused):
     import os
@@ -148,6 +148,7 @@ exit 0
 ''')
     executable(binpath/'docker','''echo "docker $*" >> "$CALLS"
 if [[ "$1" == build && "$FAILURE" == build ]]; then exit 1; fi
+if [[ "$*" == *"sessionquant.portfolio.position_limit_upgrade"* && "$FAILURE" == upgrade ]]; then exit 1; fi
 if [[ "$*" == *"SELECT @@GLOBAL.log_bin"* ]]; then echo 0; fi
 if [[ "$*" == "image inspect"* ]]; then exit 1; fi
 exit 0
@@ -168,10 +169,15 @@ exit 0
     assert ('systemctl start sessionquant.service' in log)==(not failure)
     assert (etc/'app.env').read_text()=='PRIVATE' and (data/'database').read_text()=='PRESERVED'
     if failure in ('build','masked'):assert 'systemctl stop sessionquant.service' not in log
+    if failure=='upgrade':
+        assert 'backup\n' in log and 'check\n' not in log
     if not failure:
-        if paused: assert log.count('run --rm --no-deps -T app python -')==3
+        if paused:
+            assert sum(line.endswith('run --rm --no-deps -T app python -') for line in log.splitlines())==2
+            assert sum(line.endswith('run --rm --no-deps -T app python - --stopped') for line in log.splitlines())==1
         assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
         assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
+        assert log.index('backup\n')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
         assert 'is-active --quiet sessionquant-market-close.timer' in log
         assert 'is-active --quiet sessionquant-storage-guard.timer' in log
 

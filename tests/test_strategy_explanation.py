@@ -138,8 +138,8 @@ def test_saved_explanation_is_visible_with_source_time_and_call_id(tmp_path,monk
     assert not app.exception
     assert any('AI 설명 · 시장' in e.label for e in app.expander)
     assert any('test-call' in c.value for c in app.caption)
-    assert any(expected in text.value for text in app.text)
-    assert not any('pullback_simple' in text.value for text in app.text)
+    assert any(expected in text.value for text in app.markdown)
+    assert not any('pullback_simple' in text.value for text in app.markdown)
     repo=Repository(path,backend='sqlite')
     assert repo.get_control(VIEW)['sections']==sections
     repo.close()

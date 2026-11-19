@@ -1,5 +1,6 @@
 """Saved AI narration, separate from authoritative code decisions."""
 import re
+from html import escape
 
 import streamlit as st
 
@@ -25,7 +26,28 @@ def explanation_text(view, key):
         return '입력 기준 시점에 기록된 전략 판단이 없습니다. 이 기록만으로는 매수 대기 이유를 알 수 없습니다.'
     text = str(((view.get('sections') or {}).get(key) or {}).get('text') or '').strip()
     # Translate only strategy IDs: words like LOW may be stock tickers, not statuses.
-    return _STRATEGY_CODE.sub(lambda m: LABELS[m.group()], text)
+    text = _STRATEGY_CODE.sub(lambda m: LABELS[m.group()], text)
+    return text.replace('종이 거래 모드', '모의매매').replace('종이 거래', '모의매매')
+
+
+def explanation_items(text):
+    """Keep all saved words; turn older single-paragraph narration into readable items."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) == 1:
+        # Decimal prices and quantities have no space after the dot. Do not
+        # reformat their precision or infer which trades/news belong together.
+        lines = re.split(r'(?<=[.!?])\s+', lines[0])
+    return [re.sub(r'^(?:[-•]|\d+[.)])\s+', '', line) for line in lines]
+
+
+def explanation_section(view, key, title):
+    """Escaped, unabridged narration shared by the home and detailed views."""
+    items = explanation_items(explanation_text(view, key))
+    if not items:
+        return ''
+    rows = ''.join('<li>'+escape(item)+'</li>' for item in items)
+    return ('<section class="sq-ai-section"><h4>'+escape(title)+'</h4>'
+            '<ul class="sq-ai-items">'+rows+'</ul></section>')
 
 
 def explanation_status(view):
@@ -56,19 +78,14 @@ def saved_explanation(view):
 
 def render_explanation_summary(view):
     """Retain the last successful narration while exposing refresh failures."""
-    from html import escape
     from .session_app import timestamp
     view = view or {}
     saved = saved_explanation(view)
     st.markdown('<div class="sq-section"><h2>AI가 읽은 흐름</h2><p>뉴스와 전략을 쉽게 설명합니다</p></div>', unsafe_allow_html=True)
     if saved:
-        paragraphs = []
-        for key, title in (('market', '시장'), ('strategy', '전략'), ('trades', '매매')):
-            text = explanation_text(saved, key)
-            if text:
-                short = text[:220] + ('…' if len(text) > 220 else '')
-                paragraphs.append('<p><strong>'+title+'</strong> · '+escape(short)+'</p>')
-        content = ''.join(paragraphs) or '<p>저장된 설명 본문이 없습니다.</p>'
+        content = ''.join(explanation_section(saved, key, title) for key, title in
+                          (('market', '시장 뉴스'), ('strategy', '전략 상태'), ('trades', '최근 모의매매')))
+        content = content or '<p>저장된 설명 본문이 없습니다.</p>'
         detail = '마지막 분석 · 입력 기준 '+timestamp(saved.get('as_of'))
         if saved.get('synthetic_inputs'):
             detail += ' · 합성 자료 설명'
@@ -78,11 +95,6 @@ def render_explanation_summary(view):
     st.markdown('<div class="sq-ai"><h3>AI 브리핑</h3>'+content+'<small>'+escape(detail)+'</small></div>', unsafe_allow_html=True)
     if saved and view.get('status') != 'SUCCEEDED':
         st.caption('새 분석 대기 · '+explanation_status(view)+' 위 내용은 이전 분석 시점의 설명입니다.')
-    if saved and any(len(explanation_text(saved, key)) > 220 for key in ('market','strategy','trades')):
-        with st.expander('설명 전체 읽기'):
-            for key, title in (('market','시장'),('strategy','전략'),('trades','매매')):
-                st.markdown('**'+title+'**')
-                st.text(explanation_text(saved, key))
     if saved and missing_strategy_decision(saved):
         st.caption('전략 판단 기록이 없어 해당 부분은 AI의 원인 추정 대신 기록 상태를 표시합니다.')
     st.caption('AI는 판단을 설명합니다. 매수·매도는 정한 전략과 주문 제한에 따라 결정합니다.')
@@ -104,8 +116,9 @@ def render_explanation(view):
                    ' · 실제 호출 '+', '.join(view.get('llm_call_ids',[])))
         for key,label in [('market','시장 상황'),('strategy','전략 판단'),('trades','매매 결과')]:
             part=view.get('sections',{}).get(key,{})
-            st.markdown('**'+label+'**')
-            st.text(explanation_text(view, key) or '미확인')
+            content = explanation_section(view, key, label)
+            st.markdown('<div class="sq-ai">'+content+'</div>' if content else '**'+label+'** · 미확인',
+                        unsafe_allow_html=True)
             st.caption('근거: '+', '.join(part.get('evidence_ids',[])))
         if missing_strategy_decision(view):
             st.caption('전략 판단 기록이 없어 해당 부분은 AI의 원인 추정 대신 기록 상태를 표시합니다.')

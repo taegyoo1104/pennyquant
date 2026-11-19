@@ -11,7 +11,7 @@ from .llm.evidence import parse_completion, ValidationFailure
 
 VIEW = 'strategy_explanation_v1'
 STATE = 'strategy_explanation_schedule_v1'
-VERSION = 'strategy-explanation-v2'
+VERSION = 'strategy-explanation-v3'
 PROMPT = '''You explain a Korean Paper trading demonstration. Return JSON only with exactly
 market, strategy, trades. Each is an object with text (Korean, <=700 characters) and evidence_ids
 (a nonempty list of IDs in the matching input facts group). Explain only supplied recorded facts.
@@ -28,7 +28,16 @@ at the snapshot time and that the waiting reason cannot be established. Do not i
 the strategy was evaluated, failed, or blocked by news from an absence of decisions.
 For pullback_simple, news is only a supplemental candidate ranking score. Missing, uncertain,
 or negative news alone does not block entry or force exit. Explain a waiting reason only
-from recorded strategy checks and blockers, never infer it from the market news section.'''
+from recorded strategy checks and blockers, never infer it from the market news section.
+For each text field, write concise complete Korean sentences as separate newline-delimited
+items (use escaped \\n within JSON strings). No Markdown, preamble, or trailing ellipsis.
+In market, use one item per supplied news story, beginning with its symbol if provided;
+keep any uncertainty in the same item. Do not merge multiple companies into one paragraph.
+In strategy, put each symbol's recorded conditions/waiting reason on its own line.
+In trades, put each recorded trade or related sequence on its own line. Call Paper trading
+모의매매, never 종이 거래 or actual brokerage execution. Show dollar amounts with two
+decimal places and quantities with up to six; do not call a sell a stop-loss or a profit
+without recorded evidence. Shorten wording to fit 700 characters, never cut a sentence.'''
 
 
 @dataclass(frozen=True)

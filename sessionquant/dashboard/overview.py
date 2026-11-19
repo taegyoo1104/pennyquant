@@ -36,6 +36,13 @@ def style():
       border-radius:18px;padding:22px 24px;margin:8px 0 12px}
     .sq-ai h3 {margin:0 0 8px;font-size:1rem;padding:0;color:#b1f1df}
     .sq-ai p {color:#dde8f1;line-height:1.8;font-size:.92rem;white-space:pre-wrap;overflow-wrap:anywhere}
+    .sq-ai-section {padding:16px 0;border-top:1px solid #365046;margin-top:16px;min-width:0}
+    .sq-ai-section h4 {color:#b1f1df;font-size:.9rem;padding:0;margin:0 0 12px;font-weight:650}
+    .sq-ai-items {padding-left:1.15rem!important;margin:0!important;list-style:disc}
+    .sq-ai-items li {color:#dde8f1;font-size:.92rem;line-height:1.75;padding-left:4px;
+      margin:0 0 12px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+    .sq-ai-items li:last-child {margin-bottom:0}
+    .sq-ai-items li::marker {color:#6acbb7}
     .sq-ai small {color:var(--sq-muted)}
     .sq-holdings {display:grid;gap:8px}
     .sq-holding {display:flex;gap:16px;justify-content:space-between;padding:14px 18px;
