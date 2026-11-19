@@ -424,7 +424,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             if market_section('매수 판단') and available('portfolio_selection'):
                 render_selection(data.portfolio_selection)
         else:
-            st.caption('시총 감시·집중 분석 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
+            st.caption('시총 감시·집중 분석 정책은 모의매매에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
     if market_section('분석 이력'):
         st.subheader("기술 분석 이력과 진입 근거")
         if not available('candidates'):

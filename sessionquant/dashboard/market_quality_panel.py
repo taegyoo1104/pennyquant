@@ -107,7 +107,7 @@ def render_quality(state, *, performance=None, details=True):
     _table(rows)
     if details:
         render_quality_details(report, performance)
-    st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. observed_paper_v1에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
+    st.caption('실제 계좌 자격과 거래량 비교 근거는 별도로 표시합니다. 관측 시세 기반 모의거래 정책에서는 상장 상태와 시세 품질을 확인한 뒤 가상의 소수점 거래를 허용하고, 완전한 20거래일의 계산 RVOL을 비교 근거 미검증 상태로 사용합니다. 누락·충돌 봉은 보간하지 않습니다.')
 
 
 def render_quality_details(report, performance=None):

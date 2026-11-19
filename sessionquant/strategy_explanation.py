@@ -11,7 +11,7 @@ from .llm.evidence import parse_completion, ValidationFailure
 
 VIEW = 'strategy_explanation_v1'
 STATE = 'strategy_explanation_schedule_v1'
-VERSION = 'strategy-explanation-v1'
+VERSION = 'strategy-explanation-v2'
 PROMPT = '''You explain a Korean Paper trading demonstration. Return JSON only with exactly
 market, strategy, trades. Each is an object with text (Korean, <=700 characters) and evidence_ids
 (a nonempty list of IDs in the matching input facts group). Explain only supplied recorded facts.
@@ -20,7 +20,15 @@ news, prices, causality, fills or profits. Missing news means unknown, not neutr
 The deterministic code decides strategy and orders; your text cannot authorize or block trades.
 Explain which conditions passed, why the code waits, and recorded fills/exits if present.
 Distinguish an approved/submitted order from a fill. State uncertainty and the snapshot time.
-Do not describe old observations as current prices. No outside knowledge or predictions.'''
+Do not describe old observations as current prices. No outside knowledge or predictions.
+Use Korean display names, never internal identifiers, in text: pullback_simple = 단순 눌림목,
+pullback = 눌림목, momentum = 상승 추세, gap_breakout = 갭 돌파, vwap = 평균 거래가격 회복.
+When strategy facts say NO_RECORDED_DECISION, state that no strategy decision was recorded
+at the snapshot time and that the waiting reason cannot be established. Do not infer that
+the strategy was evaluated, failed, or blocked by news from an absence of decisions.
+For pullback_simple, news is only a supplemental candidate ranking score. Missing, uncertain,
+or negative news alone does not block entry or force exit. Explain a waiting reason only
+from recorded strategy checks and blockers, never infer it from the market news section.'''
 
 
 @dataclass(frozen=True)
