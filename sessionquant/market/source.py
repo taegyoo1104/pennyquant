@@ -157,7 +157,7 @@ class TossSessionSource:
             measurements.append({'source':source,'symbol':symbol,'priority':not optional,'status':reason,
                 'read_attempts':0,'duration_seconds':0.0,'observed_at':utc(self.clock()).isoformat()})
 
-        async def call(source, method, *args, symbol='*', optional=False, reserved=0, **kwargs):
+        async def call(source, method, *args, symbol='*', optional=False, reserved=0, reserved_seconds=0, **kwargs):
             budget.reserved = 0
             group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
             until = state.get('reference_backoff_groups',{}).get(group)
@@ -167,10 +167,13 @@ class TossSessionSource:
             if state.get('backoff_until') and utc(self.clock()) < utc(state['backoff_until']):
                 skipped(source,symbol,optional,'provider_backoff')
                 return None
-            remaining = optional_deadline-monotonic()
+            available_seconds = optional_deadline-monotonic()
+            remaining = available_seconds-reserved_seconds
             if optional and remaining <= 0:
-                state['optional_deadline_reached'] = True
-                skipped(source,symbol,optional,'deadline_skipped')
+                reason = 'quote_time_reserved' if available_seconds > 0 and reserved_seconds else 'deadline_skipped'
+                if available_seconds <= 0:
+                    state['optional_deadline_reached'] = True
+                skipped(source,symbol,optional,reason)
                 return None
             before, began = budget.used, monotonic()
             status = 'UNKNOWN'
@@ -203,11 +206,11 @@ class TossSessionSource:
                     'observed_at':utc(self.clock()).isoformat()})
             return None
 
-        async def metadata(symbols, *, optional=False):
+        async def metadata(symbols, *, optional=False, reserved_seconds=0):
             missing = [s for s in symbols if s not in self._metadata_at or (utc(self.clock())-self._metadata_at[s]).total_seconds() >= 86400]
             if not missing:
                 return
-            result = await call('toss_stocks',self.client.stocks,missing,optional=optional)
+            result = await call('toss_stocks',self.client.stocks,missing,optional=optional,reserved_seconds=reserved_seconds)
             if result is None:
                 return
             values = result if isinstance(result,list) else result.get('stocks') if isinstance(result,dict) else None
@@ -230,12 +233,12 @@ class TossSessionSource:
             stamp = self._metadata_at.get(symbol,utc(self.clock()))
             return toss_eligibility(symbol,self._metadata.get(symbol),stamp)
 
-        async def quotes(symbols, *, optional=False, reserved=0):
+        async def quotes(symbols, *, optional=False, reserved=0, reserved_seconds=0):
             for symbol in symbols:
                 evidence = eligibility(symbol)
                 before = budget.used
                 quote = await call('toss_orderbook',self.client.quote,symbol,exchange=evidence.exchange,
-                    tradable=False,symbol=symbol,optional=optional,reserved=reserved)
+                    tradable=False,symbol=symbol,optional=optional,reserved=reserved,reserved_seconds=reserved_seconds)
                 if optional and budget.used > before:
                     manager.scheduler.mark(symbol,utc(self.clock()))
                     if symbol not in {'SPY','QQQ'}:
@@ -296,14 +299,14 @@ class TossSessionSource:
             minute = utc(self.clock()).replace(second=0,microsecond=0)
             return not last or utc(last).replace(second=0,microsecond=0) < minute
 
-        async def candles(symbol, *, optional=False, reserved=0):
+        async def candles(symbol, *, optional=False, reserved=0, reserved_seconds=0):
             last = state.setdefault('last_bars_fetch',{})
             stamp = utc(self.clock())
             if not candle_due(symbol):
                 return
             before = budget.used
             response = await call('toss_candles',self.client.candles,symbol,count=200,symbol=symbol,
-                                  optional=optional,reserved=reserved)
+                                  optional=optional,reserved=reserved,reserved_seconds=reserved_seconds)
             if budget.used > before:
                 manager.scheduler.mark(symbol,utc(self.clock()))
                 state.setdefault('last_candle_attempt',{})[symbol] = utc(self.clock()).isoformat()
@@ -382,11 +385,16 @@ class TossSessionSource:
             focus_started = monotonic()
             state['pre_focus_phase_seconds'] = round(focus_started-started,3)
             optional_deadline = focus_started + self.max_cycle_seconds
+            # Calls reserved by count do not reserve wall-clock time. Keep the
+            # final part of this SAME window for actionable candidate quotes,
+            # even when prices/rankings/candles time out. No extra retry budget.
+            quote_seconds = min(5., self.max_cycle_seconds / 2)
+            state['candidate_quote_reserved_seconds'] = quote_seconds
             pool = manager.light_symbols(utc(self.clock()))
             current = utc(self.clock())
             if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
                 before = budget.used
-                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,'SPY','QQQ'])),optional=True)
+                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,'SPY','QQQ'])),optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_light_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:
@@ -396,7 +404,7 @@ class TossSessionSource:
                         batch.errors.append({'source':'toss_prices','symbol':'*','error_type':'DataQualityError','message':'현재가 배치 검증 실패'})
             if pool and (not state.get('last_ranking_attempt_at') or (current-utc(state['last_ranking_attempt_at'])).total_seconds() >= self.ranking_refresh_seconds):
                 before = budget.used
-                rows = await call('toss_rankings',self.client.rankings,ranking_type='MARKET_TRADING_AMOUNT',count=100,optional=True)
+                rows = await call('toss_rankings',self.client.rankings,ranking_type='MARKET_TRADING_AMOUNT',count=100,optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_ranking_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:
@@ -411,13 +419,13 @@ class TossSessionSource:
             candidate_attempts = state.setdefault('last_candidate_quote_attempt',{})
             chosen = sorted([s for s in focus if s not in priority],
                             key=lambda s:(candidate_attempts.get(s,''),s))[:self.candidates_per_cycle]
-            await metadata(chosen,optional=True)
+            await metadata(chosen,optional=True,reserved_seconds=quote_seconds)
             # Fetch/persist the candidate's bars before taking its actionable quote.
             # A quote delivered first evaluated the previous bar set, and could
             # already be stale by the later candle/background delivery. Keep the
             # original risk-quote delivery above, and reserve candidate quote calls.
             for symbol in chosen:
-                await candles(symbol,optional=True,reserved=len(chosen))
+                await candles(symbol,optional=True,reserved=len(chosen),reserved_seconds=quote_seconds)
             if chosen:
                 # Startup/DB work may have aged the initial regime quotes. Refresh
                 # near-expiry observations under the SAME retry/deadline budget;
@@ -430,7 +438,7 @@ class TossSessionSource:
                 for symbol in references:
                     if budget.limit-budget.used <= len(chosen):
                         break
-                    await quotes([symbol],optional=True,reserved=len(chosen))
+                    await quotes([symbol],optional=True,reserved=len(chosen),reserved_seconds=quote_seconds)
             await quotes(chosen,optional=True)
             # Do not put the whole background watchlist between a fresh quote and
             # its decision. Those updates get their own batched delivery below.

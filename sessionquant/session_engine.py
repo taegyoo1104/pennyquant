@@ -318,7 +318,7 @@ class SessionEngine:
         self._batch_scope_blockers = {} if self.watchlist_policy is not None else None
         try:
             scope = getattr(self.watchlist_policy, 'read_scope', nullcontext)
-            with self.repo.transaction(), scope():
+            with self.repo.transaction(), scope(), self.market.evaluation_scope():
                 self.last_decision_at=now
                 for raw in events:
                     self._ingest(raw)

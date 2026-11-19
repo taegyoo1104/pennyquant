@@ -1,6 +1,7 @@
 """수신 시각 순서대로 시장 자료를 쌓고 기술적 매매 후보를 평가한다."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import math
@@ -66,6 +67,7 @@ class MarketEngine:
         self.rvol: dict[str, dict] = {}
         self.sector_strength: dict[str, tuple[float, datetime]] = {}
         self.history_provider = None
+        self._regime_cache = None
 
     def on_bar(self, bar: Bar) -> None:
         if bar.received_at < bar.timestamp:
@@ -76,6 +78,8 @@ class MarketEngine:
             if (existing.timestamp, existing.open, existing.high, existing.low, existing.close, existing.volume) == signature:
                 return
         values.append(bar)
+        if bar.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
+            self._regime_cache.clear()
         # 20거래일 RVOL 비교 이력을 유지하되 오래된 원본은 DB에서 보존한다.
         cutoff = bar.received_at - timedelta(days=50)
         self.bars[bar.symbol] = [x for x in values if x.timestamp >= cutoff][-20000:]
@@ -86,6 +90,8 @@ class MarketEngine:
         previous = self.quotes.get(quote.symbol)
         if previous is None or (quote.timestamp, quote.received_at) >= (previous.timestamp, previous.received_at):
             self.quotes[quote.symbol] = quote
+            if quote.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
+                self._regime_cache.clear()
 
     def set_eligibility(self, symbol: str, eligibility: InstrumentEligibility) -> None:
         if symbol != eligibility.symbol:
@@ -117,8 +123,26 @@ class MarketEngine:
         return relative_volume(total, through, self.bars.get(symbol, []), symbol=symbol,
                                min_sessions=min_sessions, corporate_actions_verified=comparability_verified)
 
+    @contextmanager
+    def evaluation_scope(self):
+        """Share benchmark work only within one serialized engine transaction."""
+        previous, self._regime_cache = self._regime_cache, {}
+        try:
+            yield
+        finally:
+            if previous is not None:
+                previous.clear()
+            self._regime_cache = previous
+
     def regime(self, now: datetime) -> RegimeResult:
-        return classify_regime(self.bars, self.quotes, now, max_quote_age_seconds=self.max_quote_age_seconds)
+        key = (utc(now), self.max_quote_age_seconds)
+        if self._regime_cache is not None and key in self._regime_cache:
+            return self._regime_cache[key]
+        result = classify_regime(self.bars, self.quotes, now, max_quote_age_seconds=self.max_quote_age_seconds)
+        if self._regime_cache is not None:
+            self._regime_cache.clear()
+            self._regime_cache[key] = result
+        return result
 
     def evaluate(self, symbol: str, now: datetime, *, news_score: float = .5,
                  news_blocked: bool = False) -> MarketDecision:
@@ -215,6 +239,8 @@ class MarketEngine:
                          "rvol": self.rvol, "sector_strength": self.sector_strength})
 
     def restore(self, payload: dict) -> None:
+        if self._regime_cache is not None:
+            self._regime_cache.clear()
         if payload.get("schema_version") != 1:
             raise ValueError("지원하지 않는 시장 상태 복구 형식입니다")
         self.bars, self.quotes, self.eligibility, self.rvol, self.sector_strength = {}, {}, {}, {}, {}
