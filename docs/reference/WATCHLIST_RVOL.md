@@ -1,15 +1,18 @@
-# 감시 50종목 과거 분봉 저장·RVOL
+# 기존 RVOL 프로필: 과거 분봉 저장·검사
 
-실제 시세·뉴스를 받아 **매매만 모의로** 실행하는 최신 절차는 [실데이터 Paper 안내](../REALTIME_PAPER.md)를 따른다. 아래의 비교 근거 없으면 전략에 RVOL을 전달하지 않는 설명은 기본 `strict` 정책이다. 별도 `observed_paper_v1` 예시는 완전한 동일 제공처·동일 경과 분의 계산값을 `EXPERIMENTAL_UNVERIFIED`로 전략에 전달하며, 실제 계좌 자격이나 거래량 비교 근거를 검증됨으로 바꾸지 않는다.
+과거 거래량과 비교하는 RVOL이 필요한 전략을 운영하거나 누락된 분봉을 조사할 때 읽습니다. **추천 `pullback_simple` 프로필은 이 20일 준비를 요구하지 않습니다.** 그 프로필은 확인 가능한 시총 기준 최대 50개에서 거래대금 중심 집중 10개를 선정하며 당일 분봉·최신 호가를 검사합니다. 아래 명령은 기존 자료를 검사·수집하는 데 계속 사용할 수 있지만, 필수 운영 순서로 모든 사용자에게 적용하지 않습니다.
 
-2026-11-15 사용자 요청에 따라 기본 시총 후보는 **시총이 확인된 S&P 500 종목 중 최대 50종목**, 실제 운영은 그중 분봉 준비가 끝난 종목, 집중 분석은 그 안에서 최대 20종목이다. `watchlist_size`로 최대 100까지 선택할 수 있다. 보유 목표 2종목과 위험 한도는 그대로 유지한다. 과거 단계 문서의 100종목은 이전 기본값이다. 사용자 YAML에 `watchlist_size: 100`이 명시돼 있으면 50으로 수정해야 한다.
+[문서 목록](../README.md) · [매매 흐름](../TRADING_PROCESS.md) · [용어 설명](../GLOSSARY.md)
+
+현재 실행 절차는 [실데이터 Paper 안내](../REALTIME_PAPER.md)를 따른다. 이 문서의 분봉 준비 종목 제외·집중 최대 20개는 **기존 후보/RVOL 프로필**에 대한 설명이다. 아래의 비교 근거 없으면 전략에 RVOL을 전달하지 않는 설명은 기본 `strict` 정책이다. 별도 `observed_paper_v1` 예시는 완전한 동일 제공처·동일 경과 분의 계산값을 `EXPERIMENTAL_UNVERIFIED`로 전략에 전달하며, 실제 계좌 자격이나 거래량 비교 근거를 검증됨으로 바꾸지 않는다.
+
+2026-11-15에 도입한 기존 프로필에서 시총 후보는 **시총이 확인된 S&P 500 종목 중 최대 50종목**, 실제 운영은 그중 분봉 준비가 끝난 종목, 집중 분석은 그 안에서 최대 20종목이다. `watchlist_size`로 최대 100까지 선택할 수 있다. 보유 목표 2종목과 위험 한도는 그대로 유지한다. 과거 단계 문서의 100종목은 이전 기본값이다. 사용자 YAML에 `watchlist_size: 100`이 명시돼 있으면 50으로 수정해야 한다.
 
 ## 로컬 실행
 
 같은 토스 클라이언트를 사용하는 수집기·계좌 조회기를 먼저 종료한다. 토큰 재발급은 이전 토큰을 무효화할 수 있다. 기존 로컬 환경변수 또는 `.env`의 토스 키와 MySQL 설정을 사용한다. 아래 명령에는 같은 `--config`를 사용해야 같은 DB 네임스페이스를 읽는다. MySQL에서 `db_path`는 실행 공간을 식별하며 SQLite 파일을 대신 만드는 옵션이 아니다.
 
 ```sh
-git pull --ff-only origin wip/stage06-handoff-20261115
 python -m sessionquant watchlist-refresh --config config/sessionquant.candidates.example.yaml
 python -m sessionquant history-backfill --config config/sessionquant.candidates.example.yaml
 python -m sessionquant history-status --config config/sessionquant.candidates.example.yaml
@@ -40,7 +43,6 @@ python -m sessionquant history-status --config config/sessionquant.candidates.ex
 업데이트 후 기존 캐시를 새 정책으로 다시 선정한다. 과거 스냅숏과 최초 수신 시각은 변경하지 않고 새 선택 시각의 이력을 추가한다.
 
 ```sh
-git pull --ff-only origin wip/stage06-handoff-20261115
 python -m sessionquant watchlist-refresh --config config/sessionquant.candidates.example.yaml
 python -m sessionquant history-status --config config/sessionquant.candidates.example.yaml --details --output data/history-readiness-cap-excluded.json
 ```
@@ -76,7 +78,7 @@ python -m sessionquant history-backfill --config config/sessionquant.candidates.
 
 ## 분봉이 준비된 50−n종목 운영
 
-토스 감시목록을 사용하는 `run`에 자동 적용된다. 원래 시총 후보 50개와 순위는 보존하며, 과거 20개 정상장 및 사이의 조기 폐장일에 분봉이 하나라도 누락·충돌하거나 출처/수신 시각이 잘못된 종목은 운영 목록에서 제외한다. 다른 종목을 추가해 50개를 채우지 않는다. 준비된 종목이 0개이면 일반 후보 조회·신규 진입 없이 위험 관리만 유지한다.
+기존 RVOL 전략으로 토스 감시목록을 사용하는 `run`에 적용된다. `pullback_simple`에는 이 과거 이력 제외 단계를 적용하지 않는다. 원래 시총 후보 50개와 순위는 보존하며, 과거 20개 정상장 및 사이의 조기 폐장일에 분봉이 하나라도 누락·충돌하거나 출처/수신 시각이 잘못된 종목은 운영 목록에서 제외한다. 다른 종목을 추가해 50개를 채우지 않는다. 준비된 종목이 0개이면 일반 후보 조회·신규 진입 없이 위험 관리만 유지한다.
 
 - 장전 실행은 다음 실제 거래일의 준비 목록을 계산한다. 주말·휴장·서머타임·조기 폐장 달력을 적용한다. 장전 재시작 및 개장 후 첫 검사에서 DB를 다시 읽는다.
 - 개장 후 첫 검사에서 운영 목록을 고정하고 같은 거래일 재시작 시 복구한다. 장중에 누락이 복구되거나 새 시총 후보가 생겨도 다음 거래일 검사 전에는 추가하지 않는다. 시총/편입 목록에서 빠진 종목은 즉시 일반 운영에서 제외한다.
@@ -99,9 +101,9 @@ python -m sessionquant history-status --config config/sessionquant.candidates.ex
 python -m sessionquant run --config config/sessionquant.candidates.example.yaml
 ```
 
-기존 `run`의 뉴스·LLM 설정은 그대로 적용된다. 시장 수집기는 같은 DB의 과거 이력을 자동으로 읽고, 당일 확정 분봉을 계속 저장한다. 다시 실행해도 과거 분봉을 매번 API에서 다시 받지 않는다. 매일 장 시작 전에 `history-backfill`을 실행하는 운영을 권장한다. 자동 장전 스케줄러나 GCP 작업은 이번 변경에 포함하지 않는다.
+기존 `run`의 뉴스·LLM 설정은 그대로 적용된다. 시장 수집기는 같은 DB의 과거 이력을 자동으로 읽고, 당일 확정 분봉을 계속 저장한다. 다시 실행해도 과거 분봉을 매번 API에서 다시 받지 않는다. 매일 장 시작 전에 `history-backfill`을 실행하는 운영을 권장한다. 이 수집 명령 자체가 장전 스케줄러나 GCP VM을 켜지는 않는다. GCP 모의 운영의 수동 시작·자동 종료 구성은 [GCP 안내](../GCP_PAPER.md)를 따른다.
 
-보유·청산 위험 호가를 먼저 전달하고 집중 후보를 수집한 뒤, 운영 목록의 나머지 종목을 `watchlist_candles_per_cycle`(기본 4개)씩 순환한다. 전체 호출 예산과 시간 제한 안에서만 실행되므로 **운영 종목 모두를 매분 조회한다는 보장은 없다.** 수집이 늦거나 새 분이 누락되면 그 종목의 최신 RVOL은 미확인으로 표시한다. 장중 늦게 시작한 경우 운영 종목의 개장 이후 누락 페이지도 점진적으로 보충한다.
+기존 REST 수집 경로는 보유·청산 위험 호가를 먼저 전달하고 집중 후보를 수집한 뒤, 운영 목록의 나머지 종목을 `watchlist_candles_per_cycle`(기본 4개)씩 순환한다. 전체 호출 예산과 시간 제한 안에서만 실행되므로 **운영 종목 모두를 매분 조회한다는 보장은 없다.** 수집이 늦거나 새 분이 누락되면 그 종목의 최신 RVOL은 미확인으로 표시한다. 장중 늦게 시작한 경우 운영 종목의 개장 이후 누락 페이지도 점진적으로 보충한다.
 
 수집된 당일 분봉으로 분 단위 관찰용 RVOL을 계산한다. 매매 엔진은 기존대로 완료된 5분봉 시점의 RVOL을 사용한다. 두 값은 기준 시각이 다르면 다를 수 있다.
 
@@ -110,7 +112,7 @@ RVOL = 오늘 개장부터 계산 기준 분까지의 누적 거래량
        / 과거 20개 비교 거래일의 같은 경과 분 평균 누적 거래량
 ```
 
-대시보드 **시장·종목 → 감시목록 과거 분봉·RVOL**에서 수집 완료 현황, 종목별 기준 시각, 확보 거래일, 누적 거래량, 평균, 계산값을 볼 수 있다. 오래된 값은 숨기고 사유를 표시한다. CLI `history-status`도 같은 상태를 읽는다.
+대시보드 **시장·종목 → 거래량 비교**에서 수집 완료 현황, 종목별 기준 시각, 확보 거래일, 누적 거래량, 평균, 계산값을 볼 수 있다. 오래된 값은 숨기고 사유를 표시한다. CLI `history-status`도 같은 상태를 읽는다.
 
 ## 저장·검증 경계
 
@@ -119,4 +121,4 @@ RVOL = 오늘 개장부터 계산 기준 분까지의 누적 거래량
 - `calculated_value`: 누락·충돌 없이 동일 출처/조정 방식의 입력으로 계산한 수치다.
 - `value` / `status=VERIFIED`: 기존 분할·거래량 비교 근거까지 유효할 때만 매매 엔진에 전달하는 값이다. 토스 이력 수집 성공만으로 이 검증을 만들지 않는다.
 
-따라서 과거 이력이 확보되어 `calculated_value`가 표시되어도, 비교 근거가 없으면 `value=null`, `status=UNKNOWN`을 유지한다. 실제 계좌 적격성·소수점·거래정지·기업행동 검증은 별도이며, 이번 변경이 이 매수 차단 조건을 해제하지 않는다. 사용자 제공 진단의 26개 완전성 결과도 매매 적격성 검증을 뜻하지 않는다.
+따라서 `strict` 정책은 과거 이력의 `calculated_value`가 있어도 비교 근거가 없으면 `value=null`, `status=UNKNOWN`을 유지한다. `observed_paper_v1`의 실험용 RVOL 전달은 문서 앞의 별도 설명을 따른다. 실제 계좌 적격성·소수점·거래정지·기업행동 검증은 별도다. 과거 분봉 확보만으로 `strict`의 자격 검사가 통과되지는 않는다. 사용자 제공 진단의 26개 완전성 결과도 매매 적격성 검증을 뜻하지 않는다.

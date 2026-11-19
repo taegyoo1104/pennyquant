@@ -1,5 +1,6 @@
 """모의매매 홈: 현재 상태 네 가지와 보유 장부만 요약한다."""
 from datetime import datetime, timezone
+from html import escape
 
 from .session_app import age_seconds, decimal_value, timestamp, usd
 from .watchlist_panel import current_status
@@ -7,6 +8,18 @@ from .watchlist_panel import current_status
 
 def _count(value):
     return str(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else '—'
+
+
+def home_focus(data, view, now):
+    """An older watchlist must not outlive the engine's current heartbeat label."""
+    from .home_cards import focus_cards
+    engine = data.engine_state
+    age = age_seconds(engine.get('heartbeat'), now)
+    online = engine.get('mode') == 'paper' and engine.get('armed') and age is not None and age <= 60
+    state = data.watchlist_state
+    if not online:
+        state = {**state, 'status': 'UNKNOWN'}
+    return focus_cards(state, data.context.get('strategy_lab'), quotes=view['quotes'], now=now)
 
 
 def operation_cards(data, view, now=None):
@@ -115,20 +128,21 @@ def render_operations(data, view, path, *, panel=None):
     from ..trading_controls import render_controls
     from .labels import market_hours_label
     from .overview import link
-    from .session_app import _table
 
     if panel == 'news':
-        render_operation_cards(data, view, news_only=True)
+        render_home_news(data)
         return
     now = datetime.now(timezone.utc)
-    st.subheader('프로그램 상태')
-    st.caption('모의매매 · '+market_hours_label(now))
+    st.markdown('<div class="sq-hero"><div><div class="sq-eyebrow">SESSIONQUANT</div>'
+        '<h1>나의 전략, 오늘의 흐름</h1><p>'+escape(market_hours_label(now))+'</p></div>'
+        '<span class="sq-pill">모의매매</span></div>', unsafe_allow_html=True)
     if data.connected:
         try:
             with closing(Repository(path, initialize=False)) as repo:
                 positions = (data.state.get('broker') or {}).get('positions') or {}
-                render_controls(repo, positions=[{'symbol':s,**r} for s,r in positions.items()],
-                                environment=view['environment'], compact=True)
+                with st.container(key='home_controls'):
+                    render_controls(repo, positions=[{'symbol':s,**r} for s,r in positions.items()],
+                                    environment=view['environment'], compact=True)
         except Exception:
             st.warning('매매 제어 연결을 확인하세요. 시스템·설정에서 상태를 볼 수 있습니다.')
     else:
@@ -137,28 +151,61 @@ def render_operations(data, view, path, *, panel=None):
         controls[0].button('매매 시작', disabled=True, key='offline-start')
         controls[1].button('전체 매도', disabled=True, key='offline-stop')
 
-    render_operation_cards(data, view, live_only=panel == 'live')
-
     account = view['account']
     cash = decimal_value(account.get('cash'))
     reserved = decimal_value(account.get('reserved_cash'))
-    summary = st.columns(2)
-    summary[0].metric('모의 총자산',usd(account.get('equity')),help='저장된 모의 장부 기준입니다. 최신 시세를 받기 전에는 이전 평가가 남아 있을 수 있습니다.')
-    summary[1].metric('매수 가능 금액',usd(cash-reserved) if cash is not None and reserved is not None else '—')
-    st.subheader('보유 종목')
-    _table([{k:r[k] for k in ('종목','평가액','평가 손익')} for r in view['positions']], '보유 종목이 없습니다.')
+    from .home_cards import focus_cards_html
+    focus = home_focus(data, view, now)
+    cards = operation_cards(data, view, now)[:2]
+    monitored = sum(card['monitored'] for card in focus)
+    if monitored:
+        cards[1].update(value=f'{monitored}개 관찰', detail='아래 카드에서 전략 진행을 확인하세요.')
+    with st.container(key='home_metrics'):
+        summary = st.columns(4)
+        for column, card in zip(summary[:2], cards):
+            with column:
+                st.metric(card['label'], card['value'], help=card.get('help'))
+                # The concise home still distinguishes saved records from live data.
+                st.caption(card['detail'])
+        summary[2].metric('모의 총자산',usd(account.get('equity')),help='마지막 저장 장부 기준입니다. 새 시세를 받기 전에는 이전 평가가 남아 있을 수 있습니다.')
+        summary[3].metric('매수 가능 금액',usd(cash-reserved) if cash is not None and reserved is not None else '—')
+
+    st.markdown('<div class="sq-section"><h2>집중 감시</h2><p>가격과 전략 단계를 한눈에</p></div>', unsafe_allow_html=True)
+    schedule = (data.watchlist_state or {}).get('focus_schedule') or {}
+    if schedule.get('next_at'):
+        st.caption('30분마다 목록 확인 · 다음 '+timestamp(schedule['next_at']))
+    st.markdown(focus_cards_html(focus), unsafe_allow_html=True)
+    if data.context.get('strategy') == 'pullback_simple':
+        st.caption('눌림목 전략 · 상승 → 잠시 조정 → 반등 확인 순서로 살펴봅니다. 조건을 충족해도 주문 제한에 따라 기다릴 수 있습니다.')
+    st.markdown('<div class="sq-section"><h2>보유 종목</h2><p>모의 장부 기준</p></div>', unsafe_allow_html=True)
+    if view['positions']:
+        holdings = ''.join('<div class="sq-holding"><strong>'+escape(str(r['종목']))+'</strong>'
+            '<span>평가액 '+escape(r['평가액'])+'</span><span>평가 손익 '+escape(r['평가 손익'])+'</span></div>'
+            for r in view['positions'])
+        st.markdown('<div class="sq-holdings">'+holdings+'</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="sq-empty">아직 보유 종목이 없습니다. 정한 조건이 맞으면 모의 주문을 냅니다.</div>', unsafe_allow_html=True)
     fills=data.tables.get('executions',[])
     if fills:
         latest=max(fills,key=lambda r:str(r.get('timestamp') or r.get('filled_at') or ''))
         st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
     else:
         st.caption('조회 범위에 모의 체결 기록이 없습니다.')
-    from .labels import label
-    strategy = data.context.get('strategy') or data.state.get('strategy')
-    if strategy:
-        st.caption('전략 · '+label(strategy))
     footer = st.columns(2)
     with footer[0]:
         link('매매 전체 보기','매매 내역')
     with footer[1]:
-        link('자료·연결 자세히','시스템·설정')
+        link('종목과 대기 이유 보기','시장·종목')
+    if panel is None:
+        render_home_news(data)
+
+
+def render_home_news(data):
+    """Slow news fragment: one saved AI explanation, optional collection details."""
+    import streamlit as st
+    from .explanation_panel import render_explanation_summary
+    from .overview import link
+    render_explanation_summary(data.strategy_explanation)
+    with st.expander('뉴스·AI 수집 현황'):
+        render_operation_cards(data, {'quotes': {}}, news_only=True)
+    link('뉴스·AI 자세히 보기', '뉴스·LLM')
