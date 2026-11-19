@@ -247,6 +247,15 @@ class WatchlistManager:
                 volume = decimal(row['tradingVolume'], positive=True)
                 fresh[symbol] = {'as_of_at': stamp.isoformat(), 'known_at': received_at.isoformat(),
                     'dollar_volume_usd': str(amount), 'volume': str(volume), 'source': 'toss:MARKET_TRADING_AMOUNT:1d'}
+                # RankingPrice.basePrice is the previous-day base for MARKET_*
+                # rankings (TOP_GAINERS/LOSERS instead use the period start).
+                # Optional display evidence must never change focus eligibility.
+                price = row.get('price')
+                if isinstance(price, dict):
+                    try:
+                        fresh[symbol]['previous_close'] = str(decimal(price.get('basePrice'), positive=True))
+                    except ValueError:
+                        pass
             except (TypeError, KeyError):
                 continue
         self.state['rankings'] = fresh
@@ -387,6 +396,8 @@ class WatchlistManager:
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],
                 'last_price_at': self.state['prices'].get(symbol, [{}])[0].get('as_of_at'),
                 'last_price': self.state['prices'].get(symbol, [{}])[0].get('price'),
+                'day_price_base': {key: self.state['rankings'].get(symbol, {}).get(key)
+                    for key in ('previous_close', 'as_of_at', 'known_at', 'source')},
                 'entry_blockers': self.entry_blockers(symbol, now)})
         previous = self.state.get('focus_recorded_at')
         identity = sorted(focused)

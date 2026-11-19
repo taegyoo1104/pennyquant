@@ -98,6 +98,7 @@ def test_stage_does_not_lock_in_and_order_approval_is_not_fill():
 def test_html_escapes_dynamic_values_and_has_only_allowlisted_classes():
     malicious='<img src=x onerror="alert(1)">'
     card={'symbol':malicious,'name':malicious,'price':malicious,'price_kind':malicious,'price_status':malicious,
+          'change':malicious,'change_help':malicious,'change_tone':'gain" onclick="alert(1)',
           'time_label':malicious,'title':malicious,'explanation':malicious,
           'steps':[{'label':malicious,'state':'done" onclick="alert(1)'}]}
     html=focus_cards_html([card])
@@ -146,3 +147,65 @@ def test_korean_provider_name_overrides_alias_and_unknown_symbols_are_not_guesse
     assert card['name']=='애플 보통주' and '애플 보통주' in focus_cards_html([card])
     state['items'][0].update(ticker='UNLISTED',name='Unlisted Company')
     assert focus_cards(state,assessment,now=NOW)[0]['name']==''
+
+
+def with_day_base(state, price='190', at=NOW):
+    state['items'][0]['day_price_base']={'previous_close':price,'as_of_at':at.isoformat(),
+        'known_at':at.isoformat(),'source':'toss:MARKET_TRADING_AMOUNT:1d'}
+
+
+def test_day_change_uses_latest_displayed_quote_not_older_ranking_percent():
+    state,assessment=snapshots();with_day_base(state)
+    original=deepcopy(state)
+    observed=focus_cards(state,assessment,now=NOW)[0]
+    assert (observed['change'],observed['change_tone'])==('+0.65%','gain')
+    quote={'symbol':'AAPL','bid':'188','ask':'188.04','timestamp':NOW.isoformat(),'received_at':NOW.isoformat()}
+    card=focus_cards(state,assessment,quotes={'AAPL':quote},now=NOW)[0]
+    assert (card['price'],card['change'],card['change_tone'])==('$188.02','-1.04%','loss')
+    assert 'sq-focus-price-line loss' in focus_cards_html([card])
+    assert state==original
+
+
+@pytest.mark.parametrize('price,expected,tone',[
+    ('190','0.00%','flat'),('189.999','0.00%','flat'),('192.999','+1.57%','gain'),
+])
+def test_display_day_change_truncates_and_zero_is_neutral(price,expected,tone):
+    state,assessment=snapshots();with_day_base(state)
+    state['items'][0]['last_price']=price
+    card=focus_cards(state,assessment,now=NOW)[0]
+    assert (card['change'],card['change_tone'])==(expected,tone)
+
+
+@pytest.mark.parametrize('fault',[
+    'missing','zero','nan','bool','other_source','old_base','future_base','future_received',
+    'invalid_time','old_price','no_price',
+])
+def test_day_change_rejects_missing_or_wrong_day_evidence(fault):
+    state,assessment=snapshots();with_day_base(state)
+    row=state['items'][0];base=row['day_price_base']
+    if fault=='missing':row.pop('day_price_base')
+    elif fault=='zero':base['previous_close']='0'
+    elif fault=='nan':base['previous_close']='NaN'
+    elif fault=='bool':base['previous_close']=True
+    elif fault=='other_source':base['source']='toss:TOP_GAINERS:1d'
+    elif fault=='old_base':base['as_of_at']=(NOW-timedelta(days=1)).isoformat()
+    elif fault=='future_base':base['as_of_at']=(NOW+timedelta(seconds=1)).isoformat()
+    elif fault=='future_received':base['known_at']=(NOW+timedelta(seconds=1)).isoformat()
+    elif fault=='invalid_time':base['as_of_at']=None
+    elif fault=='old_price':row['last_price_at']=(NOW-timedelta(days=1)).isoformat()
+    elif fault=='no_price':row['last_price']=None
+    card=focus_cards(state,assessment,now=NOW)[0]
+    assert card['change']=='—' and card['change_tone']=='flat'
+    if fault!='no_price':assert card['price']=='$191.25'
+
+
+def test_new_york_day_boundary_accepts_us_evening_across_utc_midnight_only():
+    state,assessment=snapshots()
+    later=NOW.replace(hour=0)+timedelta(days=1,hours=1)
+    with_day_base(state,at=NOW.replace(hour=23))
+    state['updated_at']=later.isoformat();state['items'][0]['last_price_at']=later.isoformat()
+    assert focus_cards(state,assessment,now=later)[0]['change']=='+0.65%'
+    # New York midnight: yesterday's baseline cannot price today's comparison.
+    later+=timedelta(hours=4)
+    state['updated_at']=later.isoformat();state['items'][0]['last_price_at']=later.isoformat()
+    assert focus_cards(state,assessment,now=later)[0]['change']=='—'

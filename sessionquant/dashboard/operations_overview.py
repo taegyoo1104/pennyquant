@@ -1,4 +1,4 @@
-"""모의매매 홈: 현재 상태 네 가지와 보유 장부만 요약한다."""
+"""모의매매 홈: 현재 상태·자산·수익률과 보유 장부를 요약한다."""
 from datetime import datetime, timezone
 from html import escape
 
@@ -161,7 +161,7 @@ def render_operations(data, view, path, *, panel=None):
     if monitored:
         cards[1].update(value=f'{monitored}개 관찰', detail='아래 카드에서 전략 진행을 확인하세요.')
     with st.container(key='home_metrics'):
-        summary = st.columns(4)
+        summary = st.columns(6)
         for column, card in zip(summary[:2], cards):
             with column:
                 st.metric(card['label'], card['value'], help=card.get('help'))
@@ -169,6 +169,8 @@ def render_operations(data, view, path, *, panel=None):
                 st.caption(card['detail'])
         summary[2].metric('모의 총자산',usd(account.get('equity')),help='마지막 저장 장부 기준입니다. 새 시세를 받기 전에는 이전 평가가 남아 있을 수 있습니다.')
         summary[3].metric('매수 가능 금액',usd(cash-reserved) if cash is not None and reserved is not None else '—')
+        from .home_returns import render_account_returns
+        render_account_returns(summary[4:],data.state,account,now)
 
     from .home_benchmarks import render_benchmarks, render_live_benchmarks
     if panel == 'live':
