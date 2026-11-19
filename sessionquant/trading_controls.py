@@ -158,17 +158,20 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
         live_ok=st.checkbox('마스킹된 실제 계좌 **의 청산 요청을 추가 확인합니다.',key='confirm-live-'+run) if expected=='live' else True
         if st.button('일괄 매매 종료·청산 요청',disabled=not active or not confirm or not live_ok or any(r.get('action')=='stop_all' for r in unresolved),key='trading-stop'):submit('stop_all')
     from .portfolio.models import decimal
+    from .dashboard.instrument_names import korean_name
     for row in [] if compact else positions:
         symbol=row.get('symbol');qty=row.get('qty')
         if not symbol:continue
         try:positive=decimal(qty)>0
         except (ValueError,TypeError):positive=False
-        quantity_label = '모의 보유' if expected=='paper' else '전략 관리'
-        with st.expander(f'{symbol} 전량 매도 · {quantity_label} {qty}주'):
+        name = korean_name(symbol, row)
+        display_name = f'{name}({symbol})' if name else symbol
+        sell_label = f'{display_name} {qty}주 전량 매도'
+        with st.expander(sell_label):
             if expected=='paper':st.caption('주 단위의 모의 보유 수량입니다. 금액에 맞춰 매수하므로 1주보다 적을 수 있어요.')
             st.caption(label(environment)+' · 시장가 위험/미체결 수량은 엔진에서 다시 확인합니다.')
-            confirm=st.checkbox(f'{symbol} 전략 관리 수량 전량 시장가 매도를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
-            if st.button('전량 매도 요청',key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or symbol in selling or any(r.get('symbol')==symbol and r.get('status')=='pending' for r in requests)):
+            confirm=st.checkbox(f'{sell_label}를 확인합니다.',key='confirm-sell-'+symbol+'-'+run)
+            if st.button(sell_label,key='sell-'+symbol,disabled=not active or expected=='live' or not positive or not confirm or symbol in selling or any(r.get('symbol')==symbol and r.get('status')=='pending' for r in requests)):
                 submit('sell_symbol',symbol)
     if not compact:
         st.caption('주문 처리와 남은 수량은 매매 내역에서 확인하세요.')
