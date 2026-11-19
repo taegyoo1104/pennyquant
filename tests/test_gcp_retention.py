@@ -65,7 +65,7 @@ def test_cleanup_preserves_backup_and_removes_only_its_own_container(tmp_path, m
     name = run.split("--name ")[1].split()[0]
     assert name.startswith("sessionquant-retention-")
     assert lines[-1] == "docker rm -f " + name
-    assert "--volume" in run and ":ro app python -m sessionquant data-retention" in run
+    assert "--volume" in run and ":ro app sh -c exec python -m sessionquant data-retention" in run
     assert ".retention-proof." in run and str(etc) not in run
     assert "--apply --backup-receipt" in run
     assert not list(data.glob(".retention.*"))

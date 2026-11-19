@@ -20,7 +20,7 @@ class CandidateSettings:
     use_news_score: bool=True
     use_sector_score: bool=True
     final_candidate_limit: int=5
-    quote_alignment_seconds: int=2
+    quote_alignment_seconds: int | None=2
     allow_above_preferred: bool=False
     max_same_sector: int | None=None
     max_high_index_correlation: int | None=None
@@ -32,6 +32,7 @@ class CandidateSettings:
         for key in ('enabled','use_news_score','use_sector_score','allow_above_preferred','fail_closed_diversification'):
             if type(getattr(self,key)) is not bool:raise ValueError('후보 선정 기능 설정은 불리언이어야 합니다.')
         for key,low,high in [('final_candidate_limit',1,5),('quote_alignment_seconds',0,10),('correlation_minutes',20,120)]:
+            if key=='quote_alignment_seconds' and getattr(self,key) is None:continue
             if type(getattr(self,key)) is not int or not low<=getattr(self,key)<=high:raise ValueError('후보 수·시간 정렬·상관 표본 설정을 확인하세요.')
         for key in ('max_same_sector','max_high_index_correlation'):
             value=getattr(self,key)
@@ -67,7 +68,7 @@ class PortfolioCandidateSelector:
             if not expected or decision.indicators.get('last_closed_at')!=expected.isoformat():blockers.append('candidate_bar_time_mismatch')
             if not quote or not quote.timestamp<=quote.received_at<=now or (now-quote.timestamp).total_seconds()>broker.settings.max_quote_age_seconds:
                 blockers.append('candidate_quote_stale_or_unknown')
-            elif anchor and (anchor-quote.timestamp).total_seconds()>settings.quote_alignment_seconds:blockers.append('candidate_quote_time_mismatch')
+            elif settings.quote_alignment_seconds is not None and anchor and (anchor-quote.timestamp).total_seconds()>settings.quote_alignment_seconds:blockers.append('candidate_quote_time_mismatch')
             if not decision.signal:blockers.append('technical_signal_absent')
             elif decision.signal.id in consumed:blockers.append('signal_already_consumed')
             if risk.get('block_entries') or risk.get('blackout'):blockers.append('confirmed_news_entry_restriction')
@@ -111,7 +112,7 @@ class PortfolioCandidateSelector:
                     if listing.get('received_at'):expiry.append(utc(listing['received_at'])+timedelta(days=1))
                     if listing.get('valid_until'):expiry.append(utc(listing['valid_until']))
             rvol=row['indicators'].get('data_quality',{}).get('rvol',{})
-            if rvol.get('valid_until'):expiry.append(utc(rvol['valid_until']))
+            if row['indicators'].get('rvol_required',True) and rvol.get('valid_until'):expiry.append(utc(rvol['valid_until']))
             news=row['news_score_signal']
             if row['indicators']['score_component_status']['news']=='VERIFIED':expiry.append(utc(news['valid_until']))
             sector=row['sector_strength']

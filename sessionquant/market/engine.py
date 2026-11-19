@@ -40,7 +40,7 @@ class MarketEngine:
                  max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
                  min_rvol: float = 1.0, allow_neutral: bool = False, use_market_filter: bool = True, strict_data: bool = False,
                  paper_data_policy='strict'):
-        if strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
+        if strategy not in {"momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"}:
             raise ValueError("지원하지 않는 전략입니다")
         self.universe, self.strategy = universe, strategy
         self.strict_data = strict_data
@@ -59,7 +59,7 @@ class MarketEngine:
         self.allow_neutral = allow_neutral
         if type(use_market_filter) is not bool or type(allow_neutral) is not bool:
             raise ValueError("시장 필터·중립장 허용 설정은 불리언이어야 합니다")
-        # 시장 필터 해제는 과거 자료 비교 실험에서만 호출자가 사용한다.
+        # 시장 필터 적용 여부는 별도 Paper 설정 또는 과거 자료 비교에서 명시한다.
         self.use_market_filter = use_market_filter
         self.bars: dict[str, list[Bar]] = {}
         self.quotes: dict[str, Quote] = {}
@@ -189,6 +189,7 @@ class MarketEngine:
                 'eligibility':jsonable(eligibility) if eligibility else None,
                 'quote_fresh':bool(quote and quote.symbol == symbol and quote.timestamp <= quote.received_at <= now
                     and all(0 <= (now-t).total_seconds() <= self.max_quote_age_seconds for t in [quote.timestamp,quote.received_at])),
+                'rvol_required':self.strategy != 'pullback_simple',
                 'quote_at':quote.timestamp.isoformat() if quote else None,
                 'quote_received_at':quote.received_at.isoformat() if quote else None}
         elif rvol is None:
@@ -200,7 +201,7 @@ class MarketEngine:
                         max_quote_age_seconds=self.max_quote_age_seconds,
                         max_eligibility_age_seconds=self.max_eligibility_age_seconds,
                         max_spread_pct=self.max_spread_pct, min_dollar_volume=self.min_dollar_volume,
-                        min_rvol=self.min_rvol, require_evidence=self.strict_data, paper_assumptions=experimental)
+                        min_rvol=self.min_rvol, require_evidence=self.strict_data, paper_assumptions=experimental, require_rvol=self.strategy != "pullback_simple")
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         if symbol in REFERENCE_SYMBOLS:
             blockers.append('market_reference_not_trading_candidate')
@@ -225,6 +226,11 @@ class MarketEngine:
                                             "market_filter_enabled": self.use_market_filter,
                                             'strategy_diagnostics':strategy_diagnostics,
                                             'strategy_status':'BLOCKED' if blockers else 'SIGNAL' if signal else 'WAITING'}
+        if self.strategy == 'pullback_simple':
+            from .simple_pullback import inspect_pattern, progress
+            indicator_values['strategy_pattern'] = inspect_pattern(data)
+            indicator_values['strategy_progress'] = progress(data)
+            indicator_values['rvol_required'] = False
         if quality is not None:
             quality['blockers'] = list(dict.fromkeys(blockers))
             self.quality_rows[symbol] = quality

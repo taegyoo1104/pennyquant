@@ -101,11 +101,11 @@ def replay_session(input_path: Path, db_path: Path, universe_path: Path, *, stra
 
 
 def batch_events(batch, *, delivered_at: datetime | None = None,
-                 last_time: datetime | None = None) -> list[dict]:
+                 last_time: datetime | None = None, delayed_quotes: bool = False) -> list[dict]:
     """Keep late bars/listing evidence without refreshing their source clocks.
 
-    Quotes older than the engine watermark remain excluded. Late non-execution
-    inputs are available only at actual delivery time, including during replay.
+    REST keeps its legacy watermark behavior. Stream mode explicitly admits late
+    quotes at delivery time; execution still checks original clocks and book IDs.
     """
     result = [{"kind": "bar", "data": jsonable(x)} for x in batch.bars]
     result += [{"kind":"bar","data":jsonable(x),"restored_at":jsonable(batch.observed_at)}
@@ -116,7 +116,7 @@ def batch_events(batch, *, delivered_at: datetime | None = None,
         retained = []
         for raw in result:
             if event_time(raw) < last_time:
-                if raw['kind'] not in {'bar', 'eligibility'}:
+                if raw['kind'] not in {'bar', 'eligibility'} and not (delayed_quotes and raw['kind']=='quote'):
                     continue
                 if delivered_at is None:
                     raise ValueError('지연 자료에는 실제 전달 시각이 필요합니다.')
@@ -149,12 +149,15 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
         await universe.refresh_public()
     stack, repo = _open(config.db_path, config.database_backend)
     market = news = market_task = news_task = account_task = dashboard = None
+    explainer = explanation_task = explanation_owner = None
+    quote_feed = quote_task = quote_delivery = None
+    quote_batch_seconds=0.
     notifier = DesktopNotifier(enabled=desktop_notifications)
     engine = None
     watchlist = None
     with stack:
         try:
-            identity = str(config.input_path.resolve()) if config.input_path else "toss-readonly"
+            identity = str(config.input_path.resolve()) if config.input_path else ("toss-readonly-websocket-v1" if config.quote_transport=="websocket" else "toss-readonly")
             bind_runtime(repo, source=config.source, identity=identity)
             if config.news_enabled:
                 from .macro.models import LLMSettings
@@ -179,14 +182,14 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
             if config.watchlist_enabled:
                 from .watchlist.selection import WatchlistManager
                 from .watchlist.history_selection import DailyHistorySelection
-                if config.source == 'toss':control_state['data_ready'] = False
+                if config.source == 'toss' and config.strategy != 'pullback_simple':control_state['data_ready'] = False
                 watchlist = WatchlistManager(repo, universe, config,
-                    history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' else None)
+                    history_selection=DailyHistorySelection(repo,startup_pending=True) if config.source == 'toss' and config.strategy != 'pullback_simple' else None)
             from .market_reference.risk import MacroReferenceRiskMonitor
             reference_risk = MacroReferenceRiskMonitor(repo,config.macro_reference_filter)
             engine = SessionEngine(repo, universe, strategy=config.strategy, settings=PortfolioSettings(**config.portfolio),
                                    restore=bool(repo.load_state()), risk_provider=news,control_state=control_state, watchlist_policy=watchlist,
-                                   strict_market_data=True, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
+                                   strict_market_data=True, use_market_filter=config.market_filter_enabled, macro_reference_risk=reference_risk, record_inputs=config.recording_enabled,
                                    candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy)
             if config.recording_enabled:
                 from .research.journal import start,stop
@@ -196,7 +199,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 repo.record("universe_history", snapshot)
             if config.source == "toss":
                 from .market.history import HistoryStore
-                history_store = HistoryStore(repo) if watchlist is not None else None
+                history_store = HistoryStore(repo) if watchlist is not None and config.strategy != "pullback_simple" else None
                 warmup = None
                 if history_store is not None:
                     from .market.warmup import StartupWarmup
@@ -205,7 +208,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 def receive_priority(batch):
                     # 위험 자료는 후보 탐색 완료를 기다리지 않고 단일 작성자 엔진에 전달한다.
                     observed_at = datetime.now(timezone.utc)
-                    raw = batch_events(batch, delivered_at=observed_at, last_time=engine.last_time)
+                    raw = batch_events(batch, delivered_at=observed_at, last_time=engine.last_time,
+                        delayed_quotes=config.quote_transport=="websocket")
                     engine.apply_batch(raw,observed_at)
                 from .market_reference.collector import MarketReferenceMonitor
                 from .market_reference.settings import reference_settings
@@ -217,7 +221,19 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     max_api_calls=config.max_api_calls_per_cycle, light_refresh_seconds=config.light_refresh_seconds,
                     ranking_refresh_seconds=config.ranking_refresh_seconds,max_cycle_seconds=config.max_cycle_seconds,
                     history_pages_per_cycle=config.history_pages_per_cycle,on_priority_batch=receive_priority,reference_monitor=reference,
-                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup)
+                    history_store=history_store,watchlist_candles_per_cycle=config.watchlist_candles_per_cycle,warmup=warmup,
+                    include_benchmarks=config.market_filter_enabled or config.focus_selection!='turnover' or reference_config['enabled'],
+                    current_session_only=config.strategy=='pullback_simple')
+                if config.quote_transport == 'websocket':
+                    from .collectors.toss_quote_feed import TossQuoteFeed
+                    from .market.live_quotes import LiveQuoteDelivery
+                    quote_feed=TossQuoteFeed(market.client,max_age_seconds=min(
+                        engine.broker.settings.max_quote_age_seconds,engine.market.max_quote_age_seconds))
+                    quote_delivery=LiveQuoteDelivery(quote_feed)
+                    market.quote_feed=quote_feed
+                    engine.quote_entry_guard=lambda symbol,stamp: quote_delivery.entry_allowed(
+                        symbol,stamp,known_quotes=engine.market.quotes)
+                    quote_task=asyncio.create_task(quote_feed.run())
                 if hasattr(market, 'restore_seen'):
                     market.restore_seen(engine.market.bars)
             if not no_dashboard:
@@ -226,11 +242,38 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     "--server.address", "127.0.0.1", "--server.port", str(port), "--server.headless", "true",
                     "--", "--db", str(config.db_path)], env=dashboard_environment(database=True))
                 print(f"SessionQuant 모의매매 대시보드: http://127.0.0.1:{port}", flush=True)
+            if config.strategy_explanation.get('enabled'):
+                from .strategy_explanation import StrategyExplainer
+                if news is None:
+                    from .macro.analysis import BudgetedAnalyzer
+                    from .macro.models import LLMSettings
+                    explanation_owner=BudgetedAnalyzer(repo,LLMSettings.from_dict(config.llm))
+                explainer=StrategyExplainer(repo,news.analyzer if news else explanation_owner,config.strategy_explanation)
             print("PAPER_LOCAL 실행 중입니다. 실제 주문은 비활성화되어 있습니다.", flush=True)
             next_account=0.
             cycles, next_market, next_news, next_tick, next_universe = 0, 0., 0., 0., time.monotonic() + 86400
+            next_explanation=0.
+            next_quotes=next_quote_status=0.
             while max_cycles is None or cycles < max_cycles:
                 current, monotonic = datetime.now(timezone.utc), time.monotonic()
+                if quote_delivery and monotonic >= next_quotes:
+                    if quote_task.done():
+                        quote_task.result()
+                        raise RuntimeError('웹소켓 수신 작업이 예기치 않게 종료됐습니다.')
+                    selected=quote_delivery.synchronize(watchlist,engine.broker,current)
+                    raw=quote_delivery.events(selected,current,known_quotes=engine.market.quotes)
+                    if raw:
+                        began=time.monotonic()
+                        engine.apply_batch(raw,current)
+                        quote_batch_seconds=round(time.monotonic()-began,4)
+                    if monotonic >= next_quote_status:
+                        from .market.live_quotes import VIEW
+                        repo.set_control(VIEW,{**quote_feed.snapshot(),'delivery_batches':quote_delivery.batches,
+                            'delivered_quotes':quote_delivery.quotes,'engine_batch_seconds':quote_batch_seconds,
+                            'selected_symbols':selected,'selected_fresh_count':sum(quote_feed.latest(s) is not None for s in selected),
+                            'transport':'websocket','rest_role':'bootstrap_and_risk_fallback'})
+                        next_quote_status=time.monotonic()+10
+                    next_quotes=time.monotonic()+2
                 if market and market_task is None and monotonic >= next_market:
                     priority = list(dict.fromkeys([*engine.broker.positions, *engine.broker.exit_intents,
                         *(o.intent.symbol for o in engine.broker.get_open_orders())]))
@@ -268,7 +311,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 if market_task and market_task.done():
                     batch = market_task.result()
                     observed_at = datetime.now(timezone.utc)
-                    raw = batch_events(batch, delivered_at=observed_at, last_time=engine.last_time)
+                    raw = batch_events(batch, delivered_at=observed_at, last_time=engine.last_time,
+                        delayed_quotes=config.quote_transport=="websocket")
                     engine.apply_batch(raw, observed_at, controls={'sq_market_cycle_at':observed_at.isoformat()})
                     for error in batch.errors:
                         repo.log("WARNING", error["message"], source=error["source"], symbol=error["symbol"],
@@ -307,6 +351,15 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     for alert in engine.broker.alerts:
                         notifier(alert)
                     next_tick = monotonic + 1
+                if explanation_task and explanation_task.done():
+                    try:explanation_task.result()
+                    except Exception as exc:
+                        repo.log('WARNING','AI 설명 실패: 규칙 기반 매매는 계속합니다.',error_type=type(exc).__name__)
+                    explanation_task=None
+                if explainer and explanation_task is None and monotonic>=next_explanation:
+                    from .strategy_explanation import snapshot
+                    explanation_task=asyncio.create_task(explainer.refresh(snapshot(engine,news,current),current))
+                    next_explanation=monotonic+10
                 if monotonic >= next_universe:
                     # 갱신은 별도 작업으로 돌려 청산 시계를 막지 않는다.
                     async def refresh_universe():
@@ -321,7 +374,9 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     next_universe = monotonic + 86400
                 await asyncio.sleep(.1)
         finally:
-            for task in (market_task, news_task, account_task):
+            if quote_feed:
+                quote_feed.stop()
+            for task in (quote_task, market_task, news_task, account_task, explanation_task):
                 if task and not task.done():
                     task.cancel()
                 if task:
@@ -330,6 +385,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                 await market.aclose()
             if news:
                 await news.aclose()
+            if explanation_owner:
+                await explanation_owner.aclose()
             if dashboard:
                 dashboard.terminate()
                 try:
@@ -339,6 +396,11 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     dashboard.wait(timeout=5)
             if engine and not engine.failed:
                 with repo.transaction():
+                    if quote_feed:
+                        from .market.live_quotes import VIEW
+                        repo.set_control(VIEW,{**repo.get_control(VIEW,{}),**quote_feed.snapshot(),
+                            'delivery_batches':quote_delivery.batches,'delivered_quotes':quote_delivery.quotes,
+                            'engine_batch_seconds':quote_batch_seconds,'selected_fresh_count':0})
                     for order in engine.broker.get_open_orders():
                         if order.intent.side == "buy":
                             engine.broker.cancel_order(order.client_id)

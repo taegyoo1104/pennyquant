@@ -14,7 +14,9 @@ class SessionConfig:
     db_path: Path = Path("data/sessionquant-paper-local.db")
     universe_path: Path = Path("data/sp500-universe.json")
     strategy: str = "pullback"
+    market_filter_enabled: bool = True
     source: str = "toss"
+    quote_transport: str = "rest"
     input_path: Path | None = None
     poll_seconds: float = 10.0
     news_refresh_seconds: float = 600.0
@@ -29,6 +31,8 @@ class SessionConfig:
     watchlist_enabled: bool = True
     watchlist_size: int = 50
     focus_size: int = 20
+    focus_selection: str = 'activity'
+    focus_rebalance_minutes: int = 0
     selection_method: str = 'market_cap_top'
     market_cap_input: Path = Path('data/market-cap-input.json')
     market_cap_provider: str = 'auto'
@@ -57,9 +61,26 @@ class SessionConfig:
     llm: dict = field(default_factory=dict)
     llm_debug_audit: dict = field(default_factory=dict)
     macro_context_llm: dict = field(default_factory=dict)
+    strategy_explanation: dict = field(default_factory=dict)
     candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        if self.quote_transport not in {"rest", "websocket"}:
+            raise ValueError("quote_transport는 rest 또는 websocket입니다.")
+        if self.quote_transport == "websocket" and (self.source != "toss" or not self.watchlist_enabled
+                or self.watchlist_size > 50 or self.strategy != "pullback_simple"
+                or self.paper_data_policy != "observed_paper_v1"):
+            raise ValueError("웹소켓 시험 운영은 토스·감시 50개 이하·단순 눌림목·observed Paper 프로필에서 사용합니다.")
+        from .strategy_explanation import ExplanationSettings
+        if not isinstance(self.strategy_explanation,dict):
+            raise ValueError('AI 설명 설정은 객체여야 합니다.')
+        ExplanationSettings(**self.strategy_explanation)
+        if self.focus_selection not in {'activity','turnover'}:
+            raise ValueError('집중 선정 방식은 activity 또는 turnover입니다.')
+        if type(self.focus_rebalance_minutes) is not int or self.focus_rebalance_minutes not in {0,30}:
+            raise ValueError('집중 재선정 주기는 0(기존 방식) 또는 30분입니다.')
+        if self.focus_rebalance_minutes and (self.strategy!='pullback_simple' or self.focus_selection!='turnover'):
+            raise ValueError('30분 집중 재선정은 단순 눌림목·거래대금 선정 프로필에서 사용합니다.')
         from .database.retention import RetentionPolicy
         if not isinstance(self.retention, dict):
             raise ValueError('자료 보관 설정은 객체여야 합니다.')
@@ -72,8 +93,10 @@ class SessionConfig:
             raise ValueError("Phase 0~4 실행 환경은 PAPER_LOCAL만 허용합니다. 실제 주문은 비활성화되어 있습니다.")
         if self.database_backend not in {"mysql", "sqlite"}:
             raise ValueError("database_backend는 mysql 또는 sqlite여야 합니다.")
-        if self.strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
+        if self.strategy not in {"momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"}:
             raise ValueError("지원하지 않는 전략입니다.")
+        if type(self.market_filter_enabled) is not bool:
+            raise ValueError('시장 방향 필터는 불리언이어야 합니다.')
         if self.source not in {"toss", "file"} or (self.source == "file" and self.input_path is None):
             raise ValueError("source는 toss 또는 file이며, file은 input_path가 필요합니다.")
         if self.market_cap_provider not in {'auto','file','toss'}:

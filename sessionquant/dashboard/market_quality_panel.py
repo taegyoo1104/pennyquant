@@ -35,6 +35,8 @@ def quality_observation_fields(item, now):
 
 def coverage_display(report, key):
     """미평가/만료를 확보 실패 0으로 표시하지 않는다. 매매 판정은 바꾸지 않는다."""
+    if key == 'strategy_rvol' and report['items'] and all(row.get('rvol_required') is False for row in report['items']):
+        return '참고 · 진입 필수 아님'
     if key == 'strategy_rvol':
         from .session_app import decimal_value
         values = [decimal_value(row.get('strategy_rvol')) for row in report['items']]

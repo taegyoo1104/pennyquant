@@ -43,8 +43,7 @@ chown 1000:1000 "$proof"
 printf 'RUNNING %s\n' "$(date -u +%FT%TZ)" > /etc/sessionquant/retention-status
 "${compose[@]}" run --rm --no-deps -T --name "$container" \
     --volume "$proof:/run/sessionquant-backup-status:ro" app \
-    python -m sessionquant data-retention --config config/sessionquant.realtime-paper.example.yaml \
-    --apply --backup-receipt /run/sessionquant-backup-status > "$part" < /dev/null &
+    sh -c 'exec python -m sessionquant data-retention --config "${SQ_SESSION_CONFIG:-config/sessionquant.realtime-paper.example.yaml}" --apply --backup-receipt /run/sessionquant-backup-status' > "$part" < /dev/null &
 worker=$!
 wait "$worker"
 # Validate a bounded, content-free report before replacing the previous result.

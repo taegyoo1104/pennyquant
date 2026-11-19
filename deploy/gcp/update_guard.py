@@ -1,5 +1,6 @@
 """Read-only guard for an explicitly paused, flat Paper update during a session."""
 import json
+import os
 import sys
 from datetime import datetime, timezone
 
@@ -31,7 +32,7 @@ def main():
     bounds = session_bounds(now)
     if not bounds or (bounds[1] - now).total_seconds() < 1800:
         raise ValueError('폐장까지 30분 미만이거나 휴장입니다. 다음 장전에 업데이트하세요.')
-    cfg = load_session_config('config/sessionquant.realtime-paper.example.yaml')
+    cfg = load_session_config(os.environ.get('SQ_SESSION_CONFIG') or 'config/sessionquant.realtime-paper.example.yaml')
     if cfg.environment != 'PAPER_LOCAL':
         raise ValueError('모의매매 환경만 업데이트할 수 있습니다.')
     db = MySQLConfig.from_env()
