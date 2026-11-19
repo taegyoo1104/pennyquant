@@ -165,7 +165,7 @@ class TossSessionSource:
 
         async def call(source, method, *args, symbol='*', optional=False, reserved=0, reserved_seconds=0, **kwargs):
             budget.reserved = 0
-            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
+            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK_ALL' if method.__name__ == 'stocks_all' else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
             until = state.get('reference_backoff_groups',{}).get(group)
             if until and utc(self.clock()) < utc(until):
                 skipped(source,symbol,optional,'provider_group_backoff')
@@ -376,14 +376,20 @@ class TossSessionSource:
             from ..watchlist.toss_capitalization import TossMarketCapProvider
             if isinstance(manager.provider,TossMarketCapProvider):
                 async def cap_read(stream,symbol):
-                    method,args = (self.client.sectors,()) if stream=='sectors' else (self.client.sector_stocks,(symbol,))
+                    method,args = ((self.client.sectors,()) if stream=='sectors' else
+                                   (self.client.stocks_all,(symbol,)) if stream=='stocks_all' else
+                                   (self.client.sector_stocks,(symbol,)))
                     return await call('market_cap:'+stream,method,*args,symbol=symbol or '*',optional=True)
                 try:
                     await manager.provider.advance(cap_read,limit=1)
                 except (ValueError,TypeError,KeyError):
-                    batch.errors.append({'source':'market_cap','message':'토스 섹터 시총 형식 미확인; 기존 검증 목록을 보존합니다.'})
+                    batch.errors.append({'source':'market_cap','symbol':'*','error_type':'DataQualityError',
+                                         'message':'토스 종목 목록·시총 형식 미확인; 확인되지 않은 목록으로 매수하지 않습니다.'})
             current_snapshot=manager.store.at(utc(self.clock())) or {}
             force_cap=isinstance(manager.provider,TossMarketCapProvider) and manager.provider.state.get('complete',False) and current_snapshot.get('contract')!='toss_reported_security_krw_v1'
+            if isinstance(manager.provider,TossMarketCapProvider) and manager.provider.us_catalog:
+                force_cap = manager.provider.state.get('complete',False) and (
+                    current_snapshot.get('session_open_at') != manager.provider.state.get('session'))
             await manager.refresh(utc(self.clock()),force=force_cap)
             if self.warmup is not None:
                 async def warmup_read(symbol,cursor):
@@ -410,9 +416,10 @@ class TossSessionSource:
             state['candidate_quote_reserved_seconds'] = quote_seconds
             pool = manager.light_symbols(utc(self.clock()))
             current = utc(self.clock())
-            if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
+            light_symbols = list(dict.fromkeys([*pool,*self.benchmark_symbols]))
+            if light_symbols and (not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds):
                 before = budget.used
-                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,*self.benchmark_symbols])),optional=True,reserved_seconds=quote_seconds)
+                rows = await call('toss_prices',self.client.prices,light_symbols,optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_light_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:

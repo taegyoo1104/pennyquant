@@ -2,7 +2,8 @@
 environment: PAPER_LOCAL
 database_backend: mysql
 db_path: ../data/sessionquant-strategy-lab-v1.db
-universe_path: ../data/sp500-universe.json
+universe_path: ../data/toss-us-universe.json
+universe_source: toss_us
 source: toss
 poll_seconds: 2
 paper_data_policy: observed_paper_v1
@@ -24,7 +25,8 @@ focus_selection: turnover
 focus_rebalance_minutes: 30
 focus_min_hold_seconds: 0  # 개별 편입 시각 대신 정규장 개장 기준 30분 슬롯 사용
 focus_refresh_grace_seconds: 120
-market_cap_provider: auto
+market_cap_provider: toss
+watchlist_refresh_days: 1
 company_news_refresh_seconds: 180
 macro_news_refresh_seconds: 900
 candidate_selection:

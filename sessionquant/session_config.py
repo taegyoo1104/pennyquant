@@ -13,6 +13,7 @@ class SessionConfig:
     database_backend: str = "mysql"
     db_path: Path = Path("data/sessionquant-paper-local.db")
     universe_path: Path = Path("data/sp500-universe.json")
+    universe_source: str = 'sp500'
     strategy: str = "pullback"
     market_filter_enabled: bool = True
     source: str = "toss"
@@ -65,6 +66,11 @@ class SessionConfig:
     candidate_selection: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        if self.universe_source not in {'sp500', 'toss_us'}:
+            raise ValueError('후보 모집단은 sp500 또는 toss_us입니다.')
+        if self.universe_source == 'toss_us' and (self.source != 'toss' or not self.watchlist_enabled
+                or self.market_cap_provider != 'toss' or self.watchlist_refresh_days != 1):
+            raise ValueError('미국 전체 후보는 토스 시총 공급·감시목록·일별 갱신 설정이 필요합니다.')
         if self.quote_transport not in {"rest", "websocket"}:
             raise ValueError("quote_transport는 rest 또는 websocket입니다.")
         if self.quote_transport == "websocket" and (self.source != "toss" or not self.watchlist_enabled

@@ -239,7 +239,9 @@ SQ_DB_NAMESPACE=sessionquant-strategy-lab-ws-v1
 
 기존 DB를 이전한다면 먼저 아래 이전 절차에서 **원래 프로필·namespace를 유지**해 검증합니다. 장부가 확인되기 전에 새 이름으로 바꾸지 않습니다. 설치 스크립트 자체의 기본값은 아직 이전 `realtime-paper`입니다.
 
-앱 자료 디렉터리에 S&P 500 목록이 없다면 앱을 시작하기 전에 운영 VM에서 준비합니다. 이미 있는 목록은 이 절차로 덮어쓰지 않습니다.
+현재 전략 실험 프로필은 앱 시작 뒤 같은 토스 연결로 미국 거래소 목록을 수집해 `data/toss-us-universe.json`에 저장합니다. 세 거래소와 시총이 준비되면 그날 후보 최대 50개를 고정합니다. 새 목록 수집은 기존 모의 잔액·체결 기록을 초기화하지 않습니다.
+
+아래 S&P 500 준비 명령은 **이전 `realtime-paper` 프로필에만 해당**합니다. 그 프로필의 앱 자료 디렉터리에 S&P 500 목록이 없다면 앱을 시작하기 전에 운영 VM에서 준비합니다. 이미 있는 목록은 덮어쓰지 않습니다.
 
 ```bash
 if ! sudo test -e /var/lib/sessionquant/app/sp500-universe.json; then

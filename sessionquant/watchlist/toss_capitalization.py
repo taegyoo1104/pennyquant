@@ -1,4 +1,4 @@
-"""토스 섹터의 보고 시총을 수집해 같은 통화의 S&P 500 종목 순위를 만든다."""
+"""토스 섹터의 보고 시총을 수집해 확인된 종목 목록 안에서 순위를 만든다."""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -21,23 +21,36 @@ class CollectionPending(ValueError):
 
 
 class TossMarketCapProvider:
-    def __init__(self, repo, universe, *, clock=None):
+    def __init__(self, repo, universe, *, clock=None, daily_us=False):
         self.repo, self.universe = repo, universe
         self.clock = clock or (lambda:datetime.now(timezone.utc))
-        self.state = repo.get_control(STATE,{}) or {}
+        self.state_key = 'toss_us_daily_market_cap_v1' if daily_us else STATE
+        self.state = repo.get_control(self.state_key,{}) or {}
+        from .us_universe import TossUSUniverse
+        self.us_catalog = TossUSUniverse(repo, universe, clock=self.clock) if daily_us else None
 
-    def _save(self): self.repo.set_control(STATE,self.state)
+    def _save(self): self.repo.set_control(self.state_key,self.state)
 
     async def advance(self, read, *, limit=1):
         """외부 토스 클라이언트/읽기 예산을 공유한다. 새 인증·주문을 생성하지 않는다."""
         now = utc(self.clock())
+        session = None
+        if self.us_catalog:
+            from .us_universe import selection_session
+            bounds = selection_session(now)
+            if not bounds:
+                return False
+            session = bounds[0].isoformat()
+            if not self.us_catalog.ready(now):
+                await self.us_catalog.advance(read, limit=limit)
+                return False  # Preserve the per-cycle budget; caps start on the next advance.
         members = self.universe.members(now)
         digest = symbols_digest(members)
         started = self.state.get('started_at')
-        if (not started or self.state.get('membership_hash') != digest
+        if (not started or self.state.get('membership_hash') != digest or self.state.get('session') != session
                 or (self.state.get('complete') and now-utc(started)>=timedelta(days=1))
                 or (not self.state.get('complete') and now-utc(started)>timedelta(minutes=15))):
-            self.state = {'started_at':now.isoformat(),'membership_hash':digest,'roots':None,'pages':{},'complete':False}
+            self.state = {'started_at':now.isoformat(),'membership_hash':digest,'roots':None,'pages':{},'complete':False,'session':session}
         if self.state.get('complete'):return True
         for _ in range(limit):
             roots = self.state['roots']
@@ -73,7 +86,15 @@ class TossMarketCapProvider:
 
     async def fetch(self):
         if not self.state.get('complete'):raise CollectionPending('토스 섹터 시총을 호출 예산 안에서 수집 중입니다.')
-        return {'schema_version':2,'contract':CONTRACT,'source':SOURCE,'source_documentation':
+        daily = {}
+        if self.us_catalog:
+            from .us_universe import selection_session, POLICY
+            now = utc(self.clock()); bounds = selection_session(now)
+            if not bounds or not self.us_catalog.ready(now) or self.state.get('session') != bounds[0].isoformat():
+                raise CollectionPending('오늘의 미국 종목 목록·시총을 수집 중입니다.')
+            daily = {'selection_policy':POLICY, 'session_open_at':bounds[0].isoformat(),
+                     'session_close_at':bounds[1].isoformat(), 'session_date':bounds[0].date().isoformat()}
+        return {**daily,'schema_version':2,'contract':CONTRACT,'source':SOURCE,'source_documentation':
             'https://openapi.tossinvest.com/openapi-docs/latest/openapi.json',
             'source_verified':True,'currency':'KRW','market_cap_basis':'provider_reported_security',
             'provider_as_of_at':None,'as_of_semantics':'collection_started_at_not_valuation_time',
@@ -143,6 +164,17 @@ def select_toss(batch, universe, now, *, size=100, allow_synthetic=False, missin
         'issues':issues,'valid_observations':len(observations),'size_limit':size,
         'raw_payload_hash':sha256(json.dumps(batch['pages'],sort_keys=True,ensure_ascii=False).encode()).hexdigest()}
     payload.update(cap_selection_metadata(issues,selected,missing_cap_policy))
+    if batch.get('selection_policy'):
+        from .us_universe import POLICY, SOURCE as US_SOURCE, selection_session
+        bounds = selection_session(now)
+        if (batch['selection_policy'] != POLICY or not bounds or universe.snapshot(now)['source'] != US_SOURCE
+                or batch.get('session_open_at') != bounds[0].isoformat()
+                or batch.get('session_close_at') != bounds[1].isoformat()
+                or batch.get('session_date') != bounds[0].date().isoformat()):
+            raise ValueError('미국 일일 고정 후보의 거래일·모집단을 확인하세요.')
+        payload.update(selection_policy=POLICY, universe_source='toss_us', session_date=batch['session_date'],
+                       session_open_at=bounds[0].isoformat(), valid_until=bounds[1].isoformat(),
+                       selected_at=now.isoformat(), selection_phase='PREOPEN' if now<bounds[0] else 'INTRADAY_START')
     for row in selected:
         row['data_status'] = 'VERIFIED' if payload['data_status']=='VALID' else 'PARTIAL'
         row['rank_scope'] = payload['ranking_scope']
@@ -156,6 +188,9 @@ def bind_provider(manager, client):
     use_toss=(config.market_cap_provider=='toss' or (config.market_cap_provider=='auto'
         and config.source=='toss' and not config.market_cap_input.is_file()))
     if not manager.provider_explicit and use_toss and all(hasattr(client,name) for name in ('sectors','sector_stocks')):
-        manager.provider=TossMarketCapProvider(manager.repo,manager.universe,clock=manager.clock)
+        daily_us = config.universe_source == 'toss_us'
+        if daily_us and not hasattr(client, 'stocks_all'):
+            raise ValueError('미국 종목 목록 조회 기능이 필요합니다.')
+        manager.provider=TossMarketCapProvider(manager.repo,manager.universe,clock=manager.clock,daily_us=daily_us)
         return True
     return False

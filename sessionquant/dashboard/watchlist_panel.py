@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from ..models import utc
 
 LABELS = {'VALID':'유효', 'UNKNOWN':'미확인', 'PARTIAL':'자료 일부 미확인', 'EXPIRED':'만료',
-          'MEMBERSHIP_UNKNOWN':'편입 정보 미확인', 'MEMBERSHIP_CHANGED':'편입 목록 변경', 'SYNTHETIC_BLOCKED':'합성 자료 차단'}
+          'MEMBERSHIP_UNKNOWN':'편입 정보 미확인', 'MEMBERSHIP_CHANGED':'편입 목록 변경', 'SYNTHETIC_BLOCKED':'합성 자료 차단',
+          'SELECTION_POLICY_CHANGED':'새 후보 선정 대기'}
 
 
 def current_status(state, now=None):
@@ -46,7 +47,8 @@ def render_watchlist(state, candidates):
                and row.get('timestamp') and 0 <= (now-utc(row['timestamp'])).total_seconds() <= 120]
     st.subheader(f"시총 후보 최대 {state.get('watchlist_limit',50)} → 분봉 준비 종목 운영 → 집중 분석 최대 {state.get('focus_limit',20)}")
     cols = st.columns(5)
-    cols[0].metric('S&P 500 전체', str(state.get('universe_count')) if state.get('universe_count') else '—')
+    us = state.get('universe_source') == 'toss_us'
+    cols[0].metric('미국 주식 · 토스 제공' if us else 'S&P 500 전체', str(state.get('universe_count')) if state.get('universe_count') else '—')
     cols[1].metric('유효 운영 종목', f"{state.get('operating_count',len(items)) if status=='VALID' else 0} / {state.get('watchlist_limit',50)}")
     expired = len(items) if status == 'EXPIRED' else 0
     unknown = state.get('watchlist_limit',50) if status not in {'VALID','EXPIRED'} else 0
@@ -88,10 +90,18 @@ def render_watchlist(state, candidates):
     if source.get('backoff_until'):
         st.caption('공급자 요청 제한 대기 시각: '+timestamp(source['backoff_until']))
     snapshot=state.get('snapshot') or {}
+    if us:
+        st.caption('토스에서 거래 가능한 NYSE·NASDAQ·AMEX의 상장 보통주·ADR·리츠 중 시총 확인 종목을 비교합니다. ETF·ETN·우선주·워런트·장외 종목은 제외합니다.')
+        if snapshot.get('selection_policy') == 'toss_us_daily_fixed_v1':
+            phase = '장전 선정' if snapshot.get('selection_phase') == 'PREOPEN' else '장중 첫 실행 · 자료 준비 후 선정'
+            st.caption(f"후보 {len(snapshot.get('items',[]))}개 · {snapshot.get('session_date')} 미국 거래일 고정 · {phase} · 선정 {timestamp(snapshot.get('selected_at'))}")
+            st.caption('장중 50위·51위가 바뀌어도 후보를 교체하지 않습니다. 다음 거래일에 다시 선정하며 보유·미체결은 별도로 계속 감시합니다.')
     excluded_caps = snapshot.get('excluded_market_cap_symbols',[])
     full_ranking = status=='VALID' and snapshot.get('ranking_verified',True)
     if excluded_caps:
-        st.info(f"시총 확인 종목 중 상위 후보입니다. 전체 S&P 500 상위 순위는 미확정이며 시총 미확인 {len(excluded_caps)}개를 제외했습니다: "+', '.join(excluded_caps))
+        scope = '미국 시장 전체' if us else '전체 S&P 500'
+        st.info(f"시총 확인 종목 중 상위 후보입니다. {scope} 상위 순위는 미확정이며 시총 미확인 {len(excluded_caps)}개를 제외했습니다.")
+        st.caption('시총 미확인 종목: '+', '.join(excluded_caps[:12])+(f' 외 {len(excluded_caps)-12}개' if len(excluded_caps)>12 else ''))
     if snapshot.get('currency')=='KRW':
         st.caption('토스 보고 종목 시총(원화 환산·일별 갱신). 주식 클래스별 집계이며 발행사 합산이 아닙니다. 공급자의 정확한 평가 시각은 미제공입니다.')
     rows = []

@@ -77,5 +77,14 @@ def test_home_shortcuts_open_the_requested_page_and_table_without_orders(tmp_pat
     assert not app.exception and app.radio(key='dashboard_page').value=='시장·종목'
     assert app.radio(key='market_detail').value=='매수 판단'
     assert app.query_params['panel']=='selection'
+    app.radio(key='dashboard_page').set_value('대시보드').run()
+    app.button(key='go-뉴스·AI 자세히 보기').click().run()
+    assert not app.exception and app.radio(key='dashboard_page').value=='뉴스·LLM'
+    assert app.query_params['page']=='news' and app.query_params['authuser']=='1'
+    assert 'panel' not in app.query_params
+    restored=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30)
+    restored.query_params.update(app.query_params)
+    restored.run()
+    assert not restored.exception and restored.radio(key='dashboard_page').value=='뉴스·LLM'
     with closing(Repository(path,backend='sqlite')) as repo:
         assert not repo.all('orders') and not repo.all('order_intents')
