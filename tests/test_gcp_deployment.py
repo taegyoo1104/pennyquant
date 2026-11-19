@@ -342,3 +342,21 @@ HTTPServer(('127.0.0.1',8501),Handler).serve_forever()
         if not grace:assert 'unhealthy' in result.stderr
     finally:
         subprocess.run([*args,'down','--timeout','2'],capture_output=True,timeout=20,check=True)
+
+
+@pytest.mark.parametrize('profile',[None,'config/sessionquant.strategy-lab-websocket.example.yaml'])
+def test_container_profile_is_one_argument_and_default_is_unchanged(tmp_path,profile):
+    import json
+    import yaml
+    command=yaml.safe_load((DEPLOY/'compose.yaml').read_text())['services']['app']['command']
+    # Compose emits a single dollar for $$. Exercise the resulting POSIX shell
+    # command with a disposable Python stub, without Docker or production env.
+    stub=tmp_path/'python'
+    stub.write_text('#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+    stub.chmod(0o755)
+    env={**os.environ,'PATH':str(tmp_path)+os.pathsep+os.environ['PATH']}
+    env.pop('SQ_SESSION_CONFIG',None)
+    if profile:env['SQ_SESSION_CONFIG']=profile
+    result=subprocess.run([part.replace('$$','$') for part in command],env=env,capture_output=True,text=True,check=True)
+    assert json.loads(result.stdout)==['-m','sessionquant','run','--config',
+        profile or 'config/sessionquant.realtime-paper.example.yaml','--no-desktop-notifications']

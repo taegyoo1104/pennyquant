@@ -95,6 +95,8 @@ def paper_report(repo, config, now=None):
         'engine':{'status':control.get('status','NOT_STARTED'), 'heartbeat_fresh':fresh,
                   'heartbeat':control.get('heartbeat'), 'run_id':control.get('run_id'),
                   'data_ready':control.get('data_ready')},
+        'quote_transport':config.quote_transport,
+        'websocket':repo.get_control('websocket_quotes_v1',{}),
         'warmup':repo.get_control('startup_data_warmup_v1',{}),
         'watchlist':{'status':watchlist.get('status','UNKNOWN'), 'base_count':history.get('base_count'),
             'operating_count':history.get('included_count'), 'excluded_history_count':history.get('excluded_count'),

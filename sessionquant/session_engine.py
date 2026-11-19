@@ -38,7 +38,7 @@ def event_time(raw: dict) -> datetime:
         received = restored
     if 'delivered_at' in raw:
         delivered = utc(raw['delivered_at'])
-        if raw['kind'] not in {'bar', 'eligibility'} or delivered < received:
+        if raw['kind'] not in {'bar', 'eligibility', 'quote'} or delivered < received:
             raise ValueError('지연 자료 전달 시각은 원본 수신·복원 이후여야 합니다.')
         received = delivered
     return received
@@ -49,9 +49,10 @@ class SessionEngine:
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
-                 candidate_settings=None, paper_data_policy='strict'):
+                 candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
+        self.quote_entry_guard=quote_entry_guard
         self.selection_frame=None
         self.selection_source_id=None
         self._batch_candidate_scope=[]
@@ -324,6 +325,12 @@ class SessionEngine:
         self._last_summary = {k:v for k,v in broker_state.items() if k != 'last_event_at'}
         self._last_persist_at = now
 
+    def _quote_entry_allowed(self, symbol, now):
+        if self.quote_entry_guard is None:return True
+        if symbol not in self._batch_quote_entry_allowed:
+            self._batch_quote_entry_allowed[symbol]=bool(self.quote_entry_guard(symbol,now))
+        return self._batch_quote_entry_allowed[symbol]
+
     @timed('engine_batch')
     def apply_batch(self, events: list[dict], now: datetime, *, cursor: int | None = None, controls: dict | None = None):
         if self.failed:
@@ -341,7 +348,8 @@ class SessionEngine:
         self._batch_news_contexts = {}
         self._batch_candidate_scope=[]
         self.selection_frame=None
-        self._batch_scope_blockers = {} if self.watchlist_policy is not None else None
+        self._batch_quote_entry_allowed = {}
+        self._batch_scope_blockers = {} if self.watchlist_policy is not None or self.quote_entry_guard is not None else None
         try:
             scope = getattr(self.watchlist_policy, 'read_scope', nullcontext)
             with self.repo.transaction(), scope(), self.market.evaluation_scope():
@@ -389,7 +397,8 @@ class SessionEngine:
                 for order in self.broker.get_open_orders():
                     if order.intent.side == 'buy':
                         risk = self.risk_context(now,order.intent.symbol)
-                        if risk.get('block_entries') or risk.get('blackout') or reference_blocked:
+                        if (risk.get('block_entries') or risk.get('blackout') or reference_blocked
+                                or not self._quote_entry_allowed(order.intent.symbol,now)):
                             self.broker.cancel_order(order.client_id,now)
                 if manual_halt:
                     for order in self.broker.get_open_orders():
@@ -401,7 +410,8 @@ class SessionEngine:
                     paper_tradable = None
                     if self.market.paper_data_policy == 'observed_paper_v1':
                         from .market.paper_policy import paper_eligibility
-                        paper_tradable = paper_eligibility(self.market.eligibility.get(quote.symbol),now)['allowed']
+                        paper_tradable = (paper_eligibility(self.market.eligibility.get(quote.symbol),now)['allowed']
+                            and self._quote_entry_allowed(quote.symbol,now))
                     self.broker.process_quote(quote, now, paper_tradable=paper_tradable)
                 for symbol in list(self.broker.positions):
                     quote = self.market.quotes.get(symbol)
@@ -449,6 +459,13 @@ class SessionEngine:
                         if scope_blockers:
                             decision = replace(decision, eligible=False, signal=None,
                                 blockers=tuple(dict.fromkeys([*decision.blockers, *scope_blockers])))
+                    if self._batch_scope_blockers is not None:
+                        self._batch_scope_blockers.setdefault(symbol,[])
+                    if not self._quote_entry_allowed(symbol,now):
+                        code='websocket_quote_unavailable'
+                        self._batch_scope_blockers.setdefault(symbol,[]).append(code)
+                        decision=replace(decision,eligible=False,signal=None,
+                            blockers=tuple(dict.fromkeys([*decision.blockers,code])))
                     decisions.append((decision, risk))
                     if self.market.strict_data:
                         self.market.quality_rows[symbol]['blockers'] = list(decision.blockers)

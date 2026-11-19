@@ -33,11 +33,12 @@ class TossSessionSource:
                  watchlist=None, max_api_calls=24, light_refresh_seconds=30, ranking_refresh_seconds=60,
                  max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None,
                  history_store=None, watchlist_candles_per_cycle=4, warmup=None,
-                 include_benchmarks=True, current_session_only=False):
+                 include_benchmarks=True, current_session_only=False, quote_feed=None):
         if type(include_benchmarks) is not bool or type(current_session_only) is not bool:
             raise ValueError('시장 참조·당일 수집 설정은 불리언이어야 합니다.')
         self.benchmark_symbols=('SPY','QQQ') if include_benchmarks else ()
         self.current_session_only=current_session_only
+        self.quote_feed=quote_feed
         if type(candidates_per_cycle) is not int or not 1 <= candidates_per_cycle <= 10:
             raise ValueError("한 주기에 상세 수집할 종목 수는 1~10개입니다")
         self.client = client or TossMarketClient()
@@ -241,6 +242,15 @@ class TossSessionSource:
         async def quotes(symbols, *, optional=False, reserved=0, reserved_seconds=0):
             for symbol in symbols:
                 evidence = eligibility(symbol)
+                if self.quote_feed is not None:
+                    # Stream delivery is independent of candle HTTP work. Only risk
+                    # symbols without fresh stream data spend REST orderbook calls.
+                    if symbol not in self.benchmark_symbols:
+                        batch.eligibility.append(evidence)
+                    if optional:
+                        state.setdefault('last_candidate_stream_visit',{})[symbol]=utc(self.clock()).isoformat()
+                    if optional or self.quote_feed.latest(symbol,utc(self.clock())) is not None:
+                        continue
                 before = budget.used
                 quote = await call('toss_orderbook',self.client.quote,symbol,exchange=evidence.exchange,
                     tradable=False,symbol=symbol,optional=optional,reserved=reserved,reserved_seconds=reserved_seconds)
@@ -254,12 +264,12 @@ class TossSessionSource:
                     batch.quotes.append(quote)
                     latest_quotes[symbol] = quote
                     state.setdefault('last_quote_success',{})[symbol] = utc(self.clock()).isoformat()
-                if symbol not in {'SPY','QQQ'}:
+                if self.quote_feed is None and symbol not in {'SPY','QQQ'}:
                     batch.eligibility.append(evidence)
 
         async def deliver(*, priority=True):
             nonlocal optional_deadline
-            if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars):
+            if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars or (self.quote_feed is not None and batch.eligibility)):
                 batch.observed_at = utc(self.clock())
                 began = monotonic()
                 self.on_priority_batch(batch)
@@ -396,7 +406,7 @@ class TossSessionSource:
             # Calls reserved by count do not reserve wall-clock time. Keep the
             # final part of this SAME window for actionable candidate quotes,
             # even when prices/rankings/candles time out. No extra retry budget.
-            quote_seconds = min(5., self.max_cycle_seconds / 2)
+            quote_seconds = 0. if self.quote_feed is not None else min(5., self.max_cycle_seconds / 2)
             state['candidate_quote_reserved_seconds'] = quote_seconds
             pool = manager.light_symbols(utc(self.clock()))
             current = utc(self.clock())
@@ -424,7 +434,8 @@ class TossSessionSource:
             focus = manager.focus(utc(self.clock()))
             # Background candle collection is not a candidate quote/decision visit.
             # Its scheduler.mark() must not postpone a still-unanalysed candidate.
-            candidate_attempts = state.setdefault('last_candidate_quote_attempt',{})
+            candidate_attempts = state.setdefault('last_candidate_stream_visit' if self.quote_feed is not None
+                                                  else 'last_candidate_quote_attempt',{})
             chosen = sorted([s for s in focus if s not in priority],
                             key=lambda s:(candidate_attempts.get(s,''),s))[:self.candidates_per_cycle]
             await metadata(chosen,optional=True,reserved_seconds=quote_seconds)
@@ -433,7 +444,7 @@ class TossSessionSource:
             # already be stale by the later candle/background delivery. Keep the
             # original risk-quote delivery above, and reserve candidate quote calls.
             for symbol in chosen:
-                await candles(symbol,optional=True,reserved=len(chosen),reserved_seconds=quote_seconds)
+                await candles(symbol,optional=True,reserved=0 if self.quote_feed is not None else len(chosen),reserved_seconds=quote_seconds)
             if chosen:
                 # Startup/DB work may have aged the initial regime quotes. Refresh
                 # near-expiry observations under the SAME retry/deadline budget;

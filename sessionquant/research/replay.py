@@ -124,6 +124,8 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                 if row['kind'] == 'engine_batch':
                     if not universe.members(stamp):raise ValueError('처리 당시 확인 가능한 유니버스 이력이 없습니다.')
                     news.contexts = data.get('news_contexts') or {}
+                    allowed=data.get('quote_entry_allowed')
+                    engine.quote_entry_guard=(lambda symbol,now,values=allowed: values.get(symbol,False)) if allowed is not None else None
                     scope.blockers = data.get('scope_blockers')
                     scope.symbols=data.get('candidate_scope_symbols') or []
                     scope.expiries={row['symbol']:row.get('scope_valid_until') for row in (data.get('portfolio_selection') or {}).get('rows',[])}
