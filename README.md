@@ -6,6 +6,8 @@
 
 새로운 기본 안내는 [전략 실험 모드](docs/STRATEGY_LAB.md)입니다. 기존 운영 설정과 장부는 비교·복구용으로 유지합니다.
 
+[웹소켓 전환 계획](docs/WEBSOCKET_ROLLOUT.md)의 1단계 독립 호가 수신기를 구현했습니다. 후보 50개와 보유·미체결 종목을 구독하고 연결 복구를 검사합니다. 운영 엔진 연결과 화면 개선은 후속 단계이며 현재 `run`은 REST 수집을 유지합니다.
+
 ```bash
 # API 키 없이 기획한 동작 확인: 새 폴더에 report.html 생성
 python -m sessionquant strategy-lab --out data/strategy-lab-check-01

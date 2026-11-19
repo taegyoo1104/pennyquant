@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import json
 from typing import AsyncIterator
 
@@ -42,14 +41,16 @@ class TossWebSocket:
     def __init__(self, rest: TossMarketClient):
         self.rest = rest
 
-    async def stream(self, symbols: list[str], *, include_orders: bool = False) -> AsyncIterator[dict]:
+    async def stream(self, symbols: list[str], *, include_orders: bool = False,
+                     trades: bool = True, max_candidates: int = 20,
+                     ack_timeout: float = 15, idle_timeout: float = 90) -> AsyncIterator[dict]:
         """One connection. Fail closed on errors/partial subscriptions; no silent reconnect.
 
         Consumer must halt entries on exception, REST-reconcile orders/holdings,
         then open a new stream and receive a successful ack before resuming.
         """
         from websockets.asyncio.client import connect
-        declarations = subscription_declaration(symbols,
+        declarations = subscription_declaration(symbols, trades=trades, max_candidates=max_candidates,
             account_seq=self.rest.account_seq if include_orders else None)
         token = await self.rest.access_token()
         async with connect(WS_URL, additional_headers={"Authorization": f"Bearer {token}"},
@@ -62,8 +63,24 @@ class TossWebSocket:
             try:
                 await ws.send(json.dumps(declarations))
                 acknowledged = False
-                async for raw in ws:
+                iterator = aiter(ws)
+                ack_deadline = asyncio.get_running_loop().time()+ack_timeout
+                while True:
+                    timeout = idle_timeout if acknowledged else max(0,ack_deadline-asyncio.get_running_loop().time())
+                    receive = asyncio.create_task(anext(iterator))
+                    try:
+                        done,_ = await asyncio.wait([receive,heartbeat],timeout=timeout,return_when=asyncio.FIRST_COMPLETED)
+                        if heartbeat in done:
+                            heartbeat.result()
+                            raise CapabilityUnavailable('Toss heartbeat stopped')
+                        if receive not in done:raise TimeoutError('Toss acknowledgement or connection idle timeout')
+                        try:raw = receive.result()
+                        except StopAsyncIteration:break
+                    finally:
+                        receive.cancel()
+                        await asyncio.gather(receive,return_exceptions=True)
                     frame = json.loads(raw)
+                    if not isinstance(frame,dict):raise CapabilityUnavailable('Invalid Toss frame')
                     frame_type = frame.get("type")
                     if frame_type == "error":
                         raise CapabilityUnavailable("Toss WebSocket error: " + frame.get("error", {}).get("code", "unknown"))
@@ -80,5 +97,4 @@ class TossWebSocket:
                 raise CapabilityUnavailable("Toss stream closed; REST reconciliation required")
             finally:
                 heartbeat.cancel()
-                with suppress(asyncio.CancelledError):
-                    await heartbeat
+                await asyncio.gather(heartbeat,return_exceptions=True)
