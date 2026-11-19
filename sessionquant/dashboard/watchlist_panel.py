@@ -33,6 +33,20 @@ def focus_is_monitored(row, now):
         return False
 
 
+def history_problem_text(problems):
+    parts = []
+    for problem in problems:
+        if 'missing_minutes' in problem and 'conflicting_minutes' in problem:
+            detail = f"누락 {problem['missing_minutes']}분 · 값 충돌 {problem['conflicting_minutes']}분"
+            other = [r for r in problem.get('reasons',[]) if r != 'history_minutes_missing_or_conflicting']
+            if other:
+                detail += ' · '+', '.join(other)
+        else:
+            detail = ', '.join(problem.get('reasons',[]))
+        parts.append(problem['session']+': '+detail)
+    return '; '.join(parts)
+
+
 def render_watchlist(state, candidates):
     import streamlit as st
     from .session_app import timestamp, usd, _table
@@ -104,7 +118,7 @@ def render_watchlist(state, candidates):
         rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if full_ranking else None, '검증자료 내 순위':row.get('rank'), '시가총액':(row.get('market_cap_value')+' KRW') if row.get('currency')=='KRW' and row.get('market_cap_value') else usd(row.get('market_cap_usd')),
             '일일 분봉 준비':row.get('history_ready') if history and not history.get('preparing') else None,
             '운영 대상':bool(row.get('operating')) and status=='VALID' and active,
-            '분봉 제외 사유':'; '.join(p['session']+': '+', '.join(p['reasons']) for p in (row.get('history_selection') or {}).get('problems',[]))
+            '분봉 제외 사유':history_problem_text((row.get('history_selection') or {}).get('problems',[]))
                 or ('시작 자료 준비 중' if history.get('preparing') else '당일 고정 목록 밖' if history and not row.get('history_ready') else ''),
             '선정 상태':LABELS.get(status,status),'시총 선택 이유':row.get('selection_reason'),
             '현재 집중':row['ticker'] in focus, '자료 갱신 대기':row['ticker'] in pending, '집중 근거':row.get('focus_reason'),
