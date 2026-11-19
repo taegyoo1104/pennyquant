@@ -16,9 +16,11 @@ async def until(predicate):
 
 
 class Stream:
-    def __init__(self):self.connections=[]; self.active=0; self.maximum=0
+    def __init__(self):self.connections=[]; self.callbacks=[]; self.active=0; self.maximum=0
     async def stream(self,symbols,**kwargs):
-        assert kwargs=={'trades':False,'max_candidates':100}
+        callback=kwargs.pop('on_disconnect',None)
+        assert callable(callback) and kwargs=={'trades':False,'max_candidates':100}
+        self.callbacks.append(callback)
         queue=asyncio.Queue(); self.connections.append((symbols,queue))
         self.active+=1; self.maximum=max(self.maximum,self.active)
         try:
@@ -218,3 +220,99 @@ async def test_loopback_websocket_disconnect_reconnect_and_clean_shutdown(monkey
             second_quote.set();await until(lambda:feed.latest('A') is not None)
         finally:
             second_quote.set();disconnect.set();await close(feed,task)
+
+
+async def test_disconnect_revokes_quotes_before_slow_rest_cancellation_finishes():
+    class SlowCancel(Rest):
+        def __init__(self):
+            super().__init__();self.started=asyncio.Event();self.cancelling=asyncio.Event()
+        async def quote(self,symbol):
+            self.started.set()
+            try:await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelling.set();await self.release.wait();raise
+    rest=SlowCancel();stream=Stream()
+    feed=TossQuoteFeed(rest,stream=stream,clock=lambda:NOW,retry_initial=.01,retry_max=.02)
+    feed.set_symbols(['A']);task=asyncio.create_task(feed.run())
+    try:
+        await until(lambda:bool(stream.connections))
+        q=stream.connections[0][1];await q.put(ack(['A']));await rest.started.wait()
+        await q.put(quote());await until(lambda:feed.latest('A') is not None)
+        await q.put(ConnectionError('closed'))
+        await rest.cancelling.wait()
+        assert feed.latest('A') is None and not feed.snapshot()['acknowledged']
+    finally:
+        rest.release.set();await close(feed,task)
+
+
+def test_reconnect_preserves_conflicts_and_never_renews_duplicate_receipt():
+    from dataclasses import replace
+    clock=NOW
+    feed=TossQuoteFeed(object(),clock=lambda:clock,max_age_seconds=10)
+    feed.set_symbols(['A']);feed._acked=True
+    original=parse_orderbook('A',orderbook(),NOW)
+    feed._accept(original,'websocket',feed._generation)
+    feed._invalidate('DISCONNECTED');clock+=timedelta(seconds=5);feed._acked=True
+    feed._accept(replace(original,received_at=clock),'rest',feed._generation)
+    assert feed.latest('A').received_at==NOW
+    clock+=timedelta(seconds=6)
+    assert feed.latest('A') is None
+    clock=NOW+timedelta(seconds=6)
+    conflict=replace(original,bid=original.bid-.01,received_at=clock)
+    feed._accept(conflict,'websocket',feed._generation)
+    assert feed.latest('A') is None
+    feed._invalidate('DISCONNECTED');feed._acked=True
+    feed._accept(replace(original,received_at=clock),'rest',feed._generation)
+    assert feed.latest('A') is None
+    fresh=replace(original,timestamp=clock,received_at=clock)
+    feed._accept(fresh,'websocket',feed._generation)
+    assert feed.latest('A')==fresh
+    feed.set_symbols(['B'])
+    assert not feed._history and not feed._conflicts
+
+
+async def test_low_level_error_revokes_feed_before_socket_close_finishes(monkeypatch):
+    queue=asyncio.Queue();closing=asyncio.Event();release=asyncio.Event()
+    class WS:
+        async def send(self,payload):pass
+        def __aiter__(self):return self
+        async def __anext__(self):
+            item=await queue.get()
+            if isinstance(item,Exception):raise item
+            return json.dumps(item)
+    class Context:
+        async def __aenter__(self):return WS()
+        async def __aexit__(self,*args):
+            closing.set();await release.wait()
+    class Client(Rest):
+        async def access_token(self):return 'fixture'
+    monkeypatch.setattr('websockets.asyncio.client.connect',lambda *a,**k:Context())
+    monkeypatch.setattr('sessionquant.collectors.toss_websocket.now_utc',lambda:NOW)
+    feed=TossQuoteFeed(Client(),clock=lambda:NOW,retry_initial=.01,retry_max=.02)
+    feed.set_symbols(['A']);task=asyncio.create_task(feed.run())
+    try:
+        await queue.put(ack(['A']));await queue.put(quote())
+        await until(lambda:feed.latest('A') is not None)
+        await queue.put(ConnectionError('lost'))
+        await closing.wait()
+        assert not release.is_set() and not feed.snapshot()['acknowledged']
+        assert feed.latest('A') is None
+    finally:
+        release.set();await close(feed,task)
+
+
+async def test_previous_connection_callback_cannot_invalidate_new_generation():
+    feed,rest,stream,task=await start()
+    try:
+        await stream.connections[0][1].put(ack(['A']))
+        await stream.connections[0][1].put(quote())
+        await until(lambda:feed.latest('A') is not None)
+        old_callback=stream.callbacks[0]
+        feed.set_symbols(['B'])
+        await until(lambda:len(stream.connections)==2)
+        await stream.connections[1][1].put(ack(['B']))
+        await stream.connections[1][1].put(quote('B'))
+        await until(lambda:feed.latest('B') is not None)
+        old_callback()
+        assert feed.latest('B') is not None and feed.snapshot()['acknowledged']
+    finally:await close(feed,task)

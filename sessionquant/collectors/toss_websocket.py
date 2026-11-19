@@ -43,13 +43,19 @@ class TossWebSocket:
 
     async def stream(self, symbols: list[str], *, include_orders: bool = False,
                      trades: bool = True, max_candidates: int = 20,
-                     ack_timeout: float = 15, idle_timeout: float = 90) -> AsyncIterator[dict]:
+                     ack_timeout: float = 15, idle_timeout: float = 90, on_disconnect=None) -> AsyncIterator[dict]:
         """One connection. Fail closed on errors/partial subscriptions; no silent reconnect.
 
         Consumer must halt entries on exception, REST-reconcile orders/holdings,
         then open a new stream and receive a successful ack before resuming.
         """
         from websockets.asyncio.client import connect
+        notified=False
+        def disconnected():
+            nonlocal notified
+            if not notified:
+                notified=True
+                if on_disconnect is not None:on_disconnect()
         declarations = subscription_declaration(symbols, trades=trades, max_candidates=max_candidates,
             account_seq=self.rest.account_seq if include_orders else None)
         token = await self.rest.access_token()
@@ -75,7 +81,10 @@ class TossWebSocket:
                             raise CapabilityUnavailable('Toss heartbeat stopped')
                         if receive not in done:raise TimeoutError('Toss acknowledgement or connection idle timeout')
                         try:raw = receive.result()
-                        except StopAsyncIteration:break
+                        except StopAsyncIteration:
+                            disconnected();break
+                    except BaseException:
+                        disconnected();raise
                     finally:
                         receive.cancel()
                         await asyncio.gather(receive,return_exceptions=True)
@@ -96,5 +105,9 @@ class TossWebSocket:
                     yield {**frame, "received_at": now_utc().isoformat()}
                 raise CapabilityUnavailable("Toss stream closed; REST reconciliation required")
             finally:
-                heartbeat.cancel()
-                await asyncio.gather(heartbeat,return_exceptions=True)
+                # Revoke consumers before awaited heartbeat/socket cleanup. A
+                # slow close handshake must not extend entry permission.
+                try:disconnected()
+                finally:
+                    heartbeat.cancel()
+                    await asyncio.gather(heartbeat,return_exceptions=True)
