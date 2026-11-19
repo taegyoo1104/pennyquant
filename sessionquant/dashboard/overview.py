@@ -279,6 +279,10 @@ def filter_trades(data):
     import streamlit as st
     import pandas as pd
     from ..models import utc
+    from .trade_reasons import execution_reasons
+    # Resolve an older order before applying the date filter to its later fill.
+    data.tables['executions'] = execution_reasons(data.tables['executions'],
+        orders=data.tables['orders'], state=data.state)
     symbol=st.text_input('종목 필터',key='trade_symbol').strip().upper()
     strategy=st.text_input('전략 필터',key='trade_strategy').strip()
     days=st.selectbox('기간',[1,7,30,365,0],format_func=lambda d:f'최근 {d}일' if d else '조회 범위 전체',key='trade_days')

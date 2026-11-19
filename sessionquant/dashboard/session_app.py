@@ -472,7 +472,10 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             cols[2].metric("동시 보유 한도", f"{limit}종목")
         else:
             cols[2].metric("동시 보유 한도", "확인 대기")
-        st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
+        if data.context.get('strategy', data.state.get('strategy')) == 'pullback_simple':
+            st.caption('현재 단순 눌림목 전략: 추가매수 없음. 최초 매수 목표는 자산의 20%이며, 손절 기준 가격에 도달하면 매도합니다. 실제 매수 금액은 현금·손절 거리·비용에 따라 줄어들 수 있습니다.')
+        else:
+            st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
         if view['environment'] == 'PAPER_LOCAL':
             st.caption('현재 한 전략만 단독 평가합니다. 10%는 고정 대기 조건이 아닌 설정 목표이며, 이익 보호·악재·손절·시간 청산이 먼저 작동할 수 있습니다. 일일 2%는 신규 매수 중단 기준으로 갭·장애 손실을 보장하지 않습니다.')
             risk = data.context.get('risk_snapshot') or {}
@@ -533,7 +536,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                     '수수료 항목':row.get('fee_breakdown'),'미체결 사유':row.get('unfilled_reason'),
                     '접수 시각':timestamp(row.get('accepted_at'))} for row in data.tables['orders']])
         with st.expander("체결 기록"):
-            _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "수량": str(row.get("qty", "")),
+            st.caption('매도 이유는 해당 주문에 기록된 사유입니다. 과거 체결은 연결된 주문에서 확인하며, 근거가 없으면 기록 없음으로 표시합니다.')
+            _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "매도 이유": row.get('매도 이유', '기록 없음') if str(row.get('side')).lower()=='sell' else '—', "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
                      '체결 모델':row.get('fill_model_version','실제 브로커' if row.get('execution_mode')=='live' else 'UNKNOWN'),
                      '예상 가격':usd(row.get('expected_price')),'가격 차이(bps)':row.get('slippage_bps'),

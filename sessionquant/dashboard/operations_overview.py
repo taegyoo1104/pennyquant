@@ -191,6 +191,10 @@ def render_operations(data, view, path, *, panel=None):
     if fills:
         latest=max(fills,key=lambda r:str(r.get('timestamp') or r.get('filled_at') or ''))
         st.caption('최근 모의 체결 · '+str(latest.get('symbol','—'))+' · '+timestamp(latest.get('timestamp') or latest.get('filled_at')))
+        if str(latest.get('side')).lower()=='sell':
+            from .trade_reasons import execution_reasons
+            explained=execution_reasons([latest],orders=data.tables.get('orders',[]),state=data.state)[0]
+            st.caption('매도 이유: '+explained['매도 이유'])
     else:
         st.caption('조회 범위에 모의 체결 기록이 없습니다.')
     footer = st.columns(2)

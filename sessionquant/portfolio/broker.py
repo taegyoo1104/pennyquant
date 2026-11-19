@@ -278,7 +278,8 @@ class PaperBroker:
         delay = Decimal(str((aware(now)-(order.submitted_at or order.intent.created_at)).total_seconds()))
         return FractionalFill(f'{order.client_id}:{len(self.fills)+1}',order.client_id,order.intent.symbol,
             order.intent.side,qty,price,fee,now,pnl,order.fill_model_version,expected,price,
-            order.assumed_latency,bps,breakdown,aware(quote.timestamp),aware(quote.received_at),delay)
+            order.assumed_latency,bps,breakdown,aware(quote.timestamp),aware(quote.received_at),delay,
+            reason=order.intent.reason)
 
     def reconcile(self) -> dict:
         issues = []
