@@ -11,7 +11,7 @@ from .llm.evidence import parse_completion, ValidationFailure
 
 VIEW = 'strategy_explanation_v1'
 STATE = 'strategy_explanation_schedule_v1'
-VERSION = 'strategy-explanation-v1'
+VERSION = 'strategy-explanation-v3'
 PROMPT = '''You explain a Korean Paper trading demonstration. Return JSON only with exactly
 market, strategy, trades. Each is an object with text (Korean, <=700 characters) and evidence_ids
 (a nonempty list of IDs in the matching input facts group). Explain only supplied recorded facts.
@@ -20,7 +20,24 @@ news, prices, causality, fills or profits. Missing news means unknown, not neutr
 The deterministic code decides strategy and orders; your text cannot authorize or block trades.
 Explain which conditions passed, why the code waits, and recorded fills/exits if present.
 Distinguish an approved/submitted order from a fill. State uncertainty and the snapshot time.
-Do not describe old observations as current prices. No outside knowledge or predictions.'''
+Do not describe old observations as current prices. No outside knowledge or predictions.
+Use Korean display names, never internal identifiers, in text: pullback_simple = 단순 눌림목,
+pullback = 눌림목, momentum = 상승 추세, gap_breakout = 갭 돌파, vwap = 평균 거래가격 회복.
+When strategy facts say NO_RECORDED_DECISION, state that no strategy decision was recorded
+at the snapshot time and that the waiting reason cannot be established. Do not infer that
+the strategy was evaluated, failed, or blocked by news from an absence of decisions.
+For pullback_simple, news is only a supplemental candidate ranking score. Missing, uncertain,
+or negative news alone does not block entry or force exit. Explain a waiting reason only
+from recorded strategy checks and blockers, never infer it from the market news section.
+For each text field, write concise complete Korean sentences as separate newline-delimited
+items (use escaped \\n within JSON strings). No Markdown, preamble, or trailing ellipsis.
+In market, use one item per supplied news story, beginning with its symbol if provided;
+keep any uncertainty in the same item. Do not merge multiple companies into one paragraph.
+In strategy, put each symbol's recorded conditions/waiting reason on its own line.
+In trades, put each recorded trade or related sequence on its own line. Call Paper trading
+모의매매, never 종이 거래 or actual brokerage execution. Show dollar amounts with two
+decimal places and quantities with up to six; do not call a sell a stop-loss or a profit
+without recorded evidence. Shorten wording to fit 700 characters, never cut a sentence.'''
 
 
 @dataclass(frozen=True)
@@ -28,9 +45,10 @@ class ExplanationSettings:
     enabled: bool = False
     min_interval_seconds: int = 600
     max_attempts_per_day: int = 20
+    regular_session_only: bool = False
 
     def __post_init__(self):
-        if type(self.enabled) is not bool:
+        if type(self.enabled) is not bool or type(self.regular_session_only) is not bool:
             raise ValueError('AI 설명 활성화는 불리언이어야 합니다.')
         if type(self.min_interval_seconds) is not int or not 60<=self.min_interval_seconds<=86400:
             raise ValueError('AI 설명 간격은 60~86400초입니다.')
@@ -106,8 +124,25 @@ class StrategyExplainer:
         self.settings=ExplanationSettings(**(settings or {}))
         self.state=repo.get_control(STATE,{})
 
+    def _publish(self, result):
+        # Keep one successful explanation, with its own facts/time, across failed
+        # refreshes and process restarts. Never retain a recursive history.
+        if result['status'] != 'SUCCEEDED':
+            previous = self.repo.get_control(VIEW, {}) or {}
+            saved = previous if previous.get('status') == 'SUCCEEDED' else previous.get('last_success', {})
+            if saved.get('status') == 'SUCCEEDED':
+                result['last_success'] = {k:v for k,v in saved.items() if k != 'last_success'}
+        self.repo.set_control(VIEW, result)
+        return result
+
     async def refresh(self, data, now):
-        now=utc(now);key=fingerprint(data);state=self.state
+        now=utc(now)
+        if self.settings.regular_session_only:
+            from .market.bars import session_bounds
+            bounds = session_bounds(now)
+            if not bounds or not bounds[0] <= now < bounds[1]:
+                return None
+        key=fingerprint(data);state=self.state
         if not self.settings.enabled or state.get('success_key')==key:return None
         if state.get('last_attempt_at') and now<utc(state['last_attempt_at'])+timedelta(seconds=self.settings.min_interval_seconds):
             return None
@@ -122,7 +157,7 @@ class StrategyExplainer:
             self.state['attempts']=attempts+1
         self.repo.set_control(STATE,self.state)
         if result['status']!='PENDING':
-            self.repo.set_control(VIEW,result);return result
+            return self._publish(result)
         metadata={'logical_analysis_id':key,'source_kind':'strategy_snapshot','prompt_version':VERSION,
                   'content_hash':key,'article_id':'strategy-snapshot:'+key,'role':'EXPLANATION_ONLY'}
         try:
@@ -138,7 +173,8 @@ class StrategyExplainer:
                     response.raise_for_status()
                     parsed,_=parse_completion(response)
                     result.update(status='SUCCEEDED',sections=validate(parsed,data),generated_at=utc(self.analyzer._clock()).isoformat())
-                except BudgetBlocked:result.update(status='BUDGET_BLOCKED',error='budget_or_provider_cooldown')
+                except BudgetBlocked as exc:
+                    result.update(status='BUDGET_BLOCKED',error='budget_or_provider_cooldown',limit_reason=exc.code)
                 except ValidationFailure as exc:
                     result.update(status='INVALID_RESPONSE',validation_error_code=exc.code,failed_field=exc.field)
                 except Exception as exc:
@@ -151,5 +187,4 @@ class StrategyExplainer:
         if result['status']=='SUCCEEDED':
             self.state['success_key']=key
             self.repo.set_control(STATE,self.state)
-        self.repo.set_control(VIEW,result)
-        return result
+        return self._publish(result)

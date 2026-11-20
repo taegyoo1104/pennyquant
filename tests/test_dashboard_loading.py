@@ -199,6 +199,18 @@ def test_fast_home_refresh_does_not_read_news_or_full_history(database):
     assert 'news_provider_schedule_v1' not in database.calls
 
 
+def test_chart_refresh_reads_only_three_controls_and_observes_new_prices(database):
+    database.failure='news_ingestions'
+    database.controls['benchmark_trade_view_v1']={'enabled':True,'points':{'SPY':[[1,'99',1]]}}
+    data=load_database('unused.db',page='대시보드',panel='benchmarks')
+    assert data.connected and not data.error
+    assert database.calls==['sessionquant_context','market_reference_view_v1','benchmark_trade_view_v1']
+    assert data.benchmark_stream['points']['SPY'][0][1]=='99'
+    database.controls['benchmark_trade_view_v1']={'enabled':True,'points':{'SPY':[[2,'101',1]]}}
+    assert load_database('unused.db',page='대시보드',panel='benchmarks').benchmark_stream['points']['SPY'][0][1]=='101'
+    assert all(repo.closed for repo in database.instances)
+
+
 def test_news_summary_never_loads_portfolio_and_keeps_original_count_scope(database):
     data = load_database('unused.db', page='대시보드', panel='news')
     assert data.connected and not data.error

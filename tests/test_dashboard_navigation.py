@@ -1,5 +1,6 @@
 """브라우저 새로고침·뒤로 가기와 화면 클릭을 구분해 선택을 보존한다."""
 from pathlib import Path
+from contextlib import closing
 
 from streamlit.testing.v1 import AppTest
 
@@ -58,3 +59,32 @@ def test_new_browser_session_restores_same_market_table_without_issuing_orders(t
         assert not repo.all('order_intents') and not repo.all('orders')
     finally:
         repo.close()
+
+
+def test_home_shortcuts_open_the_requested_page_and_table_without_orders(tmp_path,monkeypatch):
+    path=tmp_path/'shortcuts.db'
+    with closing(Repository(path,backend='sqlite')) as repo:
+        repo.set_control('sessionquant_context',{'environment':'PAPER_LOCAL'})
+    monkeypatch.setenv('SQ_DB_BACKEND','sqlite')
+    monkeypatch.setattr('sys.argv',['session_app.py','--db',str(path)])
+    app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30)
+    app.query_params['authuser']='1'
+    app.run().button(key='go-매매 전체 보기').click().run()
+    assert not app.exception and app.radio(key='dashboard_page').value=='매매 내역'
+    assert app.query_params['page']=='trades' and app.query_params['authuser']=='1'
+    app.radio(key='dashboard_page').set_value('대시보드').run()
+    app.button(key='go-종목과 대기 이유 보기').click().run()
+    assert not app.exception and app.radio(key='dashboard_page').value=='시장·종목'
+    assert app.radio(key='market_detail').value=='매수 판단'
+    assert app.query_params['panel']=='selection'
+    app.radio(key='dashboard_page').set_value('대시보드').run()
+    app.button(key='go-뉴스·AI 자세히 보기').click().run()
+    assert not app.exception and app.radio(key='dashboard_page').value=='뉴스·LLM'
+    assert app.query_params['page']=='news' and app.query_params['authuser']=='1'
+    assert 'panel' not in app.query_params
+    restored=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30)
+    restored.query_params.update(app.query_params)
+    restored.run()
+    assert not restored.exception and restored.radio(key='dashboard_page').value=='뉴스·LLM'
+    with closing(Repository(path,backend='sqlite')) as repo:
+        assert not repo.all('orders') and not repo.all('order_intents')

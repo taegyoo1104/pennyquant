@@ -15,7 +15,7 @@ from watchlist_fixtures import NOW,context
 
 
 def sector_rows(count=500):
-    return [{'symbol':f'T{i:03}','marketCapitalization':str((i+1)*1000000),'currency':'KRW'} for i in range(count)]
+    return [{'symbol':f'T{i:03}','name':f'한글 종목 {i}','marketCapitalization':str((i+1)*1000000),'currency':'KRW'} for i in range(count)]
 
 
 async def collect(repo,universe):
@@ -47,10 +47,12 @@ async def test_rank_100_krw_dedup_restart_and_no_future_history(tmp_path):
         assert all(r['market_cap_usd'] is None and not r['issuer_verified'] for r in result['items'])
         assert result['snapshot']['currency']=='KRW' and result['snapshot']['provider_as_of_at'] is None
         assert result['items'][0]['sector_ids']==['a','b']
+        assert result['items'][0]['name']=='한글 종목 499'
         assert manager.store.at(NOW-timedelta(seconds=1)) is None
         assert manager.store.status(NOW+timedelta(days=1))['status']=='EXPIRED'
         manager.publish(NOW)
         state=repo.get_control('watchlist_dashboard_v1')
+        assert state['items'][0]['name']=='한글 종목 499'
         assert current_status(state,NOW+timedelta(days=1))[0]=='EXPIRED'
         assert repo.all('orders')==[]
     finally:repo.close()

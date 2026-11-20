@@ -19,7 +19,9 @@ def test_empty_dashboard_does_not_invent_account(tmp_path, monkeypatch):
     assert app.title[0].value == "SessionQuant"
     assert next(m for m in app.metric if m.label=='모의 총자산').value == '—'
     assert next(m for m in app.metric if m.label=='시세').value == '연결 미확인'
-    assert len(app.metric)==6
+    assert next(m for m in app.metric if m.label=='일간 수익률').value == '—'
+    assert next(m for m in app.metric if m.label=='총 수익률').value == '—'
+    assert len(app.metric)==8
     assert app.radio(key='dashboard_page').options == ['대시보드','시장·종목','전략·백테스트','매매 내역','뉴스·LLM','시스템·설정']
     assert not any("실거래 활성화" == button.label for button in app.button)
     assert not (tmp_path / "absent.db").exists()
@@ -231,3 +233,24 @@ def test_stage06_dashboard_renders_populated_provider_and_enrichment_details(tmp
     values = ' '.join(frame.value.to_string() for frame in app.dataframe)
     assert '공급자 요청 제한' in values and '이용 권한 미확인' in values and '오래된 기사' in values
     assert 'PROVIDER_RATE_LIMITED' not in values and 'stale_article' not in values
+
+
+def test_holding_return_uses_remaining_cost_including_buy_fee():
+    now = datetime(2026, 11, 19, 16, tzinfo=timezone.utc)
+    data = DashboardData(state={'broker': {'positions': {'AMD': {
+        'qty': '0.1', 'avg_price': '200', 'entry_fee': '0.02', 'initial_notional': '40'}}}})
+    data.tables['quote_snapshots'] = [{'symbol':'AMD','timestamp':now.isoformat(),'bid':'199.6'}]
+    row = build_view(data, now)['positions'][0]
+    assert row['평가액'] == '$19.96'
+    assert row['평가 손익'] == '$-0.06'
+    assert row['평가 수익률'] == '-0.30%'
+    data.tables['quote_snapshots'][0]['bid'] = '210'
+    row = build_view(data, now)['positions'][0]
+    assert row['평가 손익'] == '$0.98' and row['평가 수익률'] == '+4.90%'
+    # Expired prices and invalid/zero acquisition costs cannot invent a return.
+    data.tables['quote_snapshots'][0]['timestamp'] = '2026-11-19T15:58:00Z'
+    assert build_view(data, now)['positions'][0]['평가 수익률'] == '—'
+    data.tables['quote_snapshots'][0]['timestamp'] = now.isoformat()
+    for avg in ('0', '-10', 'NaN', None):
+        data.state['broker']['positions']['AMD']['avg_price'] = avg
+        assert build_view(data, now)['positions'][0]['평가 수익률'] == '—'

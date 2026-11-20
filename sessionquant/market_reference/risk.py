@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from ..models import utc
 from ..portfolio.models import decimal, serialize
-from .contracts import REFERENCES, identity
+from .contracts import DEFAULT_REFERENCE_SYMBOLS, identity
 from .store import VIEW
 
 STATE = 'macro_reference_risk_state_v1'
@@ -48,7 +48,7 @@ class MacroReferenceRiskMonitor:
 
     def _measure(self, view, now):
         measurements, reasons, ends = {}, [], []
-        for symbol in REFERENCES:
+        for symbol in DEFAULT_REFERENCE_SYMBOLS:
             item = (view.get('items') or {}).get(symbol) or {}
             minutes = 30 if symbol == 'USO' else 15
             window = (item.get('windows') or {}).get(str(minutes)) or {}

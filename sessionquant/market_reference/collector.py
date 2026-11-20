@@ -5,13 +5,19 @@ from decimal import Decimal
 
 from ..models import utc
 from ..market.bars import session_bounds
-from .contracts import REFERENCES, observation
+from .contracts import DEFAULT_REFERENCE_SYMBOLS, observation
 from .store import ReferenceStore
 
 
 class MarketReferenceMonitor:
     """주문·적격성 인터페이스가 없다. 공급자 권한 증거 미등록은 UNKNOWN이다."""
-    def __init__(self,repo,*,permissions=None,clock,price_seconds=30,candle_seconds=180,calls_per_cycle=2,synthetic=False):
+    def __init__(self,repo,*,permissions=None,clock,price_seconds=30,candle_seconds=180,calls_per_cycle=2,synthetic=False,
+                 symbols=None,display_only=False,stream_prices=False):
+        from .settings import reference_settings
+        config=reference_settings({'symbols':list(DEFAULT_REFERENCE_SYMBOLS) if symbols is None else symbols,'display_only':display_only})
+        self.symbols=tuple(config['symbols'])
+        self.display_only=config['display_only']
+        self.stream_prices=bool(stream_prices and self.display_only)
         self.store = ReferenceStore(repo)
         self.permissions = permissions or {}
         self.clock = clock
@@ -35,13 +41,18 @@ class MarketReferenceMonitor:
         self._pending = []
         now = utc(self.clock());bounds = session_bounds(now)
         if not bounds or not bounds[0] <= now < bounds[1]:
-            return self.store.publish(now)
+            return self.store.publish(now,symbols=self.symbols)
         schedules = self.store.state['schedule']
-        jobs = [('stocks','*',86400),('prices','*',self.price_seconds)]
-        for symbol in REFERENCES:
-            jobs += [('orderbook',symbol,60),('candle',symbol,self.candle_seconds),('daily',symbol,86400)]
+        jobs = [('prices','*',self.price_seconds)] if self.display_only else [('stocks','*',86400),('prices','*',self.price_seconds)]
+        if self.stream_prices:jobs=[]
+        for symbol in self.symbols:
+            # A failed optional request must not hide the daily comparison all day.
+            daily_interval = 300 if self.display_only and self.store.state['capabilities'].get(symbol,{}).get('daily',{}).get('status') != 'OBSERVED' else 86400
+            jobs += [('daily',symbol,daily_interval)] if self.stream_prices else [('candle',symbol,self.candle_seconds),('daily',symbol,daily_interval)] if self.display_only else [
+                ('orderbook',symbol,60),('candle',symbol,self.candle_seconds),('daily',symbol,86400)]
         due = [(stream,symbol,interval) for stream,symbol,interval in jobs
-               if not schedules.get(stream+':'+symbol) or (now-utc(schedules[stream+':'+symbol])).total_seconds()>=interval]
+               if not schedules.get(stream+':'+symbol) or (now-utc(schedules[stream+':'+symbol])).total_seconds()>=interval
+               or (stream=='daily' and utc(schedules[stream+':'+symbol])<bounds[0])]
         due.sort(key=lambda row:(schedules.get(row[0]+':'+row[1],''),jobs.index(row)))
         for stream,symbol,_ in due[:min(self.calls_per_cycle,self.calls_per_cycle if limit is None else limit)]:
             schedules[stream+':'+symbol] = utc(self.clock()).isoformat()
@@ -51,7 +62,7 @@ class MarketReferenceMonitor:
             self.store.state['last_request'] = {'stream':stream,'symbol':symbol,'received_at':received.isoformat(),
                                               'duration_seconds':round(monotonic()-began,3),'error':result.get('error')}
             data = result.get('data')
-            targets = list(REFERENCES) if symbol=='*' else [symbol]
+            targets = list(self.symbols) if symbol=='*' else [symbol]
             if result.get('error') or data is None:
                 for target in targets:
                     self._record(target,stream,{},None,received,error=result.get('error') or 'response_unavailable')
@@ -108,4 +119,4 @@ class MarketReferenceMonitor:
                 await asyncio.sleep(0)
             self._pending = []
         self.store.save()
-        return self.store.publish(utc(self.clock()))
+        return self.store.publish(utc(self.clock()),symbols=self.symbols)

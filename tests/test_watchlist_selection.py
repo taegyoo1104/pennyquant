@@ -11,6 +11,31 @@ from sessionquant.watchlist.selection import FairScheduler, HistoricalWatchlistP
 from watchlist_fixtures import NOW, cap_batch, context, observe
 
 
+@pytest.mark.parametrize('base',['95',None,'0','NaN',True])
+async def test_ranking_previous_day_base_reaches_cards_without_changing_focus(tmp_path,base):
+    from sessionquant.dashboard.home_cards import focus_cards
+    from sessionquant.watchlist.selection import VIEW
+    repo,_,_,_,manager=context(tmp_path)
+    try:
+        await manager.refresh(NOW)
+        now=observe(manager)
+        symbols=manager.light_symbols(now)
+        rows=[{'symbol':symbol,'currency':'USD','tradingAmount':'10000000','tradingVolume':'10000',
+               'price':{'lastPrice':'99','basePrice':base,'changeRate':'-0.90'}} for symbol in symbols]
+        manager.observe_rankings({'rankedAt':now.isoformat(),'rankings':rows},now)
+        manager.publish(now)
+        view=repo.get_control(VIEW)
+        cards=focus_cards(view,now=now)
+        assert len(cards)==10  # Main dashboard shows the first ten focused symbols.
+        assert cards[0]['price']=='$101.00'
+        assert cards[0]['change']==('+6.31%' if base=='95' else '—')
+        assert len(manager.state['focus'])==20
+        # Display data never turns into strategy/order evidence or synthetic prices.
+        assert repo.all('orders')==[]
+        assert all(r['last_price']=='101' for r in view['items'])
+    finally:repo.close()
+
+
 def test_capitalization_order_is_not_alphabetical_and_ties_are_deterministic(tmp_path):
     repo,universe,_,provider,manager=context(tmp_path)
     try:

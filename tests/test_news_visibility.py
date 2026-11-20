@@ -162,7 +162,7 @@ def test_main_and_news_show_simple_labels_and_pipeline_counts(tmp_path,monkeypat
     monkeypatch.setenv('SQ_DB_BACKEND','sqlite');monkeypatch.setenv('SQ_ENVIRONMENT','PAPER_LOCAL')
     monkeypatch.setattr('sys.argv',['session_app.py','--db',str(path)])
     app=AppTest.from_file(str(Path('sessionquant/dashboard/session_app.py').resolve()),default_timeout=30).run()
-    assert not app.exception and len(app.metric)==6
+    assert not app.exception and len(app.metric)==8
     assert any(m.label=='모의 총자산' for m in app.metric)
     assert next(m for m in app.metric if m.label=='AI 분석').value=='1건 완료'
     assert any('요청 1건' in r.value for r in app.caption)

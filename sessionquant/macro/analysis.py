@@ -78,7 +78,7 @@ class BudgetedAnalyzer:
         health=self.repo.get_control("llm_provider_health",{})
         if health.get("code") not in {None,"AVAILABLE","UNKNOWN"} and health.get("retry_after"):
             if utc(health["retry_after"])>utc(self._clock()):
-                raise BudgetBlocked(health.get("message","LLM 분석 일시 중단; 차트 기반 처리 계속"))
+                raise BudgetBlocked(health.get("message","LLM 분석 일시 중단; 차트 기반 처리 계속"), code="PROVIDER_COOLDOWN")
 
     def _cache_key(self, digest, kind, *, prompt_version=None):
         return "session_llm_cache:" + stable_hash({"digest": digest, "kind": kind,

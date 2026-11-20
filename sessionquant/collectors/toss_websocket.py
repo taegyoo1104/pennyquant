@@ -42,7 +42,7 @@ class TossWebSocket:
         self.rest = rest
 
     async def stream(self, symbols: list[str], *, include_orders: bool = False,
-                     trades: bool = True, max_candidates: int = 20,
+                     trades: bool = True, orderbook: bool = True, max_candidates: int = 20,
                      ack_timeout: float = 15, idle_timeout: float = 90, on_disconnect=None) -> AsyncIterator[dict]:
         """One connection. Fail closed on errors/partial subscriptions; no silent reconnect.
 
@@ -56,7 +56,7 @@ class TossWebSocket:
             if not notified:
                 notified=True
                 if on_disconnect is not None:on_disconnect()
-        declarations = subscription_declaration(symbols, trades=trades, max_candidates=max_candidates,
+        declarations = subscription_declaration(symbols, trades=trades, orderbook=orderbook, max_candidates=max_candidates,
             account_seq=self.rest.account_seq if include_orders else None)
         token = await self.rest.access_token()
         async with connect(WS_URL, additional_headers={"Authorization": f"Bearer {token}"},

@@ -49,7 +49,8 @@ class SessionEngine:
                  settings: PortfolioSettings | None = None, restore: bool = False, risk_provider=None,
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
-                 candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None):
+                 candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None,
+                 benchmark_collection_enabled=None,market_reference_symbols=None):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
@@ -69,6 +70,9 @@ class SessionEngine:
         self.repo, self.universe = repository, universe
         self.strategy, self.synthetic, self.use_news = strategy, synthetic, use_news
         self.use_market_filter = use_market_filter
+        # Display metadata only. Unknown/older runs must not hide missing inputs.
+        self.benchmark_collection_enabled = benchmark_collection_enabled
+        self.market_reference_symbols = market_reference_symbols
         self.market = MarketEngine(universe, strategy, use_market_filter=use_market_filter, strict_data=strict_market_data,
                                    paper_data_policy=paper_data_policy)
         if strategy=='pullback_simple' and hasattr(watchlist_policy,'pattern_provider'):
@@ -294,6 +298,8 @@ class SessionEngine:
         context = {"environment": "PAPER_LOCAL", "mode": "paper", "live_orders_enabled": False,
                    "synthetic": self.synthetic, "strategy": self.strategy, "updated_at": now.isoformat(),
                    'paper_data_policy':self.market.paper_data_policy,
+                   'benchmark_collection_enabled':self.benchmark_collection_enabled,
+                   'market_reference_symbols':self.market_reference_symbols,
                    "market_regime": regime, "session": serialize(session_status), "account": account,
                    "backend": self.repo.backend, "news_status": "UNKNOWN" if self.risk_provider is None else 'DEGRADED' if self._risk_lookup_errors else "ENABLED",
                    'risk_policy_version':2,'exit_policy':serialize(self.exit_policy),'risk_snapshot':risk_snapshot,

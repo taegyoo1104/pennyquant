@@ -215,9 +215,10 @@ class WatchlistSelector:
 
 class WatchlistStore:
     """기존 장부를 건드리지 않고 PAPER 네임스페이스의 제어 원장에 이력을 추가한다."""
-    def __init__(self, repo, universe, *, max_age_days=7, missing_cap_policy=None):
+    def __init__(self, repo, universe, *, max_age_days=7, missing_cap_policy=None, required_selection_policy=None):
         self.repo, self.universe, self.max_age = repo, universe, timedelta(days=max_age_days)
         self.missing_cap_policy = missing_cap_policy
+        self.required_selection_policy = required_selection_policy
         self._reads = ContextVar('watchlist_snapshot_reads', default=None)
 
     @contextmanager
@@ -280,6 +281,8 @@ class WatchlistStore:
                 result['status'] = 'MEMBERSHIP_CHANGED'
             if row['synthetic'] and not allow_synthetic:
                 result['status'] = 'SYNTHETIC_BLOCKED'
+            if self.required_selection_policy and row.get('selection_policy') != self.required_selection_policy:
+                result['status'] = 'SELECTION_POLICY_CHANGED'
             result.update(ranking_scope=row.get('ranking_scope','full_universe'),
                           ranking_verified=result['status']=='VALID' and row.get('ranking_verified',True),
                           market_cap_coverage=row.get('coverage_status','COMPLETE' if row['data_status']=='VALID' else 'PARTIAL'),
