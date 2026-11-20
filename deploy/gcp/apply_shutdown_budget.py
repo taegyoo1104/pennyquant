@@ -2,12 +2,14 @@
 """Apply the reviewed shutdown-budget fix without restarting the app or timers."""
 import argparse
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
 import stat
 import subprocess
@@ -20,7 +22,8 @@ from urllib.request import urlopen
 # downloads; independent content hashes also reject unrelated/future changes.
 PAYLOADS = {
     "start.sh": ("7f1b9e92524ccf7852a588ba6e3115a765de8a46e432cf255d75515b7153ae44",
-                 "8e7b7a1d8a5fecd8b0e18862e401cdcfbb81c285a8269a37f2e28d547df38f1a"),
+                 "8e7b7a1d8a5fecd8b0e18862e401cdcfbb81c285a8269a37f2e28d547df38f1a",
+                 "90f004ddd0a7153431dab16c17e887d875c2c6025e003c5358a2a3811bcb52be"),
     "stop.sh": ("5ca60b2205e488313771d930fcdfb98daa734c60908c6b217a7e90bca4a864cc",
                 "f669b9109c608f144ce0d368d1c38cc3b4eef6dad340f42e5d4a866d73eafc10"),
     "sessionquant-cost-guard.service": ("0120f1edd9eee4dfe44a619a22aa9c1984d95f109b5961e53b6f34e53acc222c",
@@ -37,6 +40,7 @@ SERVICES = ("sessionquant-market-close", "sessionquant-cost-guard")
 # uses the updated start.sh, so no persistent override can outlive this fix.
 DROPIN = "run/systemd/system/sessionquant-market-close.service.d/90-sessionquant-backup-budget.conf"
 DROPIN_BODY = b"[Service]\nTimeoutStartSec=4200\n"
+TIMER_DROPIN = "run/systemd/system/sessionquant-market-close.timer.d/90-sessionquant-fixed-deadline.conf"
 REPO = "opt/sessionquant/deploy/gcp/"
 BACKUP_ROOT = "var/lib/sessionquant/update-backups"
 MIN_REMAINING_USEC = 600 * 1_000_000
@@ -50,7 +54,7 @@ def validate_payloads(payloads):
     if set(payloads) != set(PAYLOADS):
         raise ValueError("종료 설정 파일 목록이 일치하지 않습니다.")
     for name, body in payloads.items():
-        if len(body) > 65536 or digest(body) != PAYLOADS[name][1]:
+        if len(body) > 65536 or digest(body) != PAYLOADS[name][-1]:
             raise ValueError("내려받은 파일 검증 실패: " + name)
 
 
@@ -70,17 +74,22 @@ def run(args):
     return subprocess.check_output(args, text=True, timeout=10).strip()
 
 
-def property_usec(run_command, unit, interface, name):
+def property_tokens(run_command, unit, interface, name):
     escaped = unit.replace("-", "_2d").replace(".", "_2e")
     value = run_command(["busctl", "get-property", "org.freedesktop.systemd1",
                          "/org/freedesktop/systemd1/unit/" + escaped,
                          "org.freedesktop.systemd1." + interface, name])
-    if not re.fullmatch(r"t [0-9]+", value):
+    return shlex.split(value)
+
+
+def property_usec(run_command, unit, interface, name):
+    tokens = property_tokens(run_command, unit, interface, name)
+    if len(tokens) != 2 or tokens[0] != "t" or not tokens[1].isdigit():
         raise ValueError("종료 예약 값을 확인할 수 없습니다: " + unit)
-    return int(value.split()[1])
+    return int(tokens[1])
 
 
-def deadlines(run_command, monotonic):
+def timer_snapshots(run_command, monotonic):
     result = {}
     for name in SERVICES:
         service, timer = name + ".service", name + ".timer"
@@ -92,11 +101,77 @@ def deadlines(run_command, monotonic):
             raise ValueError("알려진 종료 작업이 아닙니다: " + service)
         if show(timer, "ActiveState") != "active" or show(timer, "Unit") != service:
             raise ValueError("활성 종료 예약을 확인할 수 없습니다: " + timer)
-        value = property_usec(run_command, timer, "Timer", "NextElapseUSecMonotonic")
-        if value == (1 << 64) - 1 or value - monotonic() // 1000 <= MIN_REMAINING_USEC:
+        if (property_tokens(run_command, timer, "Timer", "WakeSystem") != ["b", "false"] or
+                property_usec(run_command, timer, "Timer", "RandomizedDelayUSec") != 0 or
+                property_tokens(run_command, timer, "Timer", "TimersCalendar") != ["a(sst)", "0"]):
+            raise ValueError("지원하지 않는 종료 예약 설정입니다: " + timer)
+        rule = property_tokens(run_command, timer, "Timer", "TimersMonotonic")
+        if (len(rule) != 5 or rule[:2] != ["a(stt)", "1"] or
+                rule[2] not in {"OnActiveUSec", "OnBootUSec"} or not all(n.isdigit() for n in rule[3:])):
+            raise ValueError("종료 예약의 기준을 확인할 수 없습니다: " + timer)
+        if name == "sessionquant-cost-guard" and rule[2] != "OnBootUSec":
+            raise ValueError("비용 제한 예약이 부팅 기준이 아닙니다.")
+        value, scheduled = int(rule[3]), property_usec(run_command, timer, "Timer", "NextElapseUSecMonotonic")
+        if scheduled != int(rule[4]):
+            raise ValueError("종료 예약 조회 중 값이 바뀌었습니다: " + timer)
+        if rule[2] == "OnBootUSec" and scheduled != value:
+            raise ValueError("부팅 기준 종료 예약에 알 수 없는 시간 차이가 있습니다.")
+        started = 0
+        if rule[2] == "OnActiveUSec":
+            # systemd preserves this timestamp on reload, but recomputes an
+            # OnActiveSec deadline from *now* while coldplugging the timer.
+            started = property_usec(run_command, timer, "Unit", "InactiveExitTimestampMonotonic")
+            if not 0 < started <= monotonic() // 1000:
+                raise ValueError("최초 종료 예약 등록 시각을 확인할 수 없습니다.")
+        original = started + value
+        if original >= (1 << 64) - 1 or original - monotonic() // 1000 <= MIN_REMAINING_USEC:
             raise ValueError("종료 예약까지 10분 이상 남아 있어야 합니다: " + timer)
-        result[timer] = value
+        if scheduled < original - 1_000_000:
+            raise ValueError("원래 시각보다 이른 종료 예약이 있어 직접 확인이 필요합니다.")
+        result[timer] = {"base": rule[2], "value": value, "started": started,
+                         "scheduled": scheduled, "original": original}
     return result
+
+
+def original_deadlines(root, snapshots):
+    targets = {name: row["original"] for name, row in snapshots.items()}
+    # The first installer saved exact deadlines but not a boot ID. Only accept
+    # a saved value if it agrees within one second with this boot's independent
+    # activation timestamp + duration. The activation timestamp is measured
+    # just after the initial timer arm. Never restore an arbitrary old deadline.
+    candidates = sorted((root / BACKUP_ROOT).glob("shutdown-budget-*/manifest.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)[:10]
+    for path in candidates:
+        try:
+            saved = json.loads(snapshot(path)[0])
+            if not isinstance(saved, dict):
+                continue
+            values = saved.get("timer_deadlines", {})
+            if (saved.get("state") not in {"APPLIED", "ROLLED_BACK", "ROLLED_BACK_TIMER_PINNED"} or
+                    set(values) != set(targets) or
+                    any(type(values[name]) is not int or abs(values[name] - target) > 1_000_000
+                        for name, target in targets.items())):
+                continue
+            # Boot-based values are already exact and cannot use this tolerance.
+            if any(row["base"] == "OnBootUSec" and values[name] != row["original"]
+                   for name, row in snapshots.items()):
+                continue
+            return values
+        except (ValueError, OSError, TypeError):
+            continue
+    return targets
+
+
+def timer_dropin(deadline):
+    # An empty timer expression clears earlier relative/calendar expressions.
+    return f"[Timer]\nOnActiveSec=\nOnBootSec={deadline}us\n".encode()
+
+
+def verify_deadlines(run_command, monotonic, targets):
+    actual = timer_snapshots(run_command, monotonic)
+    if any(row["base"] != "OnBootUSec" or row["scheduled"] != targets[name]
+           for name, row in actual.items()):
+        raise ValueError("원래 종료 예약 시각을 확인하지 못했습니다.")
 
 
 def no_symlinks(path):
@@ -147,18 +222,26 @@ def apply(payloads, *, root=Path("/"), run_command=run, monotonic=time.monotonic
         for marker in ("maintenance", "storage-blocked"):
             if (root / "etc/sessionquant" / marker).exists():
                 raise ValueError("기존 점검·저장 공간 차단을 먼저 확인하세요.")
-        before_deadlines = deadlines(run_command, monotonic)
+        # OnBootSec is an absolute CLOCK_MONOTONIC deadline on a VM. Container
+        # managers offset it by their own start time, so do not apply there.
+        if run_command(["systemd-detect-virt"]) not in {"kvm", "qemu", "google"}:
+            raise ValueError("이 도구는 GCP 운영 VM에서 실행해야 합니다.")
+        before_timers = timer_snapshots(run_command, monotonic)
+        before_deadlines = original_deadlines(root, before_timers)
+        if min(before_deadlines.values()) - monotonic() // 1000 <= MIN_REMAINING_USEC:
+            raise ValueError("원래 종료 예약까지 10분 이상 남아 있어야 합니다.")
         for name, expected in DEPENDENCIES.items():
             if digest(snapshot(root / REPO / name)[0]) != expected:
                 raise ValueError("지원하는 백업·정리 버전이 아닙니다: " + name)
-        changes = {REPO + name: body for name, body in payloads.items()}
+        pinned_timer = timer_dropin(before_deadlines["sessionquant-market-close.timer"])
+        changes = {TIMER_DROPIN: pinned_timer, **{REPO + name: body for name, body in payloads.items()}}
         changes["etc/systemd/system/sessionquant-cost-guard.service"] = payloads["sessionquant-cost-guard.service"]
         changes[DROPIN] = DROPIN_BODY
         original = {}
         for relative in changes:
-            old = snapshot(root / relative, optional=relative == DROPIN)
-            if relative == DROPIN:
-                valid = old is None or old[0] == DROPIN_BODY
+            old = snapshot(root / relative, optional=relative in {DROPIN, TIMER_DROPIN})
+            if relative in {DROPIN, TIMER_DROPIN}:
+                valid = old is None or old[0] == changes[relative]
             else:
                 valid = digest(old[0]) in PAYLOADS[Path(relative).name]
             if not valid:
@@ -171,7 +254,8 @@ def apply(payloads, *, root=Path("/"), run_command=run, monotonic=time.monotonic
         for relative, old in original.items():
             if old is not None:
                 atomic_write(backup / relative, old[0], 0o600, os.geteuid(), os.getegid())
-        manifest = {"state": "PREPARED", "timer_deadlines": before_deadlines, "files": {
+        manifest = {"version": 2, "state": "PREPARED", "timer_deadlines": before_deadlines,
+                    "timer_before": before_timers, "files": {
             name: None if old is None else {"sha256": digest(old[0]), "mode": old[1], "uid": old[2], "gid": old[3]}
             for name, old in original.items()}}
         def record(state):
@@ -181,7 +265,7 @@ def apply(payloads, *, root=Path("/"), run_command=run, monotonic=time.monotonic
         record("PREPARED")
         # Recheck before the first write; no long command runs while files are
         # partially installed. Timers retain their original activation dates.
-        if deadlines(run_command, monotonic) != before_deadlines:
+        if timer_snapshots(run_command, monotonic) != before_timers:
             raise ValueError("종료 예약이 바뀌어 적용하지 않았습니다.")
         for relative, old in original.items():
             if snapshot(root / relative, optional=old is None) != old:
@@ -199,18 +283,28 @@ def apply(payloads, *, root=Path("/"), run_command=run, monotonic=time.monotonic
             for name in SERVICES:
                 if property_usec(run_command, name + ".service", "Service", "TimeoutStartUSec") != 4200_000_000:
                     raise ValueError("종료 서비스 제한 적용을 확인하지 못했습니다: " + name)
-            if deadlines(run_command, monotonic) != before_deadlines:
-                raise ValueError("종료 예약 시각이 바뀌었습니다.")
+            verify_deadlines(run_command, monotonic, before_deadlines)
             record("APPLIED")
         except BaseException:
-            for relative in reversed(written):
-                old = original[relative]
-                if old is None:
-                    (root / relative).unlink(missing_ok=True)
+            try:
+                for relative in reversed(written):
+                    if relative == TIMER_DROPIN:
+                        continue  # Restoring OnActiveSec would postpone it again.
+                    old = original[relative]
+                    if old is None:
+                        (root / relative).unlink(missing_ok=True)
+                    else:
+                        atomic_write(root / relative, *old)
+                pin = snapshot(root / TIMER_DROPIN, optional=True)
+                if pin is not None and pin[0] == pinned_timer:
+                    run_command(["systemctl", "daemon-reload"])
+                    verify_deadlines(run_command, monotonic, before_deadlines)
+                    record("ROLLED_BACK_TIMER_PINNED")
                 else:
-                    atomic_write(root / relative, *old)
-            run_command(["systemctl", "daemon-reload"])
-            record("ROLLED_BACK")
+                    record("ROLLED_BACK")
+            except BaseException as exc:
+                record("ROLLBACK_FAILED")
+                raise RuntimeError("종료 설정 복구 확인 실패. 이전 설정: " + str(backup)) from exc
             raise
         return backup
 
@@ -233,7 +327,13 @@ def main():
         print("종료 설정 적용 실패: " + str(exc))
         return 1
     print("종료 설정 적용 완료: 백업 최대 45분 · 정리 최대 5회/10분 · 종료 전체 최대 70분")
-    print("앱·DB·종료 예약 시각을 유지했습니다. 이전 설정: " + str(backup))
+    print("앱·DB는 유지하고 원래 종료 예약을 고정했습니다. 이전 설정: " + str(backup))
+    checked = json.loads((backup / "manifest.json").read_text())
+    current, elapsed = datetime.now(timezone.utc), time.monotonic_ns() // 1000
+    for name, label in (("sessionquant-market-close.timer", "장 마감 예약"),
+                        ("sessionquant-cost-guard.timer", "최대 실행 시간 예약")):
+        when = current + timedelta(microseconds=checked["timer_deadlines"][name] - elapsed)
+        print(label + ": " + when.astimezone(timezone(timedelta(hours=9), "KST")).strftime("%Y-%m-%d %H:%M:%S %Z"))
     return 0
 
 
