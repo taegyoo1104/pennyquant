@@ -9,13 +9,18 @@ def test_blocked_briefing_shows_existing_recent_news_with_no_new_generated_claim
     from datetime import datetime
     from sessionquant.dashboard.explanation_panel import saved_news_html, budget_caption
     now = datetime.fromisoformat('2026-11-20T15:00:00+00:00')
-    news = {'symbol':'SPY', 'summary':'저장된 분석 <script>내용</script> 끝 문장.',
+    news = {'symbol':'MU', 'summary':'ETF 출시 소식은 회사 자체에 중립적이라고 판단되지만, '
+        '주주에게 미치는 구체적인 영향이 명확하지 않아 주주 영향은 UNKNOWN로 분류함. '
+        'LOW·HIGH·GOOD <script>내용</script> 끝 문장.',
         'published_at':'2026-11-20T13:00:00Z', 'analyzed_at':'2026-11-20T14:00:00Z',
         'llm_call_ids':['verified-call'], 'requires_verification':True}
     view = {'status':'BUDGET_BLOCKED', 'facts':{'market':[news]},
             'budget':{'daily_calls':{'primary':600}, 'daily_primary_cap':600}}
+    original = deepcopy(view)
     html = saved_news_html(view, now)
-    assert '최근 저장된 뉴스 분석' in html and 'SPY' in html and '끝 문장.' in html
+    assert '최근 저장된 뉴스 분석' in html and 'MU' in html and '끝 문장.' in html
+    assert '주주 영향은 미확인으로 분류함' in html and 'UNKNOWN' not in html
+    assert 'LOW·HIGH·GOOD' in html and view == original
     assert '<script>' not in html and '&lt;script&gt;' in html
     assert '내용 확인 필요' in html and '11.20 23:00:00 KST' in html
     assert '600 / 600' in budget_caption(view)
@@ -28,12 +33,23 @@ def test_blocked_briefing_shows_existing_recent_news_with_no_new_generated_claim
     ('pullback_simple', '단순 눌림목'), ('pullback', '눌림목'),
     ('momentum', '상승 추세'), ('gap_breakout', '갭 돌파'),
     ('vwap', '평균 거래가격 회복'),
+    ('UNKNOWN', '미확인'), ('NEGATIVE', '부정'), ('CONFIRMED', '확인 완료'),
 ])
 def test_saved_narration_translates_complete_codes_without_changing_symbols_or_original(code, name):
     view = {'sections': {'strategy': {'text': f"AAPL·LOW의 '{code}' 전략을 확인합니다. my_{code}는 원문입니다."}}}
     original = deepcopy(view)
     assert explanation_text(view, 'strategy') == f"AAPL·LOW의 '{name}' 전략을 확인합니다. my_{code}는 원문입니다."
     assert view == original
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('주주 영향은 `UNKNOWN`으로 분류함.', '주주 영향은 `미확인`으로 분류함.'),
+    ('발표는 CONFIRMED으로 분류함.', '발표는 확인 완료로 분류함.'),
+])
+def test_briefing_status_prose_keeps_korean_particles_and_original(text, expected):
+    view = {'sections': {'market': {'text': text}}}
+    assert explanation_text(view, 'market') == expected
+    assert view['sections']['market']['text'] == text
 
 
 def test_no_decisions_does_not_present_news_as_an_unproven_entry_blocker():

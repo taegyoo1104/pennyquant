@@ -6,10 +6,35 @@ import streamlit as st
 
 from .labels import LABELS
 
-_STRATEGY_CODE = re.compile(
-    r'(?<![A-Za-z0-9_])(?:pullback_simple|pullback|momentum|gap_breakout|vwap)(?![A-Za-z0-9_])'
+# Do not substitute the full label catalog: LOW/HIGH/GOOD can be stock tickers.
+_NARRATION_LABELS = {code: LABELS[code] for code in
+                     ('pullback_simple', 'pullback', 'momentum', 'gap_breakout', 'vwap')}
+_NARRATION_LABELS.update({
+    'UNKNOWN': '미확인', 'UNCERTAIN': '불확실', 'UNCONFIRMED': '미확인',
+    'POSITIVE': '긍정', 'NEGATIVE': '부정', 'NEUTRAL': '중립',
+    'CONFIRMED': '확인 완료', 'PLANNED': '예정',
+    'VERIFIED': '검증 완료', 'UNVERIFIED': '미검증',
+})
+_NARRATION_CODE = re.compile(
+    r'(?<![A-Za-z0-9_])(?P<code>'+ '|'.join(sorted(_NARRATION_LABELS, key=len, reverse=True))+
+    r')(?![A-Za-z0-9_])(?P<quotes>[\'"`]*)(?P<particle>으로|로)?'
 )
 SESSION_WAITS = {'PREOPEN', 'POSTCLOSE', 'SESSION_WAIT'}
+
+
+def narration_text(value):
+    """Display known codes in Korean in both generated and saved-news prose."""
+    def replace(match):
+        label = _NARRATION_LABELS[match['code']]
+        particle = match['particle'] or ''
+        if particle:
+            # All display names end in Hangul. Keep 'UNKNOWN로' -> '미확인으로'
+            # and 'CONFIRMED으로' -> '확인 완료로' grammatical, including quotes.
+            final = (ord(label[-1])-0xAC00) % 28
+            particle = '으로' if final not in (0, 8) else '로'
+        return label+match['quotes']+particle
+    text = _NARRATION_CODE.sub(replace, str(value or '').strip())
+    return text.replace('종이 거래 모드', '모의매매').replace('종이 거래', '모의매매')
 
 
 def missing_strategy_decision(view):
@@ -25,10 +50,7 @@ def explanation_text(view, key):
     """Present saved narration without internal codes or invented missing-record causes."""
     if key == 'strategy' and missing_strategy_decision(view):
         return '입력 기준 시점에 기록된 전략 판단이 없습니다. 이 기록만으로는 매수 대기 이유를 알 수 없습니다.'
-    text = str(((view.get('sections') or {}).get(key) or {}).get('text') or '').strip()
-    # Translate only strategy IDs: words like LOW may be stock tickers, not statuses.
-    text = _STRATEGY_CODE.sub(lambda m: LABELS[m.group()], text)
-    return text.replace('종이 거래 모드', '모의매매').replace('종이 거래', '모의매매')
+    return narration_text(((view.get('sections') or {}).get(key) or {}).get('text'))
 
 
 def explanation_items(text):
@@ -114,7 +136,7 @@ def saved_news_html(view, now=None):
             continue
         title = str(row.get('symbol') or '시장 뉴스')
         caution = ' · 내용 확인 필요' if row.get('requires_verification', True) else ''
-        items.append('<li><strong>'+escape(title)+'</strong><p>'+escape(str(row['summary']))+
+        items.append('<li><strong>'+escape(title)+'</strong><p>'+escape(narration_text(row['summary']))+
                      '</p><small>저장된 분석 · '+escape(timestamp(analyzed)+caution)+'</small></li>')
         if len(items) == 4:
             break
