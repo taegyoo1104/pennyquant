@@ -273,3 +273,10 @@ def test_sort_memory_error_is_specific_without_sql_or_data(connection):
     assert '코드 1038' in str(exc.value) and '정렬 메모리' in str(exc.value)
     assert 'PRIVATE' not in str(exc.value) and 'pq_news_analysis' not in str(exc.value)
     repo.close()
+
+
+def test_mysql_timeout_explains_query_limit_without_private_sql():
+    from sessionquant.database.mysql_repository import MySQLRepositoryError
+    failure = MySQLRepositoryError(DriverError(3024, 'PRIVATE password SQL'), 'SELECT')
+    assert failure.code == 3024 and '조회가 제한 시간을 넘겼습니다' in str(failure)
+    assert 'PRIVATE' not in str(failure)

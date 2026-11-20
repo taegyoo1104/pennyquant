@@ -2,7 +2,7 @@
 # Download this script at the reviewed commit and run on the operating VM, pre-open.
 set -Eeuo pipefail
 umask 077
-[[ $EUID == 0 && ${1:-} =~ ^[0-9a-f]{40}$ && $# -le 2 && (${2:-} == '' || ${2:-} == --paused-paper) ]] || { echo 'sudo bash update_preopen.sh 검토한커밋SHA [--paused-paper]' >&2; exit 1; }
+[[ $EUID == 0 && ${1:-} =~ ^[0-9a-f]{40}$ && $# -le 2 && (${2:-} == '' || ${2:-} == --paused-paper || ${2:-} == --resume-retention) ]] || { echo 'sudo bash update_preopen.sh 검토한커밋SHA [--paused-paper|--resume-retention]' >&2; exit 1; }
 [[ $(cat /sys/class/dmi/id/product_name 2>/dev/null) == 'Google Compute Engine' && $(hostname -s) == sessionquant-paper ]] || { echo 'sessionquant-paper VM에서 실행하세요.' >&2; exit 1; }
 cd /opt/sessionquant
 exec 9>/run/sessionquant-update.lock
@@ -13,6 +13,8 @@ for unit in sessionquant-market-close.service sessionquant-cost-guard.service; d
 done
 sq_target=$1
 sq_mode=${2:-}
+sq_resume_head=$(git rev-parse HEAD)
+sq_resume_receipt=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
 git fetch origin refs/heads/main:refs/remotes/origin/main < /dev/null
 sq_stage=$(mktemp -d /var/tmp/sessionquant-update.XXXXXXXX)
 trap 'rm -rf -- "$sq_stage"' EXIT
@@ -35,7 +37,22 @@ print("장전 시간 확인 완료")
 ' < /dev/null
 fi
 }
+check_resume() {
+    [[ "$sq_mode" == --resume-retention ]] || return 0
+    [[ $(git rev-parse HEAD) == "$sq_resume_head" && $(cat /etc/sessionquant/backup-status) == "$sq_resume_receipt" ]] || {
+        echo '재개 준비 중 코드 또는 백업 기록이 변경됐습니다.' >&2; return 1;
+    }
+    grep -q '^FAILED ' /etc/sessionquant/retention-status || {
+        echo '자료 정리 실패 후 중단된 업데이트만 재개할 수 있습니다.' >&2; return 1;
+    }
+    local sq_app
+    sq_app=$(docker compose -f deploy/gcp/compose.yaml ps --status running --services app) || return 1
+    [[ -z "$sq_app" ]] || { echo '프로그램이 실행 중이므로 기존 백업으로 재개하지 않습니다.' >&2; return 1; }
+    docker compose -f deploy/gcp/compose.yaml run --rm --no-deps -T app \
+        python - "$sq_resume_head" "$sq_resume_receipt" < "$sq_stage/deploy/gcp/resume_retention_guard.py"
+}
 check_window
+check_resume
 sq_image="sessionquant:preopen-${sq_target:0:12}"
 docker build --build-arg "SQ_BUILD_REVISION=$sq_target" --build-arg SQ_BUILD_SOURCE=reviewed_archive \
     -t "$sq_image" "$sq_stage" < /dev/null
@@ -44,6 +61,7 @@ check_window
 for unit in sessionquant-market-close.service sessionquant-cost-guard.service; do
     if systemctl is-active --quiet "$unit"; then echo '종료·백업 중에는 업데이트할 수 없습니다.' >&2; exit 1; fi
 done
+check_resume
 # Check unit masks before stopping the current application.
 for path in "$sq_stage"/deploy/gcp/sessionquant*.service "$sq_stage"/deploy/gcp/sessionquant*.timer; do
     [[ $(systemctl is-enabled "$(basename "$path")" 2>/dev/null || true) != masked ]] || { echo '서비스가 점검용으로 차단돼 있습니다.' >&2; exit 1; }
@@ -57,7 +75,15 @@ if [[ "$sq_mode" == --paused-paper ]]; then check_window --stopped; fi
 sq_logging=$("${compose[@]}" exec -T db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -B -e "SELECT @@GLOBAL.log_bin"' < /dev/null)
 [[ "$sq_logging" == 0 ]] || { echo 'DB 변경 기록이 켜져 있습니다. 기존 저장 공간 수정을 먼저 적용하세요.' >&2; exit 1; }
 sq_previous_backup=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
-bash deploy/gcp/backup.sh < /dev/null
+if [[ "$sq_mode" == --resume-retention ]]; then
+    check_resume
+    # Same interrupted deployment: validate the existing fresh upload and
+    # unchanged OFFLINE heartbeat rather than fabricating a new receipt.
+    sq_previous_backup="RESUME $sq_resume_receipt"
+    echo '성공한 최근 백업을 확인했습니다. 중단된 자료 정리 단계부터 재개합니다.'
+else
+    bash deploy/gcp/backup.sh < /dev/null
+fi
 install -d -m 700 /var/lib/sessionquant/update-backups
 sq_backup="/var/lib/sessionquant/update-backups/$(date -u +%Y%m%dT%H%M%SZ)-${sq_target:0:12}"
 python3 "$sq_stage/deploy/gcp/prepare_update.py" --repo /opt/sessionquant --target "$sq_target" --backup "$sq_backup"

@@ -63,10 +63,17 @@ backlog=observability.get('backlog_status','UNKNOWN')
 attention=observability.get('attention','UNKNOWN')
 if backlog not in {'CLEAR','PRESENT','UNKNOWN'} or attention not in {'CLEAR','BACKLOG','UNKNOWN','CAPACITY_REVIEW'}:
     raise ValueError('자료 정리 관측 결과를 확인할 수 없습니다.')
-print(f"{status} scanned={report['scanned']} deleted={report['deleted']} backlog={backlog} attention={attention}")
+for error in report.get("errors", []):
+    print(f"자료 정리 조회 오류: {error['table']} (코드 {error['code']})", file=sys.stderr)
+result_status="FAILED" if report.get("errors") else status
+print(f"{result_status} scanned={report['scanned']} deleted={report['deleted']} backlog={backlog} attention={attention}")
 PY
 )
 chown 1000:1000 "$part"
 mv -- "$part" "$report"
 printf '%s %s\n' "$summary" "$(date -u +%FT%TZ)" > /etc/sessionquant/retention-status
 echo "오래된 자료 정리: $summary · 상세 /var/lib/sessionquant/app/retention-last.json"
+
+# A partial scan caused by a database error is a failed attempt, not normal
+# bounded progress. Keep its report so the next resume can name the table.
+[[ "$summary" != FAILED\ * ]] || exit 1

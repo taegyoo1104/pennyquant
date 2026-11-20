@@ -12,6 +12,8 @@ with open(sys.argv[1], encoding='utf-8') as stream:
     report = json.load(stream)
 if report.get('dry_run') is not False or report.get('status') not in {'COMPLETE','PARTIAL','DISABLED'}:
     raise SystemExit('이번 자료 정리 결과를 확인할 수 없습니다.')
+if report.get('errors'):
+    raise SystemExit('자료 정리 조회 오류: '+', '.join(item['table']+' (코드 '+str(item['code'])+')' for item in report['errors']))
 print('yes' if report['status']=='PARTIAL' or report.get('observability',{}).get('backlog_status')=='PRESENT' else 'no')
 PY
 )

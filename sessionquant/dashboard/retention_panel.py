@@ -102,7 +102,7 @@ def retention_summary(report, now=None):
         'backlog': _rows(observed.get('eligible_backlog_min'), exact=backlog == 'CLEAR'),
         'oldest_eligible_age': _days(observed.get('oldest_eligible_age_days')),
         'stop_reason': {'ROW_LIMIT': '검사 행 수 한도 도달', 'TIME_LIMIT': '검사 시간 한도 도달',
-                        'PASS_COMPLETE': '이번 검사 순회 종료'}.get(observed.get('stop_reason'), '종료 사유 미기록'),
+                        'QUERY_TIMEOUT': 'DB 조회 시간 초과 · 정리 미완료', 'PASS_COMPLETE': '이번 검사 순회 종료'}.get(observed.get('stop_reason'), '종료 사유 미기록'),
         'tables': [],
     }
     for kind, raw in _mapping(report.get('tables')).items():

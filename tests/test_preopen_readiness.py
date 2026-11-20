@@ -118,13 +118,17 @@ def test_prepare_check_and_update_shells_parse_and_do_not_delete_runtime_data():
 
 
 @pytest.mark.parametrize('failure',['','build','backup','upgrade','retention','check','masked'])
-@pytest.mark.parametrize('paused',[False,True])
+@pytest.mark.parametrize('paused',[False,True,'resume'])
 def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,paused):
     import os
     from test_gcp_deployment import executable
+    resume = paused == 'resume'
+    expected_failure = failure if not (resume and failure == 'backup') else ''
     repo=tmp_path/'repo';deploy=repo/'deploy/gcp';deploy.mkdir(parents=True)
     stage=tmp_path/'stage';(stage/'deploy/gcp').mkdir(parents=True)
     etc=tmp_path/'etc';etc.mkdir();(etc/'app.env').write_text('PRIVATE')
+    (etc/'backup-status').write_text('UPLOADED unchanged receipt')
+    (etc/'retention-status').write_text('FAILED interrupted retention')
     data=tmp_path/'data';data.mkdir();(data/'database').write_text('PRESERVED')
     calls=tmp_path/'calls';binpath=tmp_path/'bin';binpath.mkdir()
     (deploy/'sessionquant.service').write_text('fixture unit')
@@ -134,11 +138,12 @@ def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,pa
         (folder/'prepare_update.py').write_text('')
         (folder/'storage_check.py').write_text('')
         (folder/'update_guard.py').write_text('# read-only guard fixture')
+        (folder/'resume_retention_guard.py').write_text('# read-only resume fixture')
     executable(deploy/'backup.sh','echo backup >> "$CALLS"\n[[ "$FAILURE" != backup ]]\n')
     executable(deploy/'retention_after_update.sh','echo retention >> "$CALLS"\n[[ "$FAILURE" != retention ]]\n')
     executable(deploy/'preopen_check.sh','echo check >> "$CALLS"\n[[ "$FAILURE" != check ]]\n')
     executable(binpath/'hostname','echo sessionquant-paper\n')
-    executable(binpath/'git','echo "git $*" >> "$CALLS"\n')
+    executable(binpath/'git','echo "git $*" >> "$CALLS"\nif [[ "$*" == "rev-parse HEAD" ]]; then echo '+ 'b'*40 +' ; fi\n')
     executable(binpath/'tar','cat >/dev/null\n')
     executable(binpath/'mktemp','echo "$STAGE"\n')
     executable(binpath/'python3','echo "python $*" >> "$CALLS"\n')
@@ -149,6 +154,9 @@ exit 0
 ''')
     executable(binpath/'docker','''echo "docker $*" >> "$CALLS"
 if [[ "$1" == build && "$FAILURE" == build ]]; then exit 1; fi
+if [[ "$1" == build && "$FAILURE" == receipt_change ]]; then echo 'UPLOADED changed receipt' > "$BACKUP_STATUS"; fi
+if [[ "$*" == *"ps --status running --services app"* && "$FAILURE" == app_running ]]; then echo app; fi
+if [[ "$*" == *"python - bbbbb"* && "$FAILURE" == resume_guard ]]; then exit 1; fi
 if [[ "$*" == *"sessionquant.portfolio.position_limit_upgrade"* && "$FAILURE" == upgrade ]]; then exit 1; fi
 if [[ "$*" == *"SELECT @@GLOBAL.log_bin"* ]]; then echo 0; fi
 if [[ "$*" == "image inspect"* ]]; then exit 1; fi
@@ -163,25 +171,30 @@ exit 0
         ('/run/sessionquant-update.lock',str(tmp_path/'lock')),('/sys/class/dmi/id/product_name',str(tmp_path/'product')),
         ('$EUID == 0','0 == 0')]:text=text.replace(before,after)
     script.write_text(text)
-    result=subprocess.run(['bash',str(script),'a'*40,*(['--paused-paper'] if paused else [])],capture_output=True,text=True,timeout=15,
-        env={**os.environ,'PATH':str(binpath)+':'+os.environ['PATH'],'CALLS':str(calls),'STAGE':str(stage),'FAILURE':failure})
+    result=subprocess.run(['bash',str(script),'a'*40,*(['--resume-retention'] if resume else ['--paused-paper'] if paused else [])],capture_output=True,text=True,timeout=15,
+        env={**os.environ,'PATH':str(binpath)+':'+os.environ['PATH'],'CALLS':str(calls),'STAGE':str(stage),'FAILURE':failure,'BACKUP_STATUS':str(etc/'backup-status')})
     log=calls.read_text()
-    assert (result.returncode==0)==(not failure),result.stderr
-    assert ('systemctl start sessionquant.service' in log)==(not failure)
+    assert (result.returncode==0)==(not expected_failure),result.stderr
+    assert ('systemctl start sessionquant.service' in log)==(not expected_failure)
     assert (etc/'app.env').read_text()=='PRIVATE' and (data/'database').read_text()=='PRESERVED'
     if failure in ('build','masked'):assert 'systemctl stop sessionquant.service' not in log
     if failure=='upgrade':
-        assert 'backup\n' in log and 'check\n' not in log
+        assert ('backup\n' in log) is (not resume) and 'check\n' not in log
     if failure=='retention':
-        assert 'backup\n' in log and 'retention\n' in log and 'check\n' not in log
-    if not failure:
+        assert ('backup\n' in log) is (not resume) and 'retention\n' in log and 'check\n' not in log
+    if not expected_failure:
         assert 'docker build --build-arg SQ_BUILD_REVISION='+'a'*40+' --build-arg SQ_BUILD_SOURCE=reviewed_archive' in log
-        if paused:
+        if paused is True:
             assert sum(line.endswith('run --rm --no-deps -T app python -') for line in log.splitlines())==2
             assert sum(line.endswith('run --rm --no-deps -T app python - --stopped') for line in log.splitlines())==1
-        assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
-        assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
-        assert log.index('backup\n')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
+        if resume:
+            assert 'backup\n' not in log
+            assert log.count('python - '+ 'b'*40 +' UPLOADED unchanged receipt') == 3
+            assert (etc/'backup-status').read_text() == 'UPLOADED unchanged receipt'
+        else:
+            assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
+            assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
+            assert log.index('backup\n')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
         assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('retention\n')<log.index('check\n')
         assert 'is-active --quiet sessionquant-market-close.timer' in log
         assert 'is-active --quiet sessionquant-storage-guard.timer' in log
@@ -217,3 +230,11 @@ fi
     assert not list(tmp_path.glob('sq-toss-check.*'))
     log=calls.read_text()
     assert ' run ' not in log or 'check-toss --symbol AAPL' in log
+
+
+@pytest.mark.parametrize('failure', ['resume_guard', 'app_running', 'receipt_change'])
+def test_update_resume_refuses_unproven_backup_or_running_app(tmp_path, failure):
+    test_update_sequence_does_not_start_app_on_failed_checks(tmp_path, failure, 'resume')
+    log = (tmp_path/'calls').read_text()
+    assert '--backup ' not in log and 'retention\n' not in log
+    assert 'docker tag' not in log
