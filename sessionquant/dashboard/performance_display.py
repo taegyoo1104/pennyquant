@@ -93,7 +93,7 @@ def daily_chart_spec(field):
     money = field == '총자산'
     digits = "format((datum.value < 0 ? ceil(datum.value * 100) : floor(datum.value * 100)) / 100, '.2f')"
     # The heading is a normal Streamlit element, outside the canvas clipping box.
-    spec = {'height':220, 'padding':12,
+    spec = {'height':220, 'padding':{'left':12,'right':12,'top':12,'bottom':12},
         'mark':{'type':'line','point':True,'color':'#7ec8ff','invalid':'break-paths-show-domains'} if money else {'type':'bar','size':24},
         'encoding':{
             'x':{'field':'거래일','type':'ordinal','sort':'ascending','title':'미국 거래일',
