@@ -92,6 +92,26 @@ def test_missing_metrics_expire_grace_without_mid_slot_replacement():
     assert select(m,opened+timedelta(minutes=30))==['B']
 
 
+def test_empty_preopen_focus_recovers_only_after_fresh_inputs_return():
+    from copy import deepcopy
+    m=manager();opened=session_bounds(NOW)[0]
+    before=opened-timedelta(hours=2)
+    assert select(m,before,100,10)==['A']
+    # Restore a previously selected slot after an update/long data interruption.
+    restarted=manager();restarted.state=deepcopy(m.state)
+    later=before+timedelta(minutes=40)
+    old=[metric('A',100,before),metric('B',10,before)]
+    choose_scheduled(restarted,old,later)
+    assert restarted.state['focus']==[]
+    choose_scheduled(restarted,old,later+timedelta(seconds=1))
+    assert restarted.state['focus']==[]  # Old prices do not become current evidence.
+    assert select(restarted,later+timedelta(seconds=2))==['B']
+    assert restarted.state['focus_schedule']['status']=='PREOPEN'
+    assert restarted.state['focus_schedule']['next_at']==opened.isoformat()
+    assert select(restarted,later+timedelta(seconds=3),1000,10)==['B']
+    assert select(restarted,opened,1000,10)==['A']
+
+
 @pytest.mark.parametrize('day,open_hour',[('2026-07-07',13),('2026-11-19',14)])
 def test_dst_preopen_and_new_session_reset(day,open_hour):
     m=manager();opened=datetime.fromisoformat(day).replace(hour=open_hour,minute=30,tzinfo=timezone.utc)
@@ -139,4 +159,40 @@ async def test_manager_persists_membership_and_slot_across_restart_and_blocks_st
         assert all(m.entry_blockers(s,at) for s in original)
         observe(NOW+timedelta(minutes=30),True)
         assert set(m.focus(NOW+timedelta(minutes=30)))!=original
+    finally:repo.close()
+
+
+async def test_preopen_restart_republishes_focus_before_trading_is_started(tmp_path):
+    from sessionquant.watchlist.selection import WatchlistManager, VIEW
+    from sessionquant.dashboard.operations_overview import home_focus
+    from sessionquant.dashboard.session_app import DashboardData
+    repo,universe,cfg,provider,_=context(tmp_path,count=12,size=12)
+    before=NOW.replace(hour=13)
+    for key in ('as_of_at','known_at','received_at'):
+        provider.batch[key]=(before-timedelta(hours=1)).isoformat()
+    cfg=replace(cfg,strategy='pullback_simple',focus_selection='turnover',focus_rebalance_minutes=30,focus_size=10)
+    m=WatchlistManager(repo,universe,cfg,provider=provider,allow_synthetic=True)
+    try:
+        await m.refresh(before)
+        symbols=m.light_symbols(before)
+        def observe(at):
+            m.observe_prices([{'symbol':s,'lastPrice':'100','timestamp':at.isoformat(),'currency':'USD'} for s in symbols],at)
+            m.observe_rankings({'rankedAt':at.isoformat(),'rankings':[{'symbol':s,'currency':'USD',
+                'tradingAmount':str(100-i),'tradingVolume':'1000'} for i,s in enumerate(symbols)]},at)
+        observe(before);m.publish(before)
+        assert repo.get_control(VIEW)['focus_count']==10
+        m=WatchlistManager(repo,universe,cfg,provider=provider,allow_synthetic=True)
+        resumed=before+timedelta(minutes=40)
+        m.publish(resumed)
+        assert repo.get_control(VIEW)['focus_count']==0
+        assert all(m.entry_blockers(s,resumed) for s in symbols)
+        observe(resumed);m.publish(resumed)
+        view=repo.get_control(VIEW)
+        assert view['focus_count']==10
+        data=DashboardData(watchlist_state=view,engine_state={'mode':'paper','armed':True,
+            'running':False,'status':'WAITING','heartbeat':resumed.isoformat()})
+        cards=home_focus(data,{'quotes':{}},resumed)
+        assert len(cards)==10 and all(c['monitored'] and c['title']=='개장 대기' for c in cards)
+        restored=WatchlistManager(repo,universe,cfg,provider=provider,allow_synthetic=True)
+        assert set(restored.focus(resumed))==set(m.focus(resumed))
     finally:repo.close()

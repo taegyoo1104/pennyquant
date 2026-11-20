@@ -25,7 +25,11 @@ def choose_scheduled(manager, metrics, now):
     boundary = opened if preopen else min(opened + ((now-opened)//step)*step,closed)
     slot = session+':preopen' if preopen else boundary.isoformat()
     next_at = opened if preopen else min(boundary+step,closed)
-    due = now < closed and (schedule.get('slot') != slot or not schedule.get('selected_once'))
+    # A restart can expire every member while today's preopen slot stays marked
+    # selected. Retry an empty preparation list using fresh inputs; intraday
+    # membership still waits for the next opening-bell boundary.
+    due = now < closed and (schedule.get('slot') != slot or not schedule.get('selected_once')
+                           or (preopen and not previous))
     protected, pending = set(), False
     if due and not preopen and manager.pattern_provider:
         five = now.replace(second=0,microsecond=0)-timedelta(minutes=now.minute%5)
