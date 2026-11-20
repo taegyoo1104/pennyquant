@@ -67,7 +67,7 @@ def test_market_view_does_not_fetch_unused_history_or_news(database):
 
 
 @pytest.mark.parametrize('page,excluded', [
-    ('대시보드', 'market_bars'), ('전략·백테스트', 'news_events'),
+    ('대시보드', 'market_bars'), ('전략·백테스트', 'news_events'), ('전략·백테스트', 'account_snapshots'),
     ('매매 내역', 'pipeline_status'), ('뉴스·LLM', 'market_bars'),
     ('시스템·설정', 'news_events'),
 ])

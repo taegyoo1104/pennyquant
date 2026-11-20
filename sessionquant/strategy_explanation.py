@@ -135,15 +135,31 @@ class StrategyExplainer:
         self.repo.set_control(VIEW, result)
         return result
 
+    def _publish_session_wait(self, now, bounds):
+        """Explain a scheduled pause without retrying AI or renewing an old failure."""
+        status = 'PREOPEN' if bounds and now < bounds[0] else 'POSTCLOSE' if bounds else 'SESSION_WAIT'
+        opens_at = bounds[0].isoformat() if bounds else None
+        previous = self.repo.get_control(VIEW, {}) or {}
+        if previous.get('status') == status and previous.get('opens_at') == opens_at:
+            return
+        result = {'status':status, 'as_of':now.isoformat(), 'opens_at':opens_at,
+                  'role':'EXPLANATION_ONLY', 'live_orders_enabled':False}
+        attempt = (previous.get('previous_attempt') or {}) if previous.get('status') in {
+            'PREOPEN','POSTCLOSE','SESSION_WAIT'} else previous
+        if attempt.get('status') and attempt['status'] != 'SUCCEEDED':
+            result['previous_attempt'] = {key:attempt[key] for key in ('status','as_of','limit_reason') if key in attempt}
+        self._publish(result)
+
     async def refresh(self, data, now):
         now=utc(now)
+        if not self.settings.enabled:return None
         if self.settings.regular_session_only:
             from .market.bars import session_bounds
             bounds = session_bounds(now)
             if not bounds or not bounds[0] <= now < bounds[1]:
+                self._publish_session_wait(now, bounds)
                 return None
         key=fingerprint(data);state=self.state
-        if not self.settings.enabled:return None
         # The schedule marker can survive an interrupted view write. Reuse only
         # persisted content, and clear a later failed refresh when facts return
         # to the last successful snapshot without spending another attempt.

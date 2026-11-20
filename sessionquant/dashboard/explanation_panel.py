@@ -9,6 +9,7 @@ from .labels import LABELS
 _STRATEGY_CODE = re.compile(
     r'(?<![A-Za-z0-9_])(?:pullback_simple|pullback|momentum|gap_breakout|vwap)(?![A-Za-z0-9_])'
 )
+SESSION_WAITS = {'PREOPEN', 'POSTCLOSE', 'SESSION_WAIT'}
 
 
 def missing_strategy_decision(view):
@@ -52,6 +53,9 @@ def explanation_section(view, key, title):
 
 def explanation_status(view):
     """Use bounded reason codes, never raw provider errors or credentials."""
+    if view.get('status') == 'PREOPEN':
+        from .session_app import timestamp
+        return '개장 대기 · '+timestamp(view.get('opens_at'))+'부터 새 AI 브리핑을 준비합니다.'
     if view.get('status') == 'BUDGET_BLOCKED':
         return {
             'HOURLY_CALL_CAP': '시간당 AI 호출 한도에 도달했습니다. 다음 UTC 정시 이후 다시 확인합니다.',
@@ -60,6 +64,8 @@ def explanation_status(view):
             'PROVIDER_COOLDOWN': 'AI 제공 서비스의 오류·요청 제한으로 재시도를 기다립니다.',
         }.get(view.get('limit_reason'), 'AI 호출·금액 한도 또는 제공 서비스의 대기 제한에 걸렸습니다. 이전 기록에는 상세 사유가 없습니다.')
     return {
+        'POSTCLOSE': '정규장이 끝나 새 AI 브리핑을 쉬고 있습니다. 다음 정규장에 다시 준비합니다.',
+        'SESSION_WAIT': '정규장 일정 확인 대기 · 정규장 시간이 확인되면 새 AI 브리핑을 준비합니다.',
         'NO_KEY': 'AI 연결 설정이 필요합니다.',
         'DAILY_LIMIT': '오늘의 AI 설명 횟수를 모두 사용했습니다. 한국시간 오전 9시 이후 다시 확인합니다.',
         'INVALID_RESPONSE': '새 AI 답변을 검증하지 못했습니다.',
@@ -74,6 +80,14 @@ def saved_explanation(view):
         return view
     saved = view.get('last_success') or {}
     return saved if saved.get('status') == 'SUCCEEDED' else {}
+
+
+def render_previous_attempt(view):
+    from .session_app import timestamp
+    previous = view.get('previous_attempt') or {}
+    if view.get('status') in SESSION_WAITS and previous:
+        st.caption('이전 분석 시도 · '+timestamp(previous.get('as_of'))+' · '+explanation_status(previous)+
+                   ' 현재 한도 상태를 다시 확인한 결과는 아닙니다.')
 
 
 def render_explanation_summary(view):
@@ -91,12 +105,14 @@ def render_explanation_summary(view):
             detail += ' · 합성 자료 설명'
     else:
         content = '<p>'+escape(explanation_status(view))+'</p>'
-        detail = '정규장 중 새 설명이 준비되면 표시합니다.'
+        detail = ('장전에는 새 AI 브리핑을 요청하지 않습니다. 뉴스 기사 수집은 별도로 진행합니다.'
+                  if view.get('status') == 'PREOPEN' else '새 설명이 준비되면 표시합니다.')
     st.markdown('<div class="sq-ai"><h3>AI 브리핑</h3>'+content+'<small>'+escape(detail)+'</small></div>', unsafe_allow_html=True)
     if saved and view.get('status') != 'SUCCEEDED':
         st.caption('새 분석 대기 · '+explanation_status(view)+' 위 내용은 이전 분석 시점의 설명입니다.')
     if saved and missing_strategy_decision(saved):
         st.caption('전략 판단 기록이 없어 해당 부분은 AI의 원인 추정 대신 기록 상태를 표시합니다.')
+    render_previous_attempt(view)
     st.caption('AI는 판단을 설명합니다. 매수·매도는 정한 전략과 주문 제한에 따라 결정합니다.')
 
 
@@ -105,8 +121,9 @@ def render_explanation(view):
     from .session_app import timestamp
     with st.expander('AI 설명 · 시장 / 전략 판단 / 모의 체결',expanded=True):
         if view.get('status')!='SUCCEEDED':
-            st.caption('새 분석 시도 · 입력 시점 '+timestamp(view.get('as_of')))
-            st.info(explanation_status(view)+' · 규칙 기반 매매는 계속합니다.')
+            st.caption(('대기 상태 확인 · ' if view.get('status') in SESSION_WAITS else '새 분석 시도 · 입력 시점 ')+timestamp(view.get('as_of')))
+            st.info(explanation_status(view))
+            render_previous_attempt(view)
             view = saved_explanation(view)
             if not view:
                 return

@@ -80,6 +80,22 @@ def test_preopen_postclose_and_previous_session_are_not_drawn_as_today():
     assert feed.snapshot()['points']['SPY']==[]
 
 
+def test_preopen_chart_explains_wait_without_hiding_connection_failures():
+    now=NOW.replace(hour=13)
+    feed=ready(now=now)
+    waiting=card(feed,now)
+    assert waiting['price_status']=='개장 대기' and not waiting['points']
+    html=benchmark_cards_html([waiting])
+    assert '11.19 23:30 KST' in html and '장전에는 정규장 차트를 그리지 않아요' in html
+    feed.invalidate('BACKOFF')
+    assert card(feed,now)['price_status']=='재접속 중'
+    feed.clock=lambda:NOW
+    feed.state='CONNECTED';feed.acknowledged=True
+    opened=card(feed,NOW)
+    assert '개장 대기' not in benchmark_cards_html([opened])
+    assert opened['price_status']=='새 체결 대기'
+
+
 def test_restart_retains_history_without_freshness_and_rejects_old_generation():
     feed=ready();feed.accept(trade(),feed.segment)
     snapshot=feed.snapshot()

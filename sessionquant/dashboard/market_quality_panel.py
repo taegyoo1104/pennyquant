@@ -61,7 +61,12 @@ def render_quality(state, *, performance=None, details=True, show_benchmarks=Tru
     from .session_app import _table, timestamp
     now = datetime.now(timezone.utc)
     report = current_report(state, now)
+    from ..market.bars import session_bounds
+    bounds = session_bounds(now)
+    preopen = bool(bounds and now < bounds[0] and not report['synthetic'])
     st.subheader('시세·거래 적격성·RVOL 데이터 품질')
+    if preopen:
+        st.info('개장 대기 · '+timestamp(bounds[0])+'부터 당일 정규장 분봉을 모읍니다. 장전 호가 수신과 연결 상태는 아래에서 별도로 확인합니다.')
     times = sorted({utc(row['observed_at']) for row in report['items'] if row.get('evaluation_age_seconds') is not None})
     evaluated = timestamp(times[0]) if times else '—'
     if len(times)>1:evaluated += ' ~ '+timestamp(times[-1])
@@ -81,7 +86,8 @@ def render_quality(state, *, performance=None, details=True, show_benchmarks=Tru
         help_text = ('현재 전략에 전달할 수 있는 RVOL이 있는 종목 수입니다. 매수 승인 수나 RVOL 배수가 아닙니다.'
                      if key == 'strategy_rvol' else '실제 계좌 권한 확인 수입니다. 모의매매 허용 여부와 다릅니다.'
                      if key == 'eligibility' else None)
-        column.metric(label, coverage_display(report, key), help=help_text)
+        pending = preopen and key in {'minute_history', 'five_bars', 'fifteen_bars'}
+        column.metric(label, '개장 대기' if pending else coverage_display(report, key), help=help_text)
     st.caption('전략 RVOL은 계산값·시세·확정봉 조건을 확인한 수입니다. 분할 비교 근거 검증은 아래 표에서 별도로 표시합니다.')
     _table([{'차단 사유':code,'종목 수':count} for code,count in report['blocker_counts'].items()],
            '아직 평가한 종목이 없습니다. 입력 미확인은 매수 허가가 아닙니다.')

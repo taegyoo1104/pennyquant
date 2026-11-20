@@ -186,12 +186,39 @@ async def test_session_only_explanation_preserves_budget_until_regular_open(tmp_
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:clock[0])
         service=StrategyExplainer(repo,analyzer,{'enabled':True,'regular_session_only':True})
-        for at in (NOW.replace(hour=13),NOW.replace(hour=21),NOW+timedelta(days=1)):
+        for at, status in ((NOW.replace(hour=13),'PREOPEN'),(NOW.replace(hour=21),'POSTCLOSE'),
+                           (NOW+timedelta(days=1),'SESSION_WAIT')):
             assert await service.refresh(inputs(),at) is None
+            assert repo.get_control(VIEW)['status']==status
         assert not calls and not service.state
         clock[0]=NOW.replace(hour=14,minute=30)
         assert (await service.refresh(inputs(),clock[0]))['status']=='SUCCEEDED'
         assert len(calls)==1
+    repo.close()
+
+
+async def test_preopen_wait_keeps_previous_limit_and_success_without_spending_or_rewriting_each_tick(tmp_path):
+    from sessionquant.strategy_explanation import STATE
+    repo=Repository(tmp_path/'preopen-status.db',backend='sqlite')
+    saved={'status':'SUCCEEDED','as_of':'2026-11-12T18:00:00Z',
+           'sections':{'market':{'text':'이전 분석 내용입니다.'}}}
+    failure={'status':'BUDGET_BLOCKED','as_of':'2026-11-12T18:05:00Z','last_success':saved}
+    repo.set_control(VIEW,failure)
+    at=NOW.replace(hour=13)
+    def forbidden(req):
+        raise AssertionError('장전에는 AI 요청을 하지 않습니다.')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(forbidden)) as client:
+        analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:at)
+        service=StrategyExplainer(repo,analyzer,{'enabled':True,'regular_session_only':True})
+        assert await service.refresh(inputs(),at) is None
+        waiting=repo.get_control(VIEW)
+        assert waiting['status']=='PREOPEN' and waiting['opens_at']=='2026-11-13T14:30:00+00:00'
+        assert waiting['previous_attempt']=={'status':'BUDGET_BLOCKED','as_of':failure['as_of']}
+        assert waiting['last_success']==saved
+        assert await service.refresh(inputs(),at+timedelta(seconds=10)) is None
+        assert repo.get_control(VIEW)==waiting
+        assert repo.get_control(STATE) is None and not service.state
+        assert not repo.all('llm_calls') and not repo.all('orders')
     repo.close()
 
 

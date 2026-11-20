@@ -231,13 +231,10 @@ def render_account_overview(data,view,path,usage_path=None,usage_environment=Non
 
 def render_strategies(data,view):
     import streamlit as st
-    from .session_app import _table
     st.subheader('전략·백테스트 · 저장된 결과만 표시')
     render_research_report()
     st.caption('Momentum / Pullback / Gap Breakout / VWAP · 합성 데모와 실제 외표본 검증을 구분합니다.')
-    render_asset_curve(data)
-    from .performance_display import performance_rows
-    _table(performance_rows(data.tables['daily_performance']),'비교 가능한 전략 성과 기록 미확인 · 수익률/MDD/PF/기대수익/MFE·MAE/외표본은 N/A')
+    render_daily_performance(data)
     risk=data.context.get('macro_reference_risk') or {}
     st.write('시장 참고 위험 필터: '+str(risk.get('mode','미확인')))
     st.caption('필터 ON/OFF 성과 비교·표본 수·외표본 기간은 연구 보고서가 없으면 N/A입니다.')
@@ -334,14 +331,24 @@ def render_research_report():
     except (ValueError,TypeError,KeyError,AttributeError):st.warning('지원하는 평가 보고서가 아닙니다. 값을 생성하지 않습니다.')
 
 
-def render_asset_curve(data):
+def render_daily_performance(data):
     import streamlit as st
-    from .performance_display import asset_curve_points, asset_chart_spec
-    points = asset_curve_points(data.tables['account_snapshots'], datetime.now(timezone.utc))
+    from .session_app import _table
+    from .performance_display import daily_performance_points, daily_performance_rows, daily_chart_spec
+    points = daily_performance_points(data.tables['daily_performance'], datetime.now(timezone.utc))
+    st.subheader('일별 모의매매 성과')
+    st.caption('미국 날짜 기준 하루의 마지막 저장값입니다. 오늘 값은 새 기록을 조회할 때 같은 날짜에서 갱신됩니다. 마지막 기록 시각은 한국시간입니다.')
     if points:
         import pandas as pd
         frame = pd.DataFrame(points)
-        for field in ('장부 평가자산', '장부 낙폭'):
-            st.vega_lite_chart(frame, asset_chart_spec(field), width='stretch')
-        st.caption('금액·비율은 소수점 둘째 자리까지 버림 표시합니다. 차트 선과 원본 계산값은 정밀도를 유지합니다. 낙폭은 최고 평가자산 대비 하락률(%)입니다.')
-    else:st.caption('자산곡선·낙폭: 시각이 검증된 자산 스냅샷 없음 · N/A')
+        for field in ('총자산', '일간 수익률'):
+            if any(p[field] is not None for p in points):
+                st.vega_lite_chart(frame, daily_chart_spec(field), width='stretch')
+            else:
+                st.caption(field+'을 계산할 기준 자료가 없습니다.')
+        _table(daily_performance_rows(points))
+        st.caption('일간 수익률 = (총자산 ÷ 하루 시작 자산 − 1) × 100. 보유 종목의 평가손익과 이미 낸 수수료를 포함합니다. 기준 자료가 없으면 —로 표시합니다.')
+        st.caption('누적 실현손익($)은 이 모의 장부에서 매도로 확정된 손익의 합계이며, 하루 손익이나 수익률이 아닙니다. 신규 매수 중지는 손실 한도에 따른 중지 여부입니다.')
+        st.caption('표·축·도움말은 소수점 둘째 자리까지 버림 표시합니다. 차트 좌표와 원본 장부는 정밀도를 유지합니다. 최근 최대 2,000일 기록을 표시합니다.')
+    else:
+        st.info('아직 날짜와 시각이 확인된 일별 성과 기록이 없습니다.')

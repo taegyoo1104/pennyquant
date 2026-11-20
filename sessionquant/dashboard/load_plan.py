@@ -33,7 +33,7 @@ PAGE_CONTROLS = {
 PAGE_TABLES = {
     '대시보드': dict.fromkeys(('executions', 'news_events', 'news_analysis', 'quote_snapshots', 'news_ingestions'), 300),
     '시장·종목': {'market_regimes': 1, 'quote_snapshots': 300, 'candidates': 300, 'economic_events': 200},
-    '전략·백테스트': {'account_snapshots': 2000, 'daily_performance': 2000},
+    '전략·백테스트': {'daily_performance': 2000},
     '매매 내역': {'session_state': 1, 'positions': 2000, 'account_snapshots': 1, 'quote_snapshots': 300,
                  'orders': 2000, 'executions': 2000, 'alerts': 300},
     '뉴스·LLM': dict.fromkeys(('news_events', 'news_analysis', 'macro_news', 'macro_analysis',
