@@ -343,6 +343,7 @@ def render_daily_performance(data):
         frame = pd.DataFrame(points)
         for field in ('총자산', '일간 수익률'):
             if any(p[field] is not None for p in points):
+                st.markdown('**'+('일별 총자산 ($)' if field=='총자산' else '일간 수익률 (%)')+'**')
                 st.vega_lite_chart(frame, daily_chart_spec(field), width='stretch')
             else:
                 st.caption(field+'을 계산할 기준 자료가 없습니다.')

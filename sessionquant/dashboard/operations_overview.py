@@ -185,7 +185,9 @@ def render_operations(data, view, path, *, panel=None):
         else:
             st.caption('오늘 감시할 미국 주식 후보를 준비하고 있어요.')
     schedule = (data.watchlist_state or {}).get('focus_schedule') or {}
-    if schedule.get('next_at'):
+    if schedule.get('status') == 'PREOPEN' and schedule.get('next_at'):
+        st.caption('장전 관찰 목록 · 개장 시 다시 선정 · '+timestamp(schedule['next_at']))
+    elif schedule.get('next_at'):
         st.caption('30분마다 목록 확인 · 다음 '+timestamp(schedule['next_at']))
     st.markdown(focus_cards_html(focus), unsafe_allow_html=True)
     if data.context.get('strategy') == 'pullback_simple':
