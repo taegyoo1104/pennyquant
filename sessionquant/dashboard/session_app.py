@@ -60,6 +60,7 @@ class DashboardData:
     news_flow: dict = field(default_factory=dict)
     warmup: dict = field(default_factory=dict)
     engine_state: dict = field(default_factory=dict)
+    retention: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:
@@ -143,7 +144,7 @@ def load_database(path: str | Path, *, page=None, news_section=None, panel=None)
         from contextlib import nullcontext
         with repository.transaction() if hasattr(repository,'transaction') else nullcontext():
             if include_state:
-                result.state = read('state', repository.load_state) or {}
+                result.state = read('state', repository.load_dashboard_state if page == '대시보드' else repository.load_state) or {}
             for name in controls:
                 key, _ = CONTROLS[name]
                 value = read(name, lambda: repository.get_control(key))
@@ -160,6 +161,20 @@ def load_database(path: str | Path, *, page=None, news_section=None, panel=None)
             for name, limit in tables.items():
                 if name in KINDS:
                     result.tables[name] = read(name, lambda: repository.recent(name, limit=limit))
+            if page == '대시보드' and include_state and result.tables['executions']:
+                latest = max(result.tables['executions'], key=lambda row: str(row.get('timestamp') or row.get('filled_at') or ''))
+                client_id = latest.get('client_id')
+                own_reason = latest.get('reason')
+                if (str(latest.get('side')).lower() == 'sell' and isinstance(client_id, str) and client_id
+                        and not (isinstance(own_reason, str) and own_reason.strip())):
+                    def order_reasons():
+                        stored = repository.load_dashboard_order(client_id)
+                        if stored:
+                            result.state.setdefault('broker', {}).setdefault('orders', {})[client_id] = stored
+                        order = repository.load_dashboard_order(client_id, recovery_state=False)
+                        if order:
+                            result.tables['orders'] = [order]
+                    read('latest_order', order_reasons)
             if include_fred:
                 result.fred_references = read('fred_references', lambda: repository.recent('fred_reference_observations', limit=30))
             if include_news:

@@ -37,7 +37,7 @@ def credit_summary(repo,now=None):
     if checked>now:
         result['credit_uncertainty'].append('manual_check_in_future');return result
     cost=Decimal(0);unknown=False
-    for _,row in repo.iter_records('llm_usage'):
+    for row in repo.iter_credit_usage(checked):
         try:
             settled=utc(row['timestamp'])
             if settled>now:continue

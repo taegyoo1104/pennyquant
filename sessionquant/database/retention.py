@@ -110,13 +110,114 @@ def _unused(kind, metadata, cutoff, protected):
     if kind == "pipeline_status" and metadata.get("id") in protected["selection"]:
         return False
     for key, value in metadata.items():
-        if (key.endswith("_at") or key == "valid_until") and value is not None:
+        if (key.endswith("_at") or key in {"timestamp", "valid_until"}) and value is not None:
             try:
                 if utc(value) >= cutoff:
                     return False
             except (ValueError, TypeError, AttributeError, OverflowError):
                 return False  # Unknown dates cannot prove expiry.
     return True
+
+
+def _generation_baseline(previous, kind, now):
+    try:
+        generation = previous["tables"][kind]["observation"]["generation"]
+        sequence, measured = generation["high_water_seq"], utc(generation["measured_at"])
+        if type(sequence) is int and sequence >= 0 and measured < now:
+            return sequence, measured
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+        pass
+    return None
+
+
+def _observe_retention(repo, report, previous, protected, removed_sequences, deadline, clock, now):
+    """Use only spare cleanup budget; capped samples never imply an empty backlog."""
+    remaining = min(2000, report["policy"]["max_rows"] - report["scanned"])
+    summary = {"backlog_status": "UNKNOWN", "eligible_backlog_min": None,
+               "oldest_eligible_age_days": None, "observation_scanned": 0}
+    report["observability"] = summary
+
+    def read(sql, params, limit):
+        nonlocal remaining
+        milliseconds = min(250, int((deadline - clock()) * 1000))
+        if milliseconds < 1 or limit < 1 or remaining < limit:
+            raise TimeoutError("관측 예산 소진")
+        rows = repo._execute(f"SELECT /*+ MAX_EXECUTION_TIME({milliseconds}) */ {sql}", params, fetch="all")
+        remaining -= len(rows)
+        summary["observation_scanned"] += len(rows)
+        if clock() >= deadline:
+            raise TimeoutError("관측 예산 소진")
+        return rows
+
+    for index, (kind, age, condition) in enumerate(RULES):
+        observation = {"backlog_status": "UNKNOWN", "eligible_rows_min": None, "backlog_exact": False,
+                       "oldest_eligible_age_days": None, "oldest_eligible_at": None,
+                       "generation": {"rows_min": None, "exact": False, "interval_seconds": None,
+                                      "measured_at": None, "high_water_seq": None}}
+        report["tables"][kind]["observation"] = observation
+        quota = min(128, remaining // (len(RULES) - index))
+        if quota < 3 or clock() >= deadline:
+            continue
+        baseline = _generation_baseline(previous, kind, now)
+        cutoff = now - timedelta(days=report["policy"][age])
+        try:
+            # An index endpoint is a baseline, never an insertion count. Sequence
+            # gaps and other namespaces must not be counted as generated rows.
+            endpoint = read(f"seq FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
+                            "WHERE namespace=%s ORDER BY seq DESC LIMIT 1", (repo.namespace,), 1)
+            high_water = max(endpoint[0][0] if endpoint else 0, removed_sequences[kind]["highest"],
+                             baseline[0] if baseline else 0)
+            generation = observation["generation"]
+            generation.update(high_water_seq=high_water, measured_at=now.isoformat())
+            backlog_limit = (quota - 1) // 2 if baseline else quota - 1
+            rows = read(f"seq,captured_at,created_at,updated_at,({_projection(kind)}),({condition}) "
+                        f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
+                        "WHERE namespace=%s AND captured_at<%s ORDER BY captured_at,seq LIMIT %s",
+                        (repo.namespace, cutoff.replace(tzinfo=None), backlog_limit), backlog_limit)
+            eligible = [captured for _, captured, created, updated, data, allowed in rows
+                        if allowed and max(created, updated) < cutoff.replace(tzinfo=None)
+                        and _unused(kind, _decode(data), cutoff, protected)]
+            exact = len(rows) < backlog_limit
+            observation.update(backlog_status="PRESENT" if eligible else "CLEAR" if exact else "UNKNOWN",
+                               eligible_rows_min=len(eligible) if eligible or exact else None, backlog_exact=exact)
+            if eligible:
+                oldest = min(eligible).replace(tzinfo=timezone.utc)
+                observation.update(oldest_eligible_at=oldest.isoformat(),
+                                   oldest_eligible_age_days=round((now - oldest).total_seconds() / 86400, 3))
+            if baseline:
+                generation_limit = quota - 1 - backlog_limit
+                arrivals = read(f"seq,({condition}) FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
+                                "WHERE namespace=%s AND seq>%s AND seq<=%s ORDER BY seq LIMIT %s",
+                                (repo.namespace, baseline[0], high_water, generation_limit), generation_limit)
+                generation.update(rows_min=sum(bool(allowed) for _, allowed in arrivals) + removed_sequences[kind]["new_min"],
+                                  exact=len(arrivals) < generation_limit and removed_sequences[kind]["exact"],
+                                  interval_seconds=(now - baseline[1]).total_seconds())
+        except Exception as exc:
+            # A failed read is unknown observability, not a reason to broaden
+            # deletion or discard already committed maintenance results.
+            observation["error"] = type(exc).__name__
+            observation["generation"] = {"rows_min": None, "exact": False, "interval_seconds": None,
+                                         "measured_at": None, "high_water_seq": None}
+    observations = [table["observation"] for table in report["tables"].values()]
+    present = [row for row in observations if row["backlog_status"] == "PRESENT"]
+    if present:
+        summary.update(backlog_status="PRESENT", eligible_backlog_min=sum(row["eligible_rows_min"] for row in present),
+                       oldest_eligible_age_days=max(row["oldest_eligible_age_days"] for row in present))
+    elif all(row["backlog_status"] == "CLEAR" for row in observations):
+        summary.update(backlog_status="CLEAR", eligible_backlog_min=0)
+    limited = report["status"] == "PARTIAL"
+    prior_observability = previous.get("observability", {})
+    prior_limits = prior_observability.get("budget_limited_runs", 0) if isinstance(prior_observability, dict) else 0
+    repeated = (prior_limits if type(prior_limits) is int and prior_limits >= 0 else 0) + 1 if limited else 0
+    capacity_review = repeated >= 2 or any(
+        row["observation"]["backlog_status"] == "PRESENT"
+        and row["observation"]["generation"]["rows_min"] is not None
+        and row["observation"]["generation"]["rows_min"] > row["deleted"] for row in report["tables"].values())
+    summary.update(stop_reason="PASS_COMPLETE" if not limited else "ROW_LIMIT"
+                   if report["scanned"] >= report["policy"]["max_rows"] else "TIME_LIMIT",
+                   budget_limited_runs=repeated, attention="CAPACITY_REVIEW" if capacity_review else
+                   "BACKLOG" if present else summary["backlog_status"])
+    report["inspected"] = report["scanned"] + summary["observation_scanned"]
 
 
 def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, now=None, clock=monotonic):
@@ -135,6 +236,10 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
     deadline = clock() + policy.max_seconds
     with repo.engine_lease() if apply else nullcontext():
         protected = _protected_ids(repo, deadline, clock)
+        previous = repo.get_control(REPORT, {})
+        if not isinstance(previous, dict) or previous.get("namespace") != repo.namespace:
+            previous = {}
+        removed_sequences = {kind: {"highest": 0, "new_min": 0, "exact": True} for kind, _, _ in RULES}
         saved = repo.get_control(CURSORS, {}) if apply else {}
         identity = {"version": 1, "diagnostics_days": policy.diagnostics_days, "news_days": policy.news_days}
         cursors = saved.get("positions", {}) if isinstance(saved, dict) and saved.get("policy") == identity else {}
@@ -185,6 +290,12 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     removed = repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s AND seq IN ({placeholders}) "
                                             f"AND captured_at<%s AND created_at<%s AND updated_at<%s AND ({condition})",
                                             (repo.namespace, *selected, naive, naive, naive))
+                    removed_sequences[kind]["highest"] = max(removed_sequences[kind]["highest"], max(selected))
+                    baseline = _generation_baseline(previous, kind, now)
+                    if baseline:
+                        old_selected = sum(seq <= baseline[0] for seq in selected)
+                        removed_sequences[kind]["new_min"] += max(0, removed - old_selected)
+                        removed_sequences[kind]["exact"] &= removed == len(selected)
                 for key, count in (("scanned", len(rows)), ("eligible", len(selected)), ("deleted", removed)):
                     report[key] += count
                     table[key] += count
@@ -201,6 +312,7 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     repo.set_control(CURSORS, {"policy": identity, "positions": positions,
                         "next_kind": pending[0][0] if pending else None})
             report["status"] = "PARTIAL" if pending else "COMPLETE"
+            _observe_retention(repo, report, previous, protected, removed_sequences, deadline, clock, now)
             report["finished_at"] = datetime.now(timezone.utc).isoformat()
             if apply:
                 repo.set_control(REPORT, report)

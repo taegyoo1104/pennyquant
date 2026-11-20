@@ -8,6 +8,7 @@
 | [PROJECT_DIRECTION](PROJECT_DIRECTION.md), [PHASES](PHASES.md) | S&P 500 방향 전환 당시 요구사항과 단계 구분 |
 | [stages](stages) | 감시 목록·시장 데이터·모의 체결·전략·뉴스·LLM·후보 선정·대시보드의 당시 구현 기록 |
 | [REVIEW_00_08](REVIEW_00_08.md), [REVISION_00_04_AUDIT](REVISION_00_04_AUDIT.md) | 해당 시점의 검토 항목·수정 근거·검사 결과 |
+| [2026-11-20 프로젝트 점검](PROJECT_REVIEW_20261120.md) | 분봉 조회·호가 충돌·AI 설명·백업·자료 정리의 재현 오류와 후속 개선 항목 |
 | [이전 README](README_2026-11-15.md), [이전 HANDOFF](HANDOFF_2026-11-15.md) | 문서 정리 전의 상세 프로젝트 소개와 인수인계 |
 
 100개·50개 후보, 집중 20개·10개, 과거 거래량 조건, REST·웹소켓 등은 개발 중 바뀌었다. 변경 이유는 [프로젝트가 바뀌어 온 과정](../PROJECT_STORY.md), 현재 전략은 [전략 실험 안내](../STRATEGY_LAB.md), 다음 개발 작업은 [최신 HANDOFF](../../HANDOFF.md)를 따른다.

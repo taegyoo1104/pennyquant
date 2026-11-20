@@ -16,6 +16,44 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+def test_mysql_credit_projection_matches_sqlite_legacy_time_semantics(mysql_repositories,tmp_path):
+    from decimal import Decimal
+    from sessionquant.database.repository import Repository
+    from sessionquant.llm.costs import credit_summary,set_manual_credit
+    now=datetime(2026,11,20,16,tzinfo=timezone.utc);checked=now-timedelta(hours=1)
+    repo=mysql_repositories();other=mysql_repositories()
+    sqlite=Repository(tmp_path/'credit-comparison.db',backend='sqlite')
+    rows=[
+        {'timestamp':'2024-02-29T10:00:00+00:00'},
+        {'timestamp':'2026-11-19T10:00:00.123456+00:00','request_started_at':'2026-11-19T09:00:00+00:00'},
+        {'timestamp':'2026-02-30T10:00:00+00:00'},
+        {'timestamp':'2026-11-19T25:00:00+00:00'},
+        {'timestamp':'0000-01-01T10:00:00+00:00'},
+        {'timestamp':{'bad':'time'}},
+        {'timestamp':'2026-11-19T10:00:00'},
+        {'timestamp':None},
+        {'timestamp':now.isoformat(),'request_started_at':(checked-timedelta(seconds=1)).isoformat()},
+        {'timestamp':now.isoformat(),'request_started_at':[]},
+        {'timestamp':now.isoformat(),'request_started_at':False},
+        {'timestamp':now.isoformat(),'request_started_at':'2026-11-20T16:00:00+01:00'},
+        {'timestamp':now.isoformat(),'cost_usd':False},
+    ]
+    try:
+        for index,row in enumerate(rows):
+            value={'id':str(index),'cost_usd':'0.123456789012345678901','unused_body':'x'*20000,**row}
+            repo.record('llm_usage',value);sqlite.record('llm_usage',value)
+        for target in (repo,sqlite):set_manual_credit(target,'10',checked,now=now)
+        mysql_rows=list(repo.iter_credit_usage(checked,batch_size=3))
+        assert mysql_rows==list(sqlite.iter_credit_usage(checked,batch_size=3))
+        assert len(mysql_rows)==len(rows)-2 and len(str(mysql_rows))<3000
+        assert not list(other.iter_credit_usage(checked))
+        summary=credit_summary(repo,now)
+        assert summary==credit_summary(sqlite,now)
+        assert summary['estimated_credit_usd'] is None
+        assert summary['local_cost_since_check_usd']==Decimal('0.370370367037037036703')
+    finally:sqlite.close()
+
+
 def test_mysql_unchanged_history_skips_sql_but_corrections_and_timing_survive_restart(mysql_repositories):
     from sessionquant.market.history import HistoryStore,history_plan
     from sessionquant.performance import capture
@@ -901,3 +939,43 @@ def test_mysql_wide_json_ordered_reads_avoid_filesort_and_preserve_namespace(mys
         assert not has_filesort(plan), plan
         assert 'ix_namespace_seq' in json.dumps(plan)
     assert [r['id'] for r in other.recent('news_analysis', 2)] == ['other-6','other-7']
+
+
+def test_mysql_dashboard_projection_keeps_precision_legacy_orders_and_namespace(mysql_repositories, monkeypatch):
+    import json
+    from test_dashboard_projection import ledger_fixture, assert_projected_view
+    from sessionquant.database import dashboard_projection
+    from sessionquant.dashboard.trade_reasons import execution_reasons
+    now = datetime(2026, 11, 20, 16, tzinfo=timezone.utc)
+    repo, other = mysql_repositories(), mysql_repositories()
+    state, fill, _ = ledger_fixture(now)
+    repo.save_state(state)
+    other.save_state({'environment':'LIVE_LOCAL', 'broker':{'cash':'999', 'positions':{}}})
+    sizes = []
+    decode = dashboard_projection.decode
+    def measured_decode(raw, schema):
+        sizes.append(len(raw) if isinstance(raw, (str, bytes)) else len(json.dumps(raw)))
+        return decode(raw, schema)
+    monkeypatch.setattr(dashboard_projection, 'decode', measured_decode)
+    projected = repo.load_dashboard_state()
+    order = repo.load_dashboard_order(fill['client_id'])
+    assert len(json.dumps(state)) > 2_000_000 and sum(sizes) < 5000
+    assert 'orders' not in projected['broker'] and 'fills' not in projected['broker']
+    assert projected['synthetic'] is False
+    assert_projected_view(state, projected, now)
+    projected['broker']['orders'] = {fill['client_id']:order}
+    assert execution_reasons([fill], state=projected) == execution_reasons([fill], state=state)
+    assert repo.load_dashboard_order('not-present') is None
+    assert other.load_dashboard_state()['broker']['cash'] == '999'
+    assert other.load_dashboard_order(fill['client_id']) is None
+    assert repo.load_state() == state
+    recorded = {'client_id':fill['client_id'], 'symbol':'MSFT', 'side':'sell',
+                'reason':'manual_market_sell', 'unused':'x'*100_000}
+    repo.record('orders', recorded)
+    assert repo.load_dashboard_order(fill['client_id'], recovery_state=False) == {
+        key:value for key,value in recorded.items() if key != 'unused'}
+    assert other.load_dashboard_order(fill['client_id'], recovery_state=False) is None
+    legacy = {'environment':'LIVE_LOCAL', 'account':{'cash':'10.00000000000000000001',
+              'equity':'10.00000000000000000001', 'reserved_cash':None, 'positions':{}}}
+    repo.save_state(legacy)
+    assert repo.load_dashboard_state() == legacy

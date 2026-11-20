@@ -12,7 +12,11 @@ if [[ "$current" != UPLOADED\ * || "$current" == "$previous" ]]; then
     echo '이번 종료의 새 백업 업로드를 확인하지 못했습니다. 자료 정리를 생략합니다.' >&2
     exit 1
 fi
-if [[ -n $("${compose[@]}" ps --status running --services app) ]]; then
+if ! app_services=$("${compose[@]}" ps --status running --services app); then
+    echo '프로그램 실행 상태 조회 실패: 자료를 삭제하지 않습니다.' >&2
+    exit 1
+fi
+if [[ -n "$app_services" ]]; then
     echo '프로그램이 실행 중입니다. 자료를 삭제하지 않습니다.' >&2
     exit 1
 fi
@@ -54,7 +58,12 @@ with open(sys.argv[1],encoding='utf-8') as stream:
 status=report['status']
 if status not in {'COMPLETE','PARTIAL','DISABLED'} or report['dry_run'] is not False:
     raise ValueError('자료 정리 결과를 확인할 수 없습니다.')
-print(f"{status} scanned={report['scanned']} deleted={report['deleted']}")
+observability=report.get('observability',{})
+backlog=observability.get('backlog_status','UNKNOWN')
+attention=observability.get('attention','UNKNOWN')
+if backlog not in {'CLEAR','PRESENT','UNKNOWN'} or attention not in {'CLEAR','BACKLOG','UNKNOWN','CAPACITY_REVIEW'}:
+    raise ValueError('자료 정리 관측 결과를 확인할 수 없습니다.')
+print(f"{status} scanned={report['scanned']} deleted={report['deleted']} backlog={backlog} attention={attention}")
 PY
 )
 chown 1000:1000 "$part"

@@ -332,7 +332,9 @@ class TossSessionSource:
                 return
             bars, cursor = response
             accept(symbol,bars)
-            last[symbol] = utc(self.clock()).isoformat()
+            # HTTP or persistence may finish after the next minute starts.
+            # Only the request's starting minute has been refreshed.
+            last[symbol] = stamp.isoformat()
             progress = state.setdefault('history_progress',{}).setdefault(symbol,{})
             if not progress.get('started') or (progress.get('status') == 'WAITING_DATA' and cursor):
                 progress.update(started=True,cursor=cursor,done=not bool(cursor),pages=progress.get('pages',0),

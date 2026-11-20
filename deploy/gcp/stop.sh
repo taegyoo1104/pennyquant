@@ -7,7 +7,15 @@ compose=(docker compose -f deploy/gcp/compose.yaml)
 result=0
 echo '장 마감: 프로그램 저장·종료 후 백업합니다. 잔량이 있으면 다음 실행에서 복구합니다.'
 "${compose[@]}" stop -t 180 app || echo '프로그램 종료 상태를 확인하세요.' >&2
-if [[ $("${compose[@]}" ps --status running --services db) == db ]]; then
+db_services=$("${compose[@]}" ps --status running --services db)
+db_status=$?
+if ((db_status != 0)); then
+    result=1
+    install -d -m 700 /etc/sessionquant
+    (umask 077; printf 'FAILED %s phase=DB_STATUS exit_code=%s\n' \
+        "$(date -u +%FT%TZ)" "$db_status" > /etc/sessionquant/backup-status) || true
+    echo 'DB 실행 상태 조회 실패: 이번 백업을 확인하지 못했습니다. 기존 디스크를 보존하고 종료합니다.' >&2
+elif [[ "$db_services" == db ]]; then
     # Match the enclosing 40-minute systemd limit. A large logical dump may
     # legitimately take more than the former eight-minute budget.
     backup_status_before=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)

@@ -11,7 +11,8 @@ from test_gcp_deployment import DEPLOY, executable
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment scripts")
 
 
-def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE"):
+def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE",
+                  app_query_exit=0, observability=None):
     root = tmp_path / "repo"
     root.mkdir()
     etc = tmp_path / "etc"
@@ -24,11 +25,13 @@ def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running
     bindir = tmp_path / "bin"
     bindir.mkdir()
     executable(bindir / "chown", "exit 0\n")
-    report = json.dumps({"status": mode, "dry_run": False, "deleted": 20, "scanned": 25})
+    report = json.dumps({"status": mode, "dry_run": False, "deleted": 20, "scanned": 25,
+                         "observability": observability or {}})
     action = "exit 2" if mode == "FAIL" else "sleep 5" if mode == "WAIT" else "printf '%s\\n' '" + report + "'"
     executable(bindir / "docker", f'''echo "docker $*" >> "$CALLS"
 if [[ "$*" == *"--services app"* ]]; then
     {"echo app" if app_running else ":"}
+    exit {app_query_exit}
 elif [[ "$*" == *" run "* ]]; then
     {action}
 fi
@@ -52,6 +55,19 @@ def test_cleanup_refuses_failed_or_unchanged_backup_and_running_app(tmp_path, cu
     assert not calls.exists() or " run " not in calls.read_text()
     assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
     assert (etc / "backup-status").read_text() == current
+
+
+def test_cleanup_refuses_failed_app_status_query_before_starting_deletion(tmp_path):
+    script, env, etc, data, calls = setup_wrapper(tmp_path, app_query_exit=42)
+    result = subprocess.run(["bash", str(script), "UPLOADED old backup.tar.gz"],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    lines = calls.read_text().splitlines()
+    assert len(lines) == 1 and "ps --status running --services app" in lines[0]
+    assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
+    assert (etc / "backup-status").read_text() == "UPLOADED new backup.tar.gz"
+    assert not list(data.glob(".retention*"))
+    assert "실행 상태 조회 실패" in result.stderr
 
 
 @pytest.mark.parametrize("mode", ["COMPLETE", "PARTIAL", "DISABLED", "FAIL"])
@@ -87,6 +103,17 @@ def test_timeout_removes_the_oneoff_container_and_keeps_last_report(tmp_path):
     assert (etc / "backup-status").read_text().startswith("UPLOADED")
     assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
     assert not list(data.glob(".retention*"))
+
+
+def test_cleanup_status_keeps_backlog_warning_separate_from_completed_pass(tmp_path):
+    observation = {"backlog_status": "PRESENT", "attention": "CAPACITY_REVIEW"}
+    script, env, etc, data, calls = setup_wrapper(tmp_path, observability=observation)
+    result = subprocess.run(["bash", str(script), "UPLOADED old backup.tar.gz"],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0
+    status = (etc / "retention-status").read_text()
+    assert status.startswith("COMPLETE ") and "backlog=PRESENT attention=CAPACITY_REVIEW" in status
+    assert json.loads((data / "retention-last.json").read_text())["observability"] == observation
 
 
 def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):

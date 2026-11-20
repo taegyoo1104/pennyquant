@@ -199,7 +199,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                                    candidate_settings=config.candidate_selection,paper_data_policy=config.paper_data_policy,
                                    benchmark_collection_enabled=include_benchmarks if config.source=='toss' else None,
                                    market_reference_symbols=(reference_config['symbols'] if reference_config['enabled'] else [])
-                                   if config.source=='toss' else None)
+                                   if config.source=='toss' else None,
+                                   execution_clock=(lambda: datetime.now(timezone.utc)) if config.source=='toss' else None)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)

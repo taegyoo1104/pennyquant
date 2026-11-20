@@ -134,6 +134,94 @@ wait
 
 
 @pytest.mark.skipif(os.name == "nt", reason="GCE Linux shell scripts")
+@pytest.mark.parametrize("query_exit", [0, 42])
+def test_shutdown_distinguishes_absent_db_from_failed_status_query(tmp_path, query_exit):
+    root = tmp_path / "repo"
+    deploy = root / "deploy/gcp"
+    deploy.mkdir(parents=True)
+    etc = tmp_path / "etc"
+    etc.mkdir()
+    status = etc / "backup-status"
+    previous = "UPLOADED 2026-11-19T21:35:00Z previous.tar.gz\n"
+    status.write_text(previous)
+    disk = tmp_path / "database-disk"
+    disk.write_bytes(b"preserve actual DB")
+    calls = tmp_path / "calls"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    executable(bindir / "docker", 'echo "docker $*" >> "$CALLS"\n'
+               f'if [[ "$*" == *"--services db"* ]]; then exit {query_exit}; fi\n')
+    executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
+    executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
+    executable(deploy / "backup.sh", 'echo unexpected-backup >> "$CALLS"\n')
+    executable(deploy / "retention.sh", 'echo unexpected-retention >> "$CALLS"\n')
+    script = tmp_path / "stop.sh"
+    script.write_text((DEPLOY / "stop.sh").read_text()
+                      .replace("/opt/sessionquant", str(root))
+                      .replace("/run/sessionquant-stop.lock", str(tmp_path / "stop.lock"))
+                      .replace("/etc/sessionquant", str(etc))
+                      .replace("/usr/bin/systemctl", str(bindir / "systemctl")))
+    result = subprocess.run(["bash", str(script)],
+                            env={**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"],
+                                 "CALLS": str(calls)},
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == int(query_exit != 0)
+    assert disk.read_bytes() == b"preserve actual DB"
+    lines = calls.read_text().splitlines()
+    assert lines[-2:] == ["sync", "poweroff"]
+    assert any("down --timeout 120" in line for line in lines)
+    assert not any("unexpected-" in line for line in lines)
+    if query_exit:
+        assert status.read_text().startswith("FAILED ")
+        assert "phase=DB_STATUS exit_code=42" in status.read_text()
+    else:
+        assert status.read_text() == previous
+
+
+@pytest.mark.skipif(os.name == "nt", reason="GCE Linux shell scripts")
+@pytest.mark.parametrize("query_exit,app_running", [(42, False), (0, True)])
+def test_backup_refuses_unknown_or_running_app_without_dumping(tmp_path, query_exit, app_running):
+    root = tmp_path / "repo"
+    root.mkdir()
+    data = tmp_path / "data"
+    backups = data / "backups"
+    backups.mkdir(parents=True)
+    previous = backups / "sessionquant-previous.tar.gz"
+    previous.write_bytes(b"preserve previous backup")
+    etc = tmp_path / "etc"
+    etc.mkdir()
+    status = etc / "backup-status"
+    previous_status = "UPLOADED old previous.tar.gz\n"
+    status.write_text(previous_status)
+    calls = tmp_path / "calls"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    executable(bindir / "docker", 'echo "docker $*" >> "$CALLS"\n'
+               'if [[ "$*" == *"--services app"* ]]; then\n'
+               f'    {"echo app" if app_running else ":"}\n    exit {query_exit}\nfi\n'
+               'echo unexpected-dump >> "$CALLS"\n')
+    script = tmp_path / "backup.sh"
+    script.write_text((DEPLOY / "backup.sh").read_text()
+                      .replace("/opt/sessionquant", str(root))
+                      .replace("/var/lib/sessionquant", str(data))
+                      .replace("/etc/sessionquant", str(etc))
+                      .replace("/run/sessionquant-backup.lock", str(tmp_path / "backup.lock")))
+    result = subprocess.run(["bash", str(script)],
+                            env={**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"], "CALLS": str(calls)},
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == (query_exit or 1)
+    lines = calls.read_text().splitlines()
+    assert len(lines) == 1 and "ps --status running --services app" in lines[0]
+    assert list(backups.iterdir()) == [previous]
+    assert previous.read_bytes() == b"preserve previous backup"
+    if query_exit:
+        assert status.read_text().startswith("FAILED ")
+        assert "phase=APP_STATUS exit_code=42" in status.read_text()
+    else:
+        assert status.read_text() == previous_status
+
+
+@pytest.mark.skipif(os.name == "nt", reason="GCE Linux shell scripts")
 @pytest.mark.parametrize("invalid", ["empty", "broken_gzip", "package_failure"])
 def test_failed_verification_never_uploads_or_removes_previous_archive(tmp_path, invalid):
     import shutil

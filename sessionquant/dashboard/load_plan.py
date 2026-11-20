@@ -16,6 +16,7 @@ CONTROLS = {
     'news_status': ('session_news_status', '뉴스 수집 상태'),
     'warmup': ('startup_data_warmup_v1', '자료 준비'),
     'strategy_explanation': ('strategy_explanation_v1', 'AI 전략 설명'),
+    'retention': ('data_retention_v1', '자료 정리 상태'),
 }
 
 PAGE_CONTROLS = {
@@ -25,7 +26,7 @@ PAGE_CONTROLS = {
     '전략·백테스트': (),
     '매매 내역': ('actual_account', 'account_status'),
     '뉴스·LLM': ('actual_account', 'account_status', 'watchlist_state', 'news_status', 'strategy_explanation'),
-    '시스템·설정': ('warmup', 'market_reference', 'news_status'),
+    '시스템·설정': ('warmup', 'market_reference', 'news_status', 'retention'),
 }
 
 # 최신 상태 하나와 이력 표를 구분한다. 체결 내보내기·뉴스 집계의 기존 범위는 유지한다.
@@ -51,6 +52,7 @@ SOURCE_LABELS = {
     'macro_news': '시장 뉴스', 'macro_analysis': '시장 뉴스 분석', 'news_ingestions': '뉴스 수신',
     'news_enrichments': '뉴스 원문 확인', 'news_schedule': '뉴스 수집 일정',
     'news_flow': '뉴스·AI 처리 요약', 'transaction': 'DB 조회 마무리',
+    'latest_order': '최근 체결의 주문 사유',
 }
 
 

@@ -110,7 +110,7 @@ def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
     return result[0]
 
 
-def render_controls(repo,*,positions,now=None,environment=None,readonly=False,compact=False):
+def render_controls(repo,*,positions,now=None,environment=None,readonly=False,compact=False,ledger_state=None):
     """실행별 확인 상태를 보존하고 최종 버튼 클릭에서만 기존 큐를 사용한다."""
     import streamlit as st
     now=utc(now or datetime.now(timezone.utc));state=repo.get_control(KEY,{})
@@ -137,7 +137,10 @@ def render_controls(repo,*,positions,now=None,environment=None,readonly=False,co
     else:st.write('**실행 상태 · '+status+'**')
     run=state['run_id']
     requests=[r for r in repo.recent('order_intents',200) if r.get('kind')=='dashboard_command' and r.get('run_id')==run]
-    selling=set(((repo.load_state() or {}).get('broker') or {}).get('exit_intents') or {})
+    # Reuse the display snapshot; request_command still reads the authoritative
+    # ledger again when a sell is actually submitted.
+    ledger = ledger_state if ledger_state is not None else repo.load_state() or {}
+    selling=set((ledger.get('broker') or {}).get('exit_intents') or {})
     unresolved=[r for r in requests if r.get('status')=='pending']
     def submit(action,symbol=None):
         try:

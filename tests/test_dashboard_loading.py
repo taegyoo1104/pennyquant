@@ -28,6 +28,9 @@ def database(monkeypatch):
         def load_state(self):
             self.calls.append('state')
             return {'broker': {'cash': '100', 'positions': {}}}
+        def load_dashboard_state(self):
+            self.calls.append('dashboard_state')
+            return {'broker': {'cash': '100', 'positions': {}}}
         def get_control(self, name, default=None):
             self.calls.append(name)
             if name == self.failure:
@@ -193,10 +196,18 @@ def test_fast_home_refresh_does_not_read_news_or_full_history(database):
     database.failure = 'news_ingestions'
     data = load_database('unused.db', page='대시보드', panel='live')
     assert data.connected and not data.error
-    assert 'state' in database.calls
+    assert 'dashboard_state' in database.calls and 'state' not in database.calls
     assert [call for call in database.calls if isinstance(call, tuple)] == [
         ('executions', 1), ('quote_snapshots', 300)]
     assert 'news_provider_schedule_v1' not in database.calls
+    assert 'data_retention_v1' not in database.calls
+
+
+def test_system_view_reads_saved_retention_report_only(database):
+    database.controls['data_retention_v1'] = {'status':'PARTIAL', 'deleted':25}
+    data = load_database('unused.db', page='시스템·설정')
+    assert data.connected and data.retention == {'status':'PARTIAL', 'deleted':25}
+    assert database.calls.count('data_retention_v1') == 1
 
 
 def test_chart_refresh_reads_only_three_controls_and_observes_new_prices(database):
