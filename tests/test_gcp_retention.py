@@ -11,7 +11,8 @@ from test_gcp_deployment import DEPLOY, executable
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment scripts")
 
 
-def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE"):
+def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE",
+                  app_query_exit=0):
     root = tmp_path / "repo"
     root.mkdir()
     etc = tmp_path / "etc"
@@ -29,6 +30,7 @@ def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running
     executable(bindir / "docker", f'''echo "docker $*" >> "$CALLS"
 if [[ "$*" == *"--services app"* ]]; then
     {"echo app" if app_running else ":"}
+    exit {app_query_exit}
 elif [[ "$*" == *" run "* ]]; then
     {action}
 fi
@@ -52,6 +54,19 @@ def test_cleanup_refuses_failed_or_unchanged_backup_and_running_app(tmp_path, cu
     assert not calls.exists() or " run " not in calls.read_text()
     assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
     assert (etc / "backup-status").read_text() == current
+
+
+def test_cleanup_refuses_failed_app_status_query_before_starting_deletion(tmp_path):
+    script, env, etc, data, calls = setup_wrapper(tmp_path, app_query_exit=42)
+    result = subprocess.run(["bash", str(script), "UPLOADED old backup.tar.gz"],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    lines = calls.read_text().splitlines()
+    assert len(lines) == 1 and "ps --status running --services app" in lines[0]
+    assert json.loads((data / "retention-last.json").read_text()) == {"previous": "keep"}
+    assert (etc / "backup-status").read_text() == "UPLOADED new backup.tar.gz"
+    assert not list(data.glob(".retention*"))
+    assert "실행 상태 조회 실패" in result.stderr
 
 
 @pytest.mark.parametrize("mode", ["COMPLETE", "PARTIAL", "DISABLED", "FAIL"])

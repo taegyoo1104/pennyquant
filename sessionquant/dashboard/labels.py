@@ -154,6 +154,7 @@ LABELS = {
     'instrument_halted_unverified_or_restricted':'거래정지 여부 미확인·제한',
     'instrument_corporate_action_unverified_or_restricted':'기업행동 여부 미확인·제한',
     'quote_time_or_symbol_invalid':'호가의 종목·시각 불일치',
+    'quote_timestamp_conflict':'같은 시각의 호가 값 충돌 · 새 호가 대기',
     'quote_halted':'거래정지 호가',
     'quote_depth_missing':'매수·매도 호가 수량 부족',
     'spread_too_wide':'매수·매도 가격 차이가 큼',

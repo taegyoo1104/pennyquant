@@ -48,3 +48,15 @@ def test_unknown_recent_or_referenced_metadata_is_kept():
                      {"journal_ingested_at": NOW.isoformat()}):
         assert not _unused("news_analysis", metadata, NOW, protected)
     assert not _unused("pipeline_status", {"id": "allocation"}, NOW, protected)
+
+
+@pytest.mark.parametrize("timestamp,expired", [
+    ("2026-01-01T00:00:00Z", True),
+    (NOW.isoformat(), False),
+    ((NOW + timedelta(days=1)).isoformat(), False),
+    ("unverified", False),
+    ("2026-01-01T00:00:00", False),
+])
+def test_imported_timestamp_must_prove_expiry_even_with_old_receipt(timestamp, expired):
+    metadata = {"received_at": "2026-01-01T00:00:00Z", "timestamp": timestamp}
+    assert _unused("quote_snapshots", metadata, NOW, {"news": set(), "selection": set()}) is expired

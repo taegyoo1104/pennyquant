@@ -110,7 +110,7 @@ def _unused(kind, metadata, cutoff, protected):
     if kind == "pipeline_status" and metadata.get("id") in protected["selection"]:
         return False
     for key, value in metadata.items():
-        if (key.endswith("_at") or key == "valid_until") and value is not None:
+        if (key.endswith("_at") or key in {"timestamp", "valid_until"}) and value is not None:
             try:
                 if utc(value) >= cutoff:
                     return False

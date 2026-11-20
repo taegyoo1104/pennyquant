@@ -4,13 +4,23 @@ umask 077
 exec 8>/run/sessionquant-backup.lock
 flock -n 8 || { echo '다른 백업이 실행 중입니다.' >&2; exit 1; }
 cd /opt/sessionquant
-if [[ $(docker compose -f deploy/gcp/compose.yaml ps --status running --services app) == app ]]; then
+status_file=/etc/sessionquant/backup-status
+if app_services=$(docker compose -f deploy/gcp/compose.yaml ps --status running --services app); then
+    :
+else
+    query_status=$?
+    install -d -m 700 /etc/sessionquant
+    printf 'FAILED %s phase=APP_STATUS exit_code=%s\n' \
+        "$(date -u +%FT%TZ)" "$query_status" > "$status_file" || true
+    echo '프로그램 실행 상태 조회 실패: 백업을 시작하지 않습니다.' >&2
+    exit "$query_status"
+fi
+if [[ "$app_services" == app ]]; then
     echo '일관된 백업을 위해 먼저 app 컨테이너를 종료하세요.' >&2
     exit 1
 fi
 backup_dir=/var/lib/sessionquant/backups
 install -d -m 700 "$backup_dir"
-status_file=/etc/sessionquant/backup-status
 install -d -m 700 /etc/sessionquant
 printf 'RUNNING %s\n' "$(date -u +%FT%TZ)" > "$status_file"
 tmp=''

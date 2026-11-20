@@ -63,11 +63,13 @@ class MarketEngine:
         self.use_market_filter = use_market_filter
         self.bars: dict[str, list[Bar]] = {}
         self.quotes: dict[str, Quote] = {}
+        self.quote_conflicts: dict[str, datetime] = {}
         self.eligibility: dict[str, InstrumentEligibility] = {}
         self.rvol: dict[str, dict] = {}
         self.sector_strength: dict[str, tuple[float, datetime]] = {}
         self.history_provider = None
         self._regime_cache = None
+        self._quote_scope = None
 
     def on_bar(self, bar: Bar) -> None:
         if bar.received_at < bar.timestamp:
@@ -87,11 +89,45 @@ class MarketEngine:
     def on_quote(self, quote: Quote) -> None:
         if quote.received_at < quote.timestamp:
             raise ValueError("호가 수신 시각이 호가 발생 시각보다 빠릅니다")
+        if self.quote_is_conflicted(quote):
+            return
+        if self._quote_scope is not None:
+            key = (quote.symbol, quote.timestamp)
+            observed = self._quote_scope.get(key)
+            if observed is not None and self._book_signature(quote) != self._book_signature(observed):
+                self._invalidate_quote(quote)
+                return
+            self._quote_scope.setdefault(key, quote)
         previous = self.quotes.get(quote.symbol)
-        if previous is None or (quote.timestamp, quote.received_at) >= (previous.timestamp, previous.received_at):
-            self.quotes[quote.symbol] = quote
-            if quote.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
-                self._regime_cache.clear()
+        if previous is not None:
+            if quote.timestamp < previous.timestamp:
+                return
+            if quote.timestamp == previous.timestamp:
+                if self._book_signature(quote) == self._book_signature(previous):
+                    # A repeated book does not renew its original receipt time.
+                    return
+                self._invalidate_quote(quote)
+                return
+        self.quotes[quote.symbol] = quote
+        if quote.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
+            self._regime_cache.clear()
+
+    @staticmethod
+    def _book_signature(quote: Quote):
+        return quote.bid, quote.ask, quote.bid_size, quote.ask_size, quote.halted
+
+    def _invalidate_quote(self, quote: Quote) -> None:
+        conflict = max(quote.timestamp, self.quote_conflicts.get(quote.symbol, quote.timestamp))
+        self.quote_conflicts[quote.symbol] = conflict
+        current = self.quotes.get(quote.symbol)
+        if current is not None and current.timestamp <= conflict:
+            self.quotes.pop(quote.symbol, None)
+        if quote.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
+            self._regime_cache.clear()
+
+    def quote_is_conflicted(self, quote: Quote) -> bool:
+        conflict = self.quote_conflicts.get(quote.symbol)
+        return conflict is not None and quote.timestamp <= conflict
 
     def set_eligibility(self, symbol: str, eligibility: InstrumentEligibility) -> None:
         if symbol != eligibility.symbol:
@@ -127,12 +163,15 @@ class MarketEngine:
     def evaluation_scope(self):
         """Share benchmark work only within one serialized engine transaction."""
         previous, self._regime_cache = self._regime_cache, {}
+        previous_quotes = self._quote_scope
+        self._quote_scope = {} if previous_quotes is None else previous_quotes
         try:
             yield
         finally:
             if previous is not None:
                 previous.clear()
             self._regime_cache = previous
+            self._quote_scope = previous_quotes
 
     def regime(self, now: datetime) -> RegimeResult:
         key = (utc(now), self.max_quote_age_seconds)
@@ -202,6 +241,8 @@ class MarketEngine:
                         max_eligibility_age_seconds=self.max_eligibility_age_seconds,
                         max_spread_pct=self.max_spread_pct, min_dollar_volume=self.min_dollar_volume,
                         min_rvol=self.min_rvol, require_evidence=self.strict_data, paper_assumptions=experimental, require_rvol=self.strategy != "pullback_simple")
+        if quote is None and symbol in self.quote_conflicts:
+            blockers.append('quote_timestamp_conflict')
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         if symbol in REFERENCE_SYMBOLS:
             blockers.append('market_reference_not_trading_candidate')
@@ -241,7 +282,7 @@ class MarketEngine:
     def to_state(self, *, include_bars: bool = True) -> dict:
         """복구 자료의 시각을 유지한다. DB의 원본 봉을 참조할 때 봉 내역을 생략할 수 있다."""
         return jsonable({"schema_version": 1, "bars": self.bars if include_bars else {},
-                         "quotes": self.quotes, "eligibility": self.eligibility,
+                         "quotes": self.quotes, "quote_conflicts": self.quote_conflicts, "eligibility": self.eligibility,
                          "rvol": self.rvol, "sector_strength": self.sector_strength})
 
     def restore(self, payload: dict) -> None:
@@ -250,6 +291,7 @@ class MarketEngine:
         if payload.get("schema_version") != 1:
             raise ValueError("지원하지 않는 시장 상태 복구 형식입니다")
         self.bars, self.quotes, self.eligibility, self.rvol, self.sector_strength = {}, {}, {}, {}, {}
+        self.quote_conflicts = {symbol: utc(stamp) for symbol, stamp in payload.get('quote_conflicts', {}).items()}
         for symbol, rows in payload.get("bars", {}).items():
             for row in rows:
                 if row.get("symbol") != symbol:

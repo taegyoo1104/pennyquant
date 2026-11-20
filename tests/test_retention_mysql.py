@@ -102,6 +102,27 @@ def test_apply_requires_backup_and_exclusive_engine_lease(mysql_repositories, tm
         prune_expired(live, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
 
 
+def test_imported_timestamp_protects_records_after_persistence_dates_expire(mysql_repositories, tmp_path):
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=45)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    for key, timestamp in (("expired", old.isoformat()), ("recent", (now - timedelta(days=1)).isoformat()),
+                           ("future", (now + timedelta(days=1)).isoformat()), ("malformed", "unverified")):
+        repo.import_record("quote_snapshots", {"id": key, "received_at": old.isoformat(), "timestamp": timestamp}, key)
+        captured = repo._execute("SELECT captured_at FROM pq_quote_snapshots WHERE namespace=%s AND record_id=%s",
+                                 (repo.namespace, key), fetch="one")[0]
+        assert captured == old.replace(tzinfo=None)
+        # Model restored records that have aged in storage; leave the actual
+        # import projection intact so captured_at cannot mask the payload guard.
+        repo._execute("UPDATE pq_quote_snapshots SET created_at=%s,updated_at=%s WHERE namespace=%s AND record_id=%s",
+                      (old.replace(tzinfo=None), old.replace(tzinfo=None), repo.namespace, key))
+    preview = prune_expired(repo, POLICY, now=now)
+    assert preview["eligible"] == 1 and preview["deleted"] == 0
+    report = prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report["deleted"] == 1
+    assert {row["id"] for row in repo.all("quote_snapshots")} == {"recent", "future", "malformed"}
+
+
 def test_partial_cleanup_resumes_and_rotates_tables_even_at_one_row_budget(mysql_repositories, tmp_path):
     now = datetime.now(timezone.utc)
     repo = mysql_repositories(environment="PAPER_LOCAL")

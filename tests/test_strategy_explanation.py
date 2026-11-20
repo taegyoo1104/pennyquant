@@ -193,3 +193,83 @@ async def test_session_only_explanation_preserves_budget_until_regular_open(tmp_
         assert (await service.refresh(inputs(),clock[0]))['status']=='SUCCEEDED'
         assert len(calls)==1
     repo.close()
+
+
+async def test_returning_to_saved_facts_clears_failed_refresh_without_another_call(tmp_path):
+    from sessionquant.macro.budget import BudgetBlocked
+    from sessionquant.strategy_explanation import STATE
+    repo=Repository(tmp_path/'cache-recovery.db',backend='sqlite')
+    data=inputs();clock=[NOW];calls=[]
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200,json=response(data))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:clock[0])
+        config={'enabled':True,'min_interval_seconds':60,'max_attempts_per_day':2}
+        first=deepcopy(await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0]))
+        async def blocked(*args,**kwargs):
+            raise BudgetBlocked('cap',code='HOURLY_CALL_CAP')
+        analyzer.ledger.reserve=blocked
+        clock[0]+=timedelta(minutes=2)
+        changed=deepcopy(data);changed['strategy'][0]['blockers']=['changed']
+        changed['as_of']=clock[0].isoformat()
+        failed=await StrategyExplainer(repo,analyzer,config).refresh(changed,clock[0])
+        assert failed['status']=='BUDGET_BLOCKED'
+        schedule=deepcopy(repo.get_control(STATE))
+        # Restoring already paid-for content also works inside the retry interval
+        # and after exhausting the local attempt count. It retains its source time.
+        clock[0]+=timedelta(seconds=1)
+        restored=await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0])
+        assert restored==first and repo.get_control(VIEW)==first
+        assert repo.get_control(STATE)==schedule and len(calls)==1
+    repo.close()
+
+
+async def test_schedule_success_without_saved_content_does_not_suppress_recovery(tmp_path,monkeypatch):
+    from sessionquant.strategy_explanation import STATE
+    repo=Repository(tmp_path/'interrupted-publish.db',backend='sqlite')
+    data=inputs();clock=[NOW];calls=[]
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200,json=response(data))
+    original_set=repo.set_control
+    def failed_publish(key,value):
+        if key==VIEW:
+            raise OSError('interrupted view write')
+        return original_set(key,value)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:clock[0])
+        config={'enabled':True,'min_interval_seconds':60}
+        monkeypatch.setattr(repo,'set_control',failed_publish)
+        with pytest.raises(OSError,match='interrupted view write'):
+            await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0])
+        assert repo.get_control(STATE).get('success_key') and repo.get_control(VIEW) is None
+        monkeypatch.setattr(repo,'set_control',original_set)
+        service=StrategyExplainer(repo,analyzer,config)
+        clock[0]+=timedelta(seconds=1)
+        assert await service.refresh(data,clock[0]) is None and len(calls)==1
+        clock[0]+=timedelta(minutes=2)
+        recovered=await service.refresh(data,clock[0])
+        assert recovered and recovered['status']=='SUCCEEDED'
+        assert repo.get_control(VIEW)==recovered and len(calls)==2
+        assert repo.get_control(STATE)['attempts']==2
+    repo.close()
+
+
+async def test_saved_content_remains_cached_when_schedule_key_is_missing(tmp_path):
+    from sessionquant.strategy_explanation import STATE
+    repo=Repository(tmp_path/'saved-without-schedule.db',backend='sqlite')
+    data=inputs();clock=[NOW];calls=[]
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200,json=response(data))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        analyzer=BudgetedAnalyzer(repo,api_key='test',client=client,clock=lambda:clock[0])
+        config={'enabled':True,'min_interval_seconds':60}
+        first=deepcopy(await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0]))
+        schedule=repo.get_control(STATE);schedule.pop('success_key')
+        repo.set_control(STATE,schedule)
+        clock[0]+=timedelta(minutes=2)
+        assert await StrategyExplainer(repo,analyzer,config).refresh(data,clock[0]) is None
+        assert len(calls)==1 and repo.get_control(VIEW)==first
+    repo.close()

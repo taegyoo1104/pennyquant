@@ -104,14 +104,15 @@ def render_explanation(view):
     if not view:return
     from .session_app import timestamp
     with st.expander('AI 설명 · 시장 / 전략 판단 / 모의 체결',expanded=True):
-        st.caption('입력 기준 '+timestamp(view.get('as_of'))+' · 저장된 시점의 AI 설명이며 주문을 결정하지 않습니다.')
-        if view.get('synthetic_inputs'):st.info('합성 자료에 대한 설명 · 실제 시장 상황이 아닙니다.')
         if view.get('status')!='SUCCEEDED':
+            st.caption('새 분석 시도 · 입력 시점 '+timestamp(view.get('as_of')))
             st.info(explanation_status(view)+' · 규칙 기반 매매는 계속합니다.')
             view = saved_explanation(view)
             if not view:
                 return
             st.caption('이전 분석 시점의 설명을 유지하고 있습니다.')
+        st.caption('입력 기준 '+timestamp(view.get('as_of'))+' · 저장된 시점의 AI 설명이며 주문을 결정하지 않습니다.')
+        if view.get('synthetic_inputs'):st.info('합성 자료에 대한 설명 · 실제 시장 상황이 아닙니다.')
         st.caption('생성 '+timestamp(view.get('generated_at'))+' · 모델 '+str(view.get('model'))+
                    ' · 실제 호출 '+', '.join(view.get('llm_call_ids',[])))
         for key,label in [('market','시장 상황'),('strategy','전략 판단'),('trades','매매 결과')]:

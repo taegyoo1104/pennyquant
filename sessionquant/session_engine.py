@@ -124,7 +124,7 @@ class SessionEngine:
             self.risk_provider_cache = stored.get('risk_provider_cache',{})
             self.market_symbols = set(stored.get("market_symbols", []))
             self._market_storage_version = stored['schema_version']
-            merged = {"schema_version": 1, **{name: {} for name in ("bars", "quotes", "eligibility", "rvol", "sector_strength")}}
+            merged = {"schema_version": 1, **{name: {} for name in ("bars", "quotes", "quote_conflicts", "eligibility", "rvol", "sector_strength")}}
             for symbol in sorted(self.market_symbols):
                 chunk = self.repo.get_control("sq_market_" + symbol)
                 if not chunk:
@@ -134,7 +134,7 @@ class SessionEngine:
                     if not metadata or metadata.get('schema_version') != 1:
                         raise ValueError("시장 메타데이터 복구 자료가 누락되어 신규 주문을 중단합니다.")
                     chunk = {**chunk, **{name: metadata.get(name, {}) for name in
-                             ('quotes','eligibility','rvol','sector_strength')}}
+                             ('quotes','quote_conflicts','eligibility','rvol','sector_strength')}}
                 for name in merged:
                     if name != "schema_version":
                         merged[name].update(chunk.get(name, {}))
@@ -251,7 +251,7 @@ class SessionEngine:
         changed_symbols = self.dirty_symbols | (self.market_symbols if self._market_storage_version == 2 else set())
         for symbol in sorted(changed_symbols):
             payload = {"schema_version": 1}
-            for name in ("quotes", "eligibility", "rvol", "sector_strength"):
+            for name in ("quotes", "quote_conflicts", "eligibility", "rvol", "sector_strength"):
                 payload[name] = {symbol: metadata[name][symbol]} if symbol in metadata[name] else {}
             # Quotes change much more often than a 20-session bar checkpoint.
             # Both writes and the manifest commit atomically in apply_batch.
@@ -413,6 +413,10 @@ class SessionEngine:
                 session_status = self.exit_manager.tick(now, self.market.quotes)
                 quotes = [parse_event(raw).data for raw in events if raw["kind"] == "quote"]
                 for quote in quotes:
+                    # All inputs are ingested first. A later conflicting book in
+                    # this same batch invalidates both versions for execution.
+                    if self.market.quote_is_conflicted(quote):
+                        continue
                     paper_tradable = None
                     if self.market.paper_data_policy == 'observed_paper_v1':
                         from .market.paper_policy import paper_eligibility

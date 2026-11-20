@@ -143,7 +143,16 @@ class StrategyExplainer:
             if not bounds or not bounds[0] <= now < bounds[1]:
                 return None
         key=fingerprint(data);state=self.state
-        if not self.settings.enabled or state.get('success_key')==key:return None
+        if not self.settings.enabled:return None
+        # The schedule marker can survive an interrupted view write. Reuse only
+        # persisted content, and clear a later failed refresh when facts return
+        # to the last successful snapshot without spending another attempt.
+        previous=self.repo.get_control(VIEW,{}) or {}
+        saved=previous if previous.get('status')=='SUCCEEDED' else previous.get('last_success',{}) or {}
+        if saved.get('status')=='SUCCEEDED' and saved.get('input_hash')==key:
+            if previous.get('status')!='SUCCEEDED':
+                return self._publish({k:v for k,v in saved.items() if k!='last_success'})
+            return None
         if state.get('last_attempt_at') and now<utc(state['last_attempt_at'])+timedelta(seconds=self.settings.min_interval_seconds):
             return None
         attempts=state.get('attempts',0) if state.get('day')==now.date().isoformat() else 0

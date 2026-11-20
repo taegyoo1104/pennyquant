@@ -85,3 +85,23 @@ def test_home_briefing_renders_complete_long_saved_text_as_escaped_items(status)
     assert card.count('<section') == 3
     if status != 'SUCCEEDED':
         assert any('이전 분석 시점' in c.value for c in app.caption)
+
+
+@pytest.mark.parametrize('saved_synthetic', [True, False])
+def test_detailed_fallback_labels_the_saved_content_source_time_and_provenance(saved_synthetic):
+    from streamlit.testing.v1 import AppTest
+    saved={'status':'SUCCEEDED','as_of':'2026-11-19T17:00:34+00:00',
+           'generated_at':'2026-11-19T17:00:40+00:00','synthetic_inputs':saved_synthetic,
+           'sections':{'market':{'text':'이전에 저장한 시장 설명입니다.'}}}
+    view={'status':'BUDGET_BLOCKED','limit_reason':'HOURLY_CALL_CAP',
+          'as_of':'2026-11-19T17:05:34+00:00','synthetic_inputs':not saved_synthetic,'last_success':saved}
+    script=('from sessionquant.dashboard.explanation_panel import render_explanation\n'
+            f'render_explanation({view!r})')
+    app=AppTest.from_string(script).run()
+    assert not app.exception
+    source_labels=[row.value for row in app.caption if row.value.startswith('입력 기준 ')]
+    assert len(source_labels)==1 and '11.20 02:00:34 KST' in source_labels[0]
+    assert '11.20 02:05:34 KST' not in source_labels[0]
+    assert any('이전에 저장한 시장 설명' in row.value for row in app.markdown)
+    synthetic_warnings=[row.value for row in app.info if '합성 자료에 대한 설명' in row.value]
+    assert bool(synthetic_warnings)==saved_synthetic
