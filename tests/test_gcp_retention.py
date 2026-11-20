@@ -50,7 +50,7 @@ pathlib.Path(os.environ['REPORT']).write_text(json.dumps(report))
 
 
 def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE",
-                  app_query_exit=0, observability=None):
+                  app_query_exit=0, observability=None, errors=None):
     root = tmp_path / "repo"
     root.mkdir()
     etc = tmp_path / "etc"
@@ -64,7 +64,7 @@ def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running
     bindir.mkdir()
     executable(bindir / "chown", "exit 0\n")
     report = json.dumps({"status": mode, "dry_run": False, "deleted": 20, "scanned": 25,
-                         "observability": observability or {}})
+                         "observability": observability or {}, "errors": errors or []})
     action = "exit 2" if mode == "FAIL" else "sleep 5" if mode == "WAIT" else "printf '%s\\n' '" + report + "'"
     executable(bindir / "docker", f'''echo "docker $*" >> "$CALLS"
 if [[ "$*" == *"--services app"* ]]; then
@@ -180,3 +180,16 @@ def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):
     assert "exit_code=124" in (etc / "retention-status").read_text()
     assert calls.read_text().splitlines()[-2:] == ["sync", "poweroff"]
     assert "down --timeout 120" in calls.read_text()
+
+
+def test_query_failure_keeps_partial_report_but_records_failed_attempt(tmp_path):
+    errors = [{'table': 'pq_research_events', 'code': 3024, 'phase': 'READ'}]
+    script, env, etc, data, calls = setup_wrapper(tmp_path, mode='PARTIAL', errors=errors)
+    result = subprocess.run(['bash', str(script), 'previous backup'], env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    report = json.loads((data/'retention-last.json').read_text())
+    assert report['status'] == 'PARTIAL' and report['errors'] == errors
+    assert 'pq_research_events (코드 3024)' in result.stderr
+    assert (etc/'retention-status').read_text().startswith('FAILED ')
+    assert (etc/'backup-status').read_text() == 'UPLOADED new backup.tar.gz'
+    assert not list(data.glob('.retention*'))
