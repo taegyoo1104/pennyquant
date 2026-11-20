@@ -423,7 +423,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             from sessionquant.dashboard.reference_panel import render_references, reference_benchmarks_visible
             render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,
                 quotes=view['quotes'], fred_available='fred_references' not in data.unavailable,
-                show_benchmarks=reference_benchmarks_visible(data.context))
+                show_benchmarks=reference_benchmarks_visible(data.context),stream=data.benchmark_stream)
         if available('economic_events'):
             from sessionquant.dashboard.news_panel import calendar_rows
             schedule = calendar_rows(data.tables['economic_events'])

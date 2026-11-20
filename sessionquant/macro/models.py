@@ -138,6 +138,7 @@ class LLMSettings:
     hourly_escalation_call_cap: int = 2
     daily_briefing_reserved_calls: int = 0
     hourly_briefing_reserved_calls: int = 0
+    briefing_separate_schedule: bool = False
     format_retry_limit: int = 0
     monthly_soft_budget_usd: Decimal = Decimal("2.0")
     monthly_hard_budget_usd: Decimal = Decimal("3.0")
@@ -191,6 +192,10 @@ class LLMSettings:
             value = getattr(self, period+'_briefing_reserved_calls')
             if type(value) is not int or not 0 <= value <= getattr(self, period+'_primary_call_cap'):
                 raise ValueError('브리핑 예약 횟수는 전체 AI 호출 한도 안에서 설정해야 합니다.')
+        if type(self.briefing_separate_schedule) is not bool:
+            raise ValueError('브리핑 별도 일정 설정은 불리언이어야 합니다.')
+        if self.briefing_separate_schedule and (self.daily_briefing_reserved_calls or self.hourly_briefing_reserved_calls):
+            raise ValueError('시간 단위 브리핑에는 별도 호출 예약 횟수를 함께 설정하지 않습니다.')
         if not self.primary_model.strip() or not self.escalation_model.strip():
             raise ValueError("LLM 모델명이 필요합니다")
         if type(self.enable_event_cache) is not bool or type(self.enable_escalation) is not bool or type(self.pricing_verified) is not bool:

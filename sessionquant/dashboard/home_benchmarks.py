@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from ..market.bars import session_bounds
 from ..models import utc
 from .home_cards import CARD_STYLE, _positive
-from .reference_panel import observed_price
+from .reference_panel import observed_price, stream_price_observation
 
 BENCHMARKS = {'SPY':'S&P 500', 'QQQ':'나스닥 100', 'SOXX':'미국 반도체 ETF'}
 COLORS = {'up':'#f87171', 'down':'#60a5fa', 'flat':'#94a3b8'}
@@ -87,32 +87,11 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
 
 
 def _stream_card(card,stream,now):
-    from ..market_reference.trade_feed import samples, price_sample, timestamp, MAX_AGE
     symbol=card['symbol']
-    points=[]; latest=None; connected=False; current=None
-    try:
-        known=timestamp(stream['updated_at'])
-        if known<=now:
-            points=samples((stream.get('points') or {}).get(symbol,[]),now)
-            current=price_sample((stream.get('price_samples') or {}).get(symbol),now)
-            latest=(stream.get('latest') or {}).get(symbol)
-            connected=(stream.get('state')=='CONNECTED' and stream.get('acknowledged') is True
-                       and (now-known).total_seconds()<=10)
-    except (ValueError,TypeError,KeyError,AttributeError):pass
-    current=current or (points[-1] if points else None)
-    price=_positive(current[1]) if current else None
-    event=datetime.fromtimestamp(current[0]/1000,timezone.utc) if current else None
-    fresh=False
-    if latest and current:
-        try:
-            received=timestamp(latest['received_at'])
-            fresh=bool(connected and latest['at']==current[0] and latest['segment']==current[2]
-                       and _positive(latest['price'])==price and event<=received<=now
-                       and (now-event).total_seconds()<=MAX_AGE)
-        except (ValueError,TypeError,KeyError,AttributeError):pass
+    observation=stream_price_observation(stream,symbol,now)
+    points,price,event=observation['points'],observation['price'],observation['event_at']
+    fresh,status=observation['fresh'],observation['status']
     change=(price/card['reference']-1)*100 if price and card['reference'] else None
-    status='최근 수신' if fresh else '새 체결 대기' if connected else '재접속 중' if stream.get('state')=='BACKOFF' else '연결 대기'
-    if stream.get('state') in {'STOPPED','STOPPING'}:status='수신 중지'
     bounds=session_bounds(now)
     kind='장전 체결가' if bounds and now<bounds[0] else '체결가'
     card.update(price=f'${price:,.2f}' if price else '—',price_kind=kind,price_status=status,price_fresh=fresh,

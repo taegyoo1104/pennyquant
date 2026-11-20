@@ -7,6 +7,7 @@ universe_source: toss_us
 source: toss
 quote_transport: websocket
 poll_seconds: 2
+symbols_per_cycle: 10  # 집중 10종목 분봉을 한 순회에서 시도. API 횟수·시간 예산은 유지.
 paper_data_policy: observed_paper_v1
 actual_account_monitor_enabled: false
 recording_enabled: true
@@ -66,8 +67,7 @@ llm:
   format_retry_limit: 0
   daily_primary_call_cap: 600
   hourly_primary_call_cap: 120
-  daily_briefing_reserved_calls: 80
-  hourly_briefing_reserved_calls: 12
+  briefing_separate_schedule: true  # 뉴스 횟수 한도와 분리. 월 $3·한 시간 간격은 검사.
   monthly_soft_budget_usd: '3'
   monthly_hard_budget_usd: '3'
 market_filter_enabled: false
@@ -82,5 +82,5 @@ market_reference:
 strategy_explanation:
   enabled: true
   regular_session_only: true
-  min_interval_seconds: 300
-  max_attempts_per_day: 80
+  min_interval_seconds: 3600
+  max_attempts_per_day: null

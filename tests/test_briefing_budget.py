@@ -93,6 +93,63 @@ async def test_real_adapter_passes_briefing_purpose_to_shared_budget(repo):
     assert not repo.all('orders')
 
 
+def hourly_settings(**changes):
+    return LLMSettings(**{'daily_primary_call_cap':600,'hourly_primary_call_cap':120,
+        'monthly_soft_budget_usd':'3','monthly_hard_budget_usd':'3',
+        'briefing_separate_schedule':True,**changes})
+
+
+async def test_hourly_briefing_works_after_600_news_calls_without_resetting_usage(repo):
+    repo.set_control(CONTROL, {'2026-11':{'spent':'0.5770024','reservations':{},
+        'days':{'2026-11-20':{'primary':600,'escalation':0}},
+        'hours':{'2026-11-20T14':{'primary':120,'escalation':0}}}})
+    ledger = BudgetLedger(repo,hourly_settings())
+    await ledger.reserve('primary',{},NOW,metadata=BRIEFING)
+    result = ledger.snapshot(NOW)
+    assert result['daily_calls']['primary'] == 601 and result['daily_news_calls'] == 600
+    assert result['daily_briefing_calls'] == 1 and result['spent_usd'] == '0.5770024'
+    with pytest.raises(BudgetBlocked) as blocked:
+        await ledger.reserve('primary',{},NOW+timedelta(minutes=1),metadata={'source_kind':'company_news'})
+    assert blocked.value.code == 'DAILY_CALL_CAP'
+    restored = BudgetLedger(repo,hourly_settings())
+    with pytest.raises(BudgetBlocked) as blocked:
+        await restored.reserve('primary',{},NOW+timedelta(minutes=59),metadata=BRIEFING)
+    assert blocked.value.code == 'BRIEFING_INTERVAL'
+    await restored.reserve('primary',{},NOW+timedelta(hours=1),metadata=BRIEFING)
+    assert restored.snapshot(NOW)['daily_calls']['primary'] == 602
+
+
+@pytest.mark.parametrize('first', ['2026-11-20T23:59:00+00:00','2026-11-30T23:59:00+00:00'])
+async def test_hourly_interval_survives_day_and_month_boundaries(repo, first):
+    now = datetime.fromisoformat(first)
+    await BudgetLedger(repo,hourly_settings()).reserve('primary',{},now,metadata=BRIEFING)
+    other = BudgetLedger(repo,hourly_settings())
+    with pytest.raises(BudgetBlocked) as blocked:
+        await other.reserve('primary',{},now+timedelta(minutes=2),metadata=BRIEFING)
+    assert blocked.value.code == 'BRIEFING_INTERVAL'
+    await other.reserve('primary',{},now+timedelta(hours=1),metadata=BRIEFING)
+
+
+async def test_separate_briefing_still_obeys_monthly_cost_and_pending_reservations(repo):
+    ledger = BudgetLedger(repo,hourly_settings(monthly_soft_budget_usd='0.004',monthly_hard_budget_usd='0.004'))
+    await ledger.reserve('primary',{},NOW,metadata=BRIEFING)
+    with pytest.raises(BudgetBlocked) as blocked:
+        await ledger.reserve('primary',{},NOW+timedelta(hours=1),metadata=BRIEFING)
+    assert blocked.value.code == 'MONTHLY_COST_CAP'
+    assert ledger.snapshot(NOW)['daily_calls']['primary'] == 1
+
+
+async def test_briefing_does_not_consume_news_quota_or_allow_escalation_bypass(repo):
+    ledger = BudgetLedger(repo,hourly_settings(daily_primary_call_cap=1,hourly_primary_call_cap=1,
+                                              daily_escalation_call_cap=0))
+    await ledger.reserve('primary',{},NOW,metadata=BRIEFING)
+    await ledger.reserve('primary',{},NOW,metadata={'source_kind':'company_news'})
+    with pytest.raises(BudgetBlocked):
+        await ledger.reserve('primary',{},NOW)
+    with pytest.raises(BudgetBlocked):
+        await ledger.reserve('escalation',{},NOW,metadata=BRIEFING)
+
+
 @pytest.mark.parametrize('value', [-1, 7, True, '2'])
 def test_invalid_reserved_calls_rejected(value):
     with pytest.raises(ValueError):

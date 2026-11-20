@@ -261,7 +261,7 @@ def render_system(data,view):
     from .reference_panel import reference_rows, reference_benchmarks_visible
     st.subheader('시장 참고 지표')
     _table(reference_rows(data.market_reference,
-                          show_benchmarks=reference_benchmarks_visible(data.context)))
+                          show_benchmarks=reference_benchmarks_visible(data.context),stream=data.benchmark_stream))
     from .news_panel import provider_rows
     st.subheader('뉴스 수집 상태')
     _table(provider_rows(data.news_status))

@@ -62,7 +62,7 @@ class BudgetedAnalyzer:
         repository.set_control('session_llm_limits_v1',{key:str(getattr(self.settings,key)) for key in (
             'monthly_soft_budget_usd','monthly_hard_budget_usd','daily_primary_call_cap','daily_escalation_call_cap',
             'hourly_primary_call_cap','hourly_escalation_call_cap',
-            'daily_briefing_reserved_calls','hourly_briefing_reserved_calls')})
+            'daily_briefing_reserved_calls','hourly_briefing_reserved_calls','briefing_separate_schedule')})
         self.max_age_hours = self.settings.max_age_hours
         self._locks = {}
         previous=self.repo.get_control("llm_provider_health",{})

@@ -29,6 +29,42 @@ def response(data):
             'usage':{'prompt_tokens':300,'completion_tokens':100}}
 
 
+async def test_hourly_profile_keeps_interval_on_restart_without_daily_count_stop(tmp_path):
+    from sessionquant.macro.models import LLMSettings
+    from sessionquant.macro.budget import CONTROL
+    from sessionquant.strategy_explanation import STATE
+    repo=Repository(tmp_path/'hourly.db',backend='sqlite')
+    clock=[NOW]; data=inputs(); calls=[]
+    repo.set_control(CONTROL,{'2026-11':{'spent':'0.5','reservations':{},
+        'days':{NOW.date().isoformat():{'primary':600,'escalation':0}}}})
+    repo.set_control(STATE,{'day':NOW.date().isoformat(),'attempts':80,
+        'last_attempt_at':(NOW-timedelta(hours=1)).isoformat()})
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200,json=response(data))
+    settings={'enabled':True,'regular_session_only':True,'min_interval_seconds':3600,'max_attempts_per_day':None}
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            analyzer=BudgetedAnalyzer(repo,LLMSettings(briefing_separate_schedule=True),
+                api_key='fixture',client=client,clock=lambda:clock[0])
+            first=await StrategyExplainer(repo,analyzer,settings).refresh(data,clock[0])
+            assert first['status']=='SUCCEEDED' and len(calls)==1
+            data['strategy'][0]['blockers']=['changed']
+            clock[0]+=timedelta(minutes=59)
+            data['as_of']=clock[0].isoformat()
+            assert await StrategyExplainer(repo,analyzer,settings).refresh(data,clock[0]) is None
+            assert len(calls)==1
+            clock[0]+=timedelta(minutes=1)
+            data['as_of']=clock[0].isoformat()
+            assert (await StrategyExplainer(repo,analyzer,settings).refresh(data,clock[0]))['status']=='SUCCEEDED'
+            assert len(calls)==2 and not repo.all('orders')
+            clock[0]=NOW.replace(hour=22)
+            assert await StrategyExplainer(repo,analyzer,settings).refresh(data,clock[0]) is None
+            assert repo.get_control(VIEW)['status']=='POSTCLOSE' and len(calls)==2
+    finally:
+        repo.close()
+
+
 async def test_explanation_uses_audited_budgeted_transport_and_survives_restart(tmp_path):
     data=inputs();calls=[];clock=[NOW]
     async def request(req):

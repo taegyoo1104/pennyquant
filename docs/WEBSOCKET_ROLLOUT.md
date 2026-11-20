@@ -136,3 +136,9 @@ python -m sessionquant.ws_probe --symbols AAPL MSFT --seconds 60
 자동 검사는 가짜 HTTP·웹소켓과 로컬 루프백 연결로 끊김·재연결·중복·역순·신선도·엔진 전달을 검증합니다. 대시보드 부분 갱신과 집중 카드도 구현되어 있지만 실제 토스/GCP의 장중 처리량·모바일 터널 안정성은 별도 운영 검증 대상입니다.
 
 공급자 문서: [토스 AsyncAPI](https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json), [연동 가이드](https://openapi.tossinvest.com/openapi-docs/overview.md), [FAQ](https://openapi.tossinvest.com/openapi-docs/faq.md).
+
+## 분봉 조회와 참고 표
+
+호가는 웹소켓으로 전달하고 매매용 1분봉은 REST로 받습니다. 웹소켓 프로필은 한 순회에서 집중 최대 10종목의 분봉을 시도합니다. 아직 조회하지 못한 종목과 실제 분봉 조회 시각이 오래된 종목을 우선하며, 같은 분에 성공한 조회는 반복하지 않습니다. 기존 API 횟수·시간 예산, 429 대기와 오래된 자료의 진입 차단은 유지합니다. 공급자 지연이나 DB 처리 지연이 없어지는 것을 보장하지 않습니다.
+
+시장 참고 표의 SPY·QQQ·SOXX 표시 가격도 메인 카드와 같은 웹소켓 체결 기록을 읽습니다. 체결가 수신은 분봉 분석 검증 완료를 뜻하지 않으며 재접속·오래된 기록 상태를 구분합니다.

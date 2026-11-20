@@ -222,6 +222,14 @@ def test_chart_refresh_reads_only_three_controls_and_observes_new_prices(databas
     assert all(repo.closed for repo in database.instances)
 
 
+@pytest.mark.parametrize('page,panel', [('시장·종목','시장 참고'),('시스템·설정',None)])
+def test_reference_table_reads_same_benchmark_stream_as_home(database,page,panel):
+    database.controls['benchmark_trade_view_v1']={'enabled':True,'price_samples':{'SOXX':[1,'134.36',1]}}
+    data=load_database('unused.db',page=page,panel=panel)
+    assert data.benchmark_stream['price_samples']['SOXX'][1]=='134.36'
+    assert database.calls.count('benchmark_trade_view_v1')==1
+
+
 def test_news_summary_never_loads_portfolio_and_keeps_original_count_scope(database):
     data = load_database('unused.db', page='대시보드', panel='news')
     assert data.connected and not data.error
