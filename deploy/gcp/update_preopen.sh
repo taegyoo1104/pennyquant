@@ -37,7 +37,8 @@ fi
 }
 check_window
 sq_image="sessionquant:preopen-${sq_target:0:12}"
-docker build -t "$sq_image" "$sq_stage" < /dev/null
+docker build --build-arg "SQ_BUILD_REVISION=$sq_target" --build-arg SQ_BUILD_SOURCE=reviewed_archive \
+    -t "$sq_image" "$sq_stage" < /dev/null
 # A build can take time; recheck both the session and pending shutdown.
 check_window
 for unit in sessionquant-market-close.service sessionquant-cost-guard.service; do

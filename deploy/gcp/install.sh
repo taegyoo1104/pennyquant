@@ -47,7 +47,10 @@ if not db.exists():
 PY
 printf '%s\n' "$1" > /etc/sessionquant/backup-bucket
 chmod 600 /etc/sessionquant/*
-docker build -t sessionquant:local .
+# The working tree may include operator changes; HEAD is only a reference.
+sq_build_revision=$(git rev-parse HEAD 2>/dev/null || true)
+docker build --build-arg "SQ_BUILD_REVISION=$sq_build_revision" --build-arg SQ_BUILD_SOURCE=working_tree \
+    -t sessionquant:local .
 docker compose -f deploy/gcp/compose.yaml pull db
 chmod 755 deploy/gcp/*.sh
 install -m 644 deploy/gcp/sessionquant*.service deploy/gcp/sessionquant*.timer /etc/systemd/system/

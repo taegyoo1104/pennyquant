@@ -56,13 +56,51 @@ sudo docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml logs --tail=100
 
 ### 3. 별도 Cloud Shell 터미널에서 대시보드 열기
 
-새 Cloud Shell 탭의 프롬프트가 **`@cloudshell`**인지 확인한 뒤 실행합니다.
+Cloud Shell에 검토한 접속 도우미를 한 번 준비한 뒤에는 아래 명령 하나로 접속합니다. 프롬프트는 **`@cloudshell`**이어야 합니다. VM 안에서 실행하면 올바른 위치를 안내하고 중단합니다.
+
+```bash
+python3 "$HOME/sessionquant-dashboard.py"
+```
+
+도우미는 활성 로그인 계정, 고정된 `sessionquant / us-central1-a / sessionquant-paper`의 실행 상태, VM의 화면 HTTP 응답을 확인합니다. 부팅 직후 SSH·화면 서버가 준비 중이면 제한 시간 안에서 기다립니다. 화면 준비 대기는 기본 8분이며 이후 SSH 터널 준비도 별도 제한 시간이 있습니다. VM·프로그램·매매를 시작하거나 재시작하는 명령은 보내지 않습니다.
+
+8501이 이미 사용 중이면 **Cloud Shell에서만** 8502~8510 중 비어 있는 포트를 사용합니다. VM의 화면 포트는 항상 8501입니다. 기존 포트를 쓰는 프로세스를 종료하거나 임의의 기존 터널을 재사용하지 않습니다. 자신의 SSH 연결과 포트 전달 성공, 실제 HTTP 응답을 모두 확인한 뒤 `대시보드 접속 준비 완료`와 정확한 미리보기 포트를 표시합니다. **Cloud Shell 상단 웹 미리보기 → 포트 변경 → 출력된 번호**로 여세요. 필요하면 `--port 8503`처럼 포트를 직접 지정할 수 있습니다.
+
+접속 도우미를 실행한 터미널은 유지합니다. **Ctrl+C는 이 도우미가 연 접속만 닫으며 VM의 프로그램·매매는 계속 실행됩니다.** 같은 도우미를 여러 터미널에서 동시에 실행하면 각각 다른 접속이 생길 수 있으므로 정상적으로 열린 미리보기는 그대로 사용하세요. 접속이 끊기면 도우미를 다시 실행합니다.
+
+<details>
+<summary>최초 한 번: 검토한 버전의 접속 도우미 준비</summary>
+
+검토한 커밋의 전체 SHA와 그 커밋에 있는 `deploy/gcp/dashboard_access.py`의 SHA256을 준비합니다. 아래 두 예시 문자열을 실제 값으로 바꾼 뒤 **Cloud Shell**에서 실행합니다. 최신 `main` 파일을 검증 없이 바로 실행하지 않습니다.
+
+```bash
+bash <<'BASH'
+set -Eeuo pipefail
+umask 077
+SQ_REV=검토한_40자리_커밋_SHA
+SQ_ACCESS_SHA256=확인한_64자리_파일_SHA256
+[[ "$SQ_REV" =~ ^[0-9a-f]{40}$ && "$SQ_ACCESS_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+  echo '검토한 커밋 SHA와 접속 도우미 SHA256을 입력하세요.' >&2
+  exit 1
+}
+SQ_SCRIPT=$(mktemp)
+trap 'rm -f -- "$SQ_SCRIPT"' EXIT
+curl -fsSL "https://raw.githubusercontent.com/taegyoo1104/pennyquant/$SQ_REV/deploy/gcp/dashboard_access.py" -o "$SQ_SCRIPT"
+printf '%s  %s\n' "$SQ_ACCESS_SHA256" "$SQ_SCRIPT" | sha256sum --check
+install -m 700 "$SQ_SCRIPT" "$HOME/sessionquant-dashboard.py"
+echo '준비 완료. python3 "$HOME/sessionquant-dashboard.py" 로 접속하세요.'
+BASH
+```
+
+Cloud Shell 홈에 저장하므로 일반적인 터미널 재접속 때 다시 다운로드할 필요가 없습니다. 도우미를 업데이트할 때는 새로 검토한 SHA·해시로 같은 절차를 실행합니다.
+
+</details>
+
+로컬 PC에서 접속하려면 기존 수동 SSH 방식으로 자신의 PC에 터널을 열고 `http://localhost:8501`로 접속합니다. Cloud Shell용 도우미는 로컬 PC에서 실행하지 않습니다.
 
 ```bash
 gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap -- -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8501:127.0.0.1:8501
 ```
-
-출력 없이 기다리는 상태가 정상입니다. Cloud Shell 상단 **웹 미리보기 → 포트 변경 → 8501**로 엽니다. PC에 Google Cloud CLI를 설치해 같은 명령을 실행했다면 PC 브라우저에서 `http://localhost:8501`을 사용합니다.
 
 휴대폰은 같은 Google 계정으로 인증된 미리보기 링크를 이용할 수 있지만, Cloud Shell 세션·터널이 끝나면 링크도 끊깁니다. 인터넷 공개 대시보드가 아닙니다. 휴대폰 앱 전환이나 PC 종료로 터널이 끊겨도 **VM의 systemd/Docker 앱은 별도로 계속 실행**됩니다. 서버가 실제로 종료됐는지는 VM 상태로 확인합니다.
 
@@ -115,6 +153,10 @@ SH
 **CI는 구현되어 있고 CD 자동 배포는 구현되지 않았습니다.** GitHub의 `SessionQuant 회귀 검사`가 push·PR에서 정적 검사·오프라인 테스트 후 폐기 가능한 MySQL 통합 검사까지 자동 실행합니다. 수동 실행에서는 MySQL 검사 여부를 선택할 수 있습니다. 병합만 해서는 GCP 코드·이미지가 바뀌지 않습니다.
 
 업데이트는 검사가 통과하고 `main`에 포함된 **검토한 전체 커밋 SHA**로 고정합니다. 정규장 시작 전, 매매 시작을 누르기 전에 하며 백업·빌드 시간을 넉넉히 둡니다. 백업이 커지면 20분 이상 걸릴 수도 있습니다. 현재 커밋·설정은 운영 VM에서 확인합니다.
+
+업데이트 뒤에는 대시보드 **시스템·설정 → 실행 중인 프로그램**에서 `실행 코드`를 확인합니다. 이 값은 화면 서버가 실행 중인 이미지에 빌드할 때 넣은 커밋이며, VM 작업 폴더의 현재 Git 커밋을 읽은 값이 아닙니다. 정상 장전 업데이트는 검토한 커밋의 압축 소스로 이미지를 만들어 그 커밋을 표시합니다. `이미지 생성 시각`은 한국시간으로 표시하며 배포 완료 시각은 아닙니다.
+
+초기 설치·복구는 수정된 작업 폴더로 빌드할 수 있으므로 `작업 폴더로 만든 이미지 · 수정 포함 가능`과 참고용 `빌드 기준 커밋`을 표시합니다. 이 경우 기준 커밋과 실행 파일이 완전히 같다고 판단하지 않습니다. 기존 이미지·일반 Docker 빌드·잘못된 버전 파일은 `미확인`으로 표시하며, GitHub 최신 여부를 자동으로 판정하거나 DB의 과거 버전 기록을 현재 버전으로 대신 표시하지 않습니다.
 
 ```bash
 sudo git -C /opt/sessionquant log -1 --oneline

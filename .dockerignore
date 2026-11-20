@@ -2,6 +2,7 @@
 .env
 .env.*
 .git
+sessionquant/_build_info.json
 __pycache__
 .pytest_cache
 .ruff_cache

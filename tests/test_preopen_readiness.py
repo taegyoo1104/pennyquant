@@ -172,6 +172,7 @@ exit 0
     if failure=='upgrade':
         assert 'backup\n' in log and 'check\n' not in log
     if not failure:
+        assert 'docker build --build-arg SQ_BUILD_REVISION='+'a'*40+' --build-arg SQ_BUILD_SOURCE=reviewed_archive' in log
         if paused:
             assert sum(line.endswith('run --rm --no-deps -T app python -') for line in log.splitlines())==2
             assert sum(line.endswith('run --rm --no-deps -T app python - --stopped') for line in log.splitlines())==1
