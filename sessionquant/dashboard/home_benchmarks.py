@@ -78,38 +78,42 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
             opened = bounds[0].astimezone(KST).strftime('%m.%d %H:%M KST')
             card = cards[-1]
             card['empty_message'] = '개장 대기\n'+opened+'부터 차트를 준비해요.'
-            card['trend_status'] = '장전에는 정규장 차트를 그리지 않아요.'
+            card['trend_status'] = '장전 · 차트는 정규장 개장 후 표시해요.'
             if card.get('chart_kind') == 'trade' and card['price_status'] == '새 체결 대기':
-                card['price_status'] = '개장 대기'
+                card['price_status'] = '장전 시세 대기' if card['price'] == '—' else '가격 갱신 대기'
     return cards
 
 
 def _stream_card(card,stream,now):
-    from ..market_reference.trade_feed import samples, timestamp, MAX_AGE
+    from ..market_reference.trade_feed import samples, price_sample, timestamp, MAX_AGE
     symbol=card['symbol']
-    points=[]; latest=None; connected=False
+    points=[]; latest=None; connected=False; current=None
     try:
         known=timestamp(stream['updated_at'])
         if known<=now:
             points=samples((stream.get('points') or {}).get(symbol,[]),now)
+            current=price_sample((stream.get('price_samples') or {}).get(symbol),now)
             latest=(stream.get('latest') or {}).get(symbol)
             connected=(stream.get('state')=='CONNECTED' and stream.get('acknowledged') is True
                        and (now-known).total_seconds()<=10)
     except (ValueError,TypeError,KeyError,AttributeError):pass
-    price=_positive(points[-1][1]) if points else None
-    event=datetime.fromtimestamp(points[-1][0]/1000,timezone.utc) if points else None
+    current=current or (points[-1] if points else None)
+    price=_positive(current[1]) if current else None
+    event=datetime.fromtimestamp(current[0]/1000,timezone.utc) if current else None
     fresh=False
-    if latest and points:
+    if latest and current:
         try:
             received=timestamp(latest['received_at'])
-            fresh=bool(connected and latest['at']==points[-1][0] and latest['segment']==points[-1][2]
+            fresh=bool(connected and latest['at']==current[0] and latest['segment']==current[2]
                        and _positive(latest['price'])==price and event<=received<=now
                        and (now-event).total_seconds()<=MAX_AGE)
         except (ValueError,TypeError,KeyError,AttributeError):pass
     change=(price/card['reference']-1)*100 if price and card['reference'] else None
     status='최근 수신' if fresh else '새 체결 대기' if connected else '재접속 중' if stream.get('state')=='BACKOFF' else '연결 대기'
     if stream.get('state') in {'STOPPED','STOPPING'}:status='수신 중지'
-    card.update(price=f'${price:,.2f}' if price else '—',price_kind='체결가',price_status=status,price_fresh=fresh,
+    bounds=session_bounds(now)
+    kind='장전 체결가' if bounds and now<bounds[0] else '체결가'
+    card.update(price=f'${price:,.2f}' if price else '—',price_kind=kind,price_status=status,price_fresh=fresh,
         change=f'{change:+.2f}%' if change is not None else '전일 대비 확인 중',
         tone='up' if change is not None and change>0 else 'down' if change is not None and change<0 else 'flat',
         time_label=event.astimezone(KST).strftime('%m.%d %H:%M:%S KST') if event else '체결가 수신을 기다려요.',
@@ -216,7 +220,7 @@ def render_benchmarks(view, context, *, now=None, stream=None):
     st.markdown('<div class="sq-section"><h2>시장 흐름</h2><p>참고용 · 매수 조건과 별개</p></div>',unsafe_allow_html=True)
     st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols,stream=stream)),unsafe_allow_html=True)
     if stream and stream.get('enabled'):
-        st.caption('미국 정규장에 수신한 체결가를 1초 단위로 모아 표시합니다. 연결 끊김·15초 넘는 수신 공백은 선으로 잇지 않습니다.')
+        st.caption('장전에도 수신한 체결가를 표시합니다. 차트는 정규장 체결가만 1초 단위로 모아 그립니다. 연결 끊김·15초 넘는 수신 공백은 선으로 잇지 않습니다.')
     st.caption('현재 연결한 토스 API에서 해당 미국 지수를 직접 제공하지 않아 ETF로 시장 흐름을 보여드려요. '
         'SPY는 S&P 500, QQQ는 나스닥 100, SOXX는 미국 반도체 업종을 살펴보는 용도입니다. '
         '지수 자체의 수치는 아니며, SOXX는 필라델피아 반도체 지수와 구성 종목·비중이 달라요.')

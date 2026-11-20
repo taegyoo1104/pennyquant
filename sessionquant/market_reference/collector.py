@@ -2,6 +2,7 @@
 from datetime import timedelta
 from time import monotonic
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from ..models import utc
 from ..market.bars import session_bounds
@@ -40,7 +41,8 @@ class MarketReferenceMonitor:
         """read는 남은 주기 예산·대기를 적용한 읽기 함수이며 토큰을 새로 만들지 않는다."""
         self._pending = []
         now = utc(self.clock());bounds = session_bounds(now)
-        if not bounds or not bounds[0] <= now < bounds[1]:
+        preopen = bool(bounds and now < bounds[0] and self.display_only)
+        if not bounds or not (preopen or bounds[0] <= now < bounds[1]):
             return self.store.publish(now,symbols=self.symbols)
         schedules = self.store.state['schedule']
         jobs = [('prices','*',self.price_seconds)] if self.display_only else [('stocks','*',86400),('prices','*',self.price_seconds)]
@@ -48,11 +50,14 @@ class MarketReferenceMonitor:
         for symbol in self.symbols:
             # A failed optional request must not hide the daily comparison all day.
             daily_interval = 300 if self.display_only and self.store.state['capabilities'].get(symbol,{}).get('daily',{}).get('status') != 'OBSERVED' else 86400
-            jobs += [('daily',symbol,daily_interval)] if self.stream_prices else [('candle',symbol,self.candle_seconds),('daily',symbol,daily_interval)] if self.display_only else [
+            jobs += [('daily',symbol,daily_interval)] if self.stream_prices or preopen else [('candle',symbol,self.candle_seconds),('daily',symbol,daily_interval)] if self.display_only else [
                 ('orderbook',symbol,60),('candle',symbol,self.candle_seconds),('daily',symbol,86400)]
+        # Refresh yesterday's close once in preopen and again at the open, not
+        # on every preopen cycle simply because the open is still in the future.
+        daily_boundary = bounds[0].astimezone(ZoneInfo('America/New_York')).replace(hour=0,minute=0) if preopen else bounds[0]
         due = [(stream,symbol,interval) for stream,symbol,interval in jobs
                if not schedules.get(stream+':'+symbol) or (now-utc(schedules[stream+':'+symbol])).total_seconds()>=interval
-               or (stream=='daily' and utc(schedules[stream+':'+symbol])<bounds[0])]
+               or (stream=='daily' and utc(schedules[stream+':'+symbol])<daily_boundary)]
         due.sort(key=lambda row:(schedules.get(row[0]+':'+row[1],''),jobs.index(row)))
         for stream,symbol,_ in due[:min(self.calls_per_cycle,self.calls_per_cycle if limit is None else limit)]:
             schedules[stream+':'+symbol] = utc(self.clock()).isoformat()
