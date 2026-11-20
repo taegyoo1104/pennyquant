@@ -326,6 +326,10 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     if not styled:
         style()
     page=selected_page or st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
+    if page == '시스템·설정':
+        # Build identity is local to this process/image, available even if DB reads fail.
+        from sessionquant.dashboard.version_panel import render_version
+        render_version(st)
     news_section = None
     if page == '뉴스·LLM':
         from sessionquant.dashboard.load_plan import NEWS_SECTIONS

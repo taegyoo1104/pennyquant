@@ -22,7 +22,10 @@ logging=$("${compose[@]}" exec -T db sh -c \
 install -m 600 /dev/null /etc/sessionquant/binlog-disabled-verified
 python3 deploy/gcp/storage_check.py --minimum-mib 2048
 bash deploy/gcp/backup.sh < /dev/null
-docker build -t sessionquant:local . < /dev/null
+# Recovery patches make a working-tree build distinct from the base commit.
+sq_build_revision=$(git rev-parse HEAD 2>/dev/null || true)
+docker build --build-arg "SQ_BUILD_REVISION=$sq_build_revision" --build-arg SQ_BUILD_SOURCE=working_tree \
+    -t sessionquant:local . < /dev/null
 python3 deploy/gcp/storage_check.py --minimum-mib 2048
 chmod 755 deploy/gcp/*.sh
 for path in deploy/gcp/sessionquant*.service deploy/gcp/sessionquant*.timer; do

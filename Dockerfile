@@ -10,6 +10,10 @@ COPY sessionquant ./sessionquant
 COPY pennyquant ./pennyquant
 COPY config ./config
 COPY .streamlit ./.streamlit
+ARG SQ_BUILD_REVISION=""
+ARG SQ_BUILD_SOURCE=unknown
+RUN python -m sessionquant.build_info --write /app/sessionquant/_build_info.json \
+    --source "$SQ_BUILD_SOURCE" --revision "$SQ_BUILD_REVISION"
 RUN --mount=type=secret,id=pip_ca \
     if [ -f /run/secrets/pip_ca ]; then export PIP_CERT=/run/secrets/pip_ca; fi; \
     python -m pip install --no-deps . && useradd --uid 1000 --create-home sessionquant && mkdir -p /app/data && chown -R sessionquant:sessionquant /app
