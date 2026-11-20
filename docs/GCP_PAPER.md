@@ -85,6 +85,31 @@ gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-
 
 화면 내부에 DB 오류가 뜨면 터널은 연결된 상태일 수 있습니다. `MySQL 2013` 등 실제 오류와 `dashboard_read_failed`의 조회 항목·시간을 확인합니다. [오류별 진단](REALTIME_PAPER.md#문제별로-먼저-볼-것)을 참고하세요.
 
+### MySQL 1038로 시작이 중단된 경우
+
+2026-11-19에는 코드·이미지 교체와 Cloud Storage 백업이 끝난 뒤 앱이 6초 만에 `MySQL 1038 · SELECT`로 종료됐다. 1038은 조회 결과의 정렬 작업 메모리 부족이다. 어떤 테이블·실행 계획이 실패했는지는 해당 로그만으로 확정할 수 없다. 상태 검사 대기 시간을 늘려 해결할 오류가 아니다.
+
+공통 기록 조회는 `(namespace, seq)` 인덱스로 순번대로 읽도록 지정해 큰 JSON 내용을 별도로 정렬하는 경로를 피한다. 실제 MySQL에서 큰 JSON·작은 정렬 버퍼로 1038을 재현하고 인덱스 조회의 결과·순서·실행 계획을 검사한다. DB 서버의 다른 정렬 작업까지 모두 해결한다는 의미는 아니다.
+
+기존 이미지의 복구가 먼저 필요하면, **8GiB 운영 VM·최대 DB 연결 30개 설정**에서 아래 명령으로 정렬 버퍼가 8MiB 미만일 때만 8MiB로 올릴 수 있다. 운영 VM에서 실행한다. 새 DB 연결부터 적용되며 `SET PERSIST`가 DB 데이터 디렉터리에 저장하므로 DB 재시작 뒤에도 유지된다. 이미 8MiB 이상인데 실패하면 추가 증설 대신 실패한 조회·실행 계획을 확인한다. 비밀번호·SQL 응답 원문을 공유하지 않는다.
+
+```bash
+sudo docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml exec -T db sh <<'SH'
+set -eu
+export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+SQ_SORT_BYTES=$(mysql -u root -N -B -e 'SELECT @@GLOBAL.sort_buffer_size')
+case "$SQ_SORT_BYTES" in
+  ''|*[!0-9]*) echo '정렬 버퍼 설정을 읽지 못했습니다.' >&2; exit 1 ;;
+esac
+if [ "$SQ_SORT_BYTES" -lt 8388608 ]; then
+  mysql -u root -e 'SET PERSIST sort_buffer_size = 8388608'
+fi
+mysql -u root -e 'SELECT @@GLOBAL.sort_buffer_size / 1024 / 1024 AS sort_buffer_MiB'
+SH
+```
+
+전체 업데이트를 반복하면 백업도 다시 실행된다. 코드 교체가 완료됐고 웹소켓 전환만 남았다면 위 설정이 성공한 뒤 [웹소켓 전환 절차](WEBSOCKET_ROLLOUT.md)의 `activate_websocket.sh`부터 이어갈 수 있다. 전환 스크립트는 기존 장부의 보유·미체결 없음과 새 백업 성공을 별도로 확인한다. 앞선 백업을 자동으로 재사용하지 않으며, 종료·시작 실패를 설정 파일 덮어쓰기로 우회하지 않는다.
+
 ## 장전 업데이트
 
 **CI는 구현되어 있고 CD 자동 배포는 구현되지 않았습니다.** GitHub의 `SessionQuant 회귀 검사`가 push·PR에서 정적 검사와 오프라인 테스트를 실행합니다. 선택적 MySQL 검사는 수동 실행입니다. 병합만 해서는 GCP 코드·이미지가 바뀌지 않습니다.
