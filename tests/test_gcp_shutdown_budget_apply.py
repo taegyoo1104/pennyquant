@@ -110,6 +110,8 @@ class Systemd:
                 return "t " + str(self.started)
             if args[-1] == "WakeSystem":
                 return "b false"
+            if args[-1] == "Transient":
+                return "b true" if name == "market" else "b false"
             if args[-1] == "RandomizedDelayUSec":
                 return "t 0"
             if args[-1] == "TimersCalendar":
@@ -159,6 +161,7 @@ def test_live_install_preserves_timers_app_and_recovery_copy_and_is_repeatable(i
         assert path.stat().st_mode & 0o777 == (0o755 if path.suffix == ".sh" else 0o644)
     assert (root / patch.DROPIN).read_bytes() == patch.DROPIN_BODY
     assert patch.DROPIN.startswith("run/")  # today's override expires with the VM boot
+    assert patch.TIMER_DROPIN.startswith("run/systemd/transient/")  # expires when the current timer is replaced
     assert (root / "etc/systemd/system/sessionquant-cost-guard.service").read_bytes() == payloads["sessionquant-cost-guard.service"]
     second = apply(installed)
     assert second != backup
@@ -342,7 +345,7 @@ def test_timer_pin_write_failure_does_not_reload_or_change_other_host_files(inst
 
 
 @pytest.mark.parametrize("property_name,value", [
-    ("WakeSystem", "b true"), ("RandomizedDelayUSec", "t 1000000"),
+    ("Transient", "b false"), ("WakeSystem", "b true"), ("RandomizedDelayUSec", "t 1000000"),
     ("TimersCalendar", 'a(sst) 1 "OnCalendar" "*-*-* 21:05:00" 1795208700000000'),
     ("TimersMonotonic", 'a(stt) 2 "OnActiveUSec" 4000000000 4600000000 "OnBootUSec" 4600000000 4600000000'),
 ])

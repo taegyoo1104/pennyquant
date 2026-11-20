@@ -40,7 +40,10 @@ SERVICES = ("sessionquant-market-close", "sessionquant-cost-guard")
 # uses the updated start.sh, so no persistent override can outlive this fix.
 DROPIN = "run/systemd/system/sessionquant-market-close.service.d/90-sessionquant-backup-budget.conf"
 DROPIN_BODY = b"[Service]\nTimeoutStartSec=4200\n"
-TIMER_DROPIN = "run/systemd/system/sessionquant-market-close.timer.d/90-sessionquant-fixed-deadline.conf"
+# Belongs to this transient timer, not merely this boot. systemd removes it
+# when start.sh replaces the unit, so an old pin cannot override a newly armed
+# holiday/calendar-failure deadline during a later service start.
+TIMER_DROPIN = "run/systemd/transient/sessionquant-market-close.timer.d/90-sessionquant-fixed-deadline.conf"
 REPO = "opt/sessionquant/deploy/gcp/"
 BACKUP_ROOT = "var/lib/sessionquant/update-backups"
 MIN_REMAINING_USEC = 600 * 1_000_000
@@ -101,6 +104,8 @@ def timer_snapshots(run_command, monotonic):
             raise ValueError("알려진 종료 작업이 아닙니다: " + service)
         if show(timer, "ActiveState") != "active" or show(timer, "Unit") != service:
             raise ValueError("활성 종료 예약을 확인할 수 없습니다: " + timer)
+        if name == "sessionquant-market-close" and property_tokens(run_command, timer, "Unit", "Transient") != ["b", "true"]:
+            raise ValueError("현재 실행에 등록된 임시 장 마감 타이머가 아닙니다.")
         if (property_tokens(run_command, timer, "Timer", "WakeSystem") != ["b", "false"] or
                 property_usec(run_command, timer, "Timer", "RandomizedDelayUSec") != 0 or
                 property_tokens(run_command, timer, "Timer", "TimersCalendar") != ["a(sst)", "0"]):
