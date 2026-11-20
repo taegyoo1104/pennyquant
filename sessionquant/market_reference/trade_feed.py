@@ -60,6 +60,24 @@ def samples(rows, now):
     return result
 
 
+def price_sample(row, now):
+    """A display price may be preopen; regular-session chart samples may not."""
+    try:
+        now = timestamp(now)
+        millis, price, segment = row
+        if type(millis) is not int or type(segment) is not int or segment < 0:
+            return None
+        at = datetime.fromtimestamp(millis/1000, timezone.utc)
+        value = positive(price)
+        bounds = session_bounds(now)
+        if (not bounds or session_bounds(at) != bounds or not now-timedelta(hours=1) <= at <= now
+                or at > bounds[1] or (at < bounds[0]) != (now < bounds[0])):
+            return None
+        return [millis, str(value), segment]
+    except (ValueError, TypeError, OverflowError, OSError, InvalidOperation):
+        return None
+
+
 class BenchmarkTradeFeed:
     def __init__(self, rest, *, symbols=SYMBOLS, restored=None, stream=None, clock=now_utc,
                  retry_initial=1., retry_max=30.):
@@ -79,7 +97,10 @@ class BenchmarkTradeFeed:
             saved = {}
         saved_points = saved.get('points') if isinstance(saved.get('points'),dict) else {}
         self.points = {s:deque(samples(saved_points.get(s,[]),now),maxlen=MAX_POINTS) for s in symbols}
-        self.segment = max((r[2] for rows in self.points.values() for r in rows),default=0)+1
+        saved_prices = saved.get('price_samples') if isinstance(saved.get('price_samples'),dict) else {}
+        self.price_samples = {s:row for s in symbols if (row := price_sample(saved_prices.get(s),now))}
+        self.segment = max([r[2] for rows in self.points.values() for r in rows]
+                           + [r[2] for r in self.price_samples.values()],default=0)+1
         self.latest = {}; self.state = 'STARTING'; self.acknowledged = False
         self.retry_seconds = 0.; self.last_error = None
         self.counts = {'connections':0,'reconnects':0,'received':0,'invalid':0,'ignored':0}
@@ -103,22 +124,26 @@ class BenchmarkTradeFeed:
             bounds = session_bounds(now)
             if not at <= received <= now or (now-at).total_seconds() > MAX_AGE:
                 raise ValueError('future or delayed trade')
-            if not bounds or not bounds[0] <= at <= min(now,bounds[1]):
+            if (not bounds or session_bounds(at) != bounds or at > bounds[1]
+                    or (at < bounds[0]) != (now < bounds[0])):
                 self.counts['ignored'] += 1
                 return
             millis = int(at.timestamp()*1000)
             rows = self.points[symbol]
             prior = self.latest.get(symbol)
+            last = self.price_samples.get(symbol) or (rows[-1] if rows else None)
             # Across restart/reconnect the old source event cannot refresh the chart.
-            if rows and (millis < rows[-1][0] or (millis == rows[-1][0] and
-                    (rows[-1][2] != self.segment or str(price) == rows[-1][1]))):
+            if last and (millis < last[0] or (millis == last[0] and
+                    (last[2] != self.segment or str(price) == last[1]))):
                 self.counts['ignored'] += 1
                 return
             row = [millis,str(price),self.segment]
-            if rows and rows[-1][0]//1000 == millis//1000 and rows[-1][2] == self.segment:
-                rows[-1] = row
-            else:
-                rows.append(row)
+            self.price_samples[symbol] = row
+            if at >= bounds[0]:
+                if rows and rows[-1][0]//1000 == millis//1000 and rows[-1][2] == self.segment:
+                    rows[-1] = row
+                else:
+                    rows.append(row)
             while rows and rows[0][0] < int((now-timedelta(hours=1)).timestamp()*1000):
                 rows.popleft()
             # Same-time trades can legitimately have different prices. Do not
@@ -182,6 +207,7 @@ class BenchmarkTradeFeed:
                 'retry_seconds':self.retry_seconds,'last_error_type':self.last_error,'counts':dict(self.counts),
                 'sample_seconds':1,'gap_seconds':GAP_SECONDS,
                 'latest':{s:dict(r) for s,r in self.latest.items()},
+                'price_samples':{s:row for s,r in self.price_samples.items() if (row := price_sample(r,now))},
                 'points':{s:samples(list(rows),now) for s,rows in self.points.items()}}
 
     def stop(self):
