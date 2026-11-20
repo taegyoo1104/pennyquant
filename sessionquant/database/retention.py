@@ -67,7 +67,7 @@ def retention_rules(policy):
     from ..research.journal import KINDS, CONTROLS
     replay_kinds = sorted(KINDS | CONTROLS | {"recording_start", "recording_stop", "engine_batch", "pipeline_status", "market_history_sessions"})
     replay_condition = "payload->>'$.kind' IN (" + ",".join("'" + kind + "'" for kind in replay_kinds) + ")"
-    daily = {"research_events", "pipeline_status", "price_samples", "quote_snapshots", "market_regimes", "system_logs"}
+    daily = {"research_events", "pipeline_status", "price_samples", "quote_snapshots"}
     return tuple((kind, "intraday" if kind in daily else age,
                   replay_condition if kind == "research_events" else condition) for kind, age, condition in RULES)
 

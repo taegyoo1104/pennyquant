@@ -51,7 +51,7 @@ def test_intraday_retention_expires_replay_but_keeps_today_active_and_financial_
     seed(repo, 'pipeline_status', 'used-selection', now, days=1, kind='portfolio_selection')
     seed(repo, 'pipeline_status', 'risk-evidence', now, days=1, kind='risk_decision')
     seed(repo, 'order_intents', 'intent', now, days=1, selection_id='used-selection')
-    keep = ('orders', 'executions', 'positions', 'account_snapshots', 'daily_performance', 'market_bars', 'market_history_sessions', 'llm_usage', 'news_events')
+    keep = ('orders', 'executions', 'positions', 'account_snapshots', 'daily_performance', 'market_bars', 'market_history_sessions', 'llm_usage', 'news_events', 'system_logs', 'market_regimes')
     for kind in keep:
         seed(repo, kind, 'keep-'+kind, now, days=1)
     repo.save_state({'cash': '123.45', 'positions': {'TEST': '0.01'}})
