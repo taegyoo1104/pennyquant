@@ -117,7 +117,7 @@ def test_prepare_check_and_update_shells_parse_and_do_not_delete_runtime_data():
     assert 'news-refresh' not in check and 'llm' not in check.split('set -Eeuo',1)[-1].lower()
 
 
-@pytest.mark.parametrize('failure',['','build','backup','upgrade','check','masked'])
+@pytest.mark.parametrize('failure',['','build','backup','upgrade','retention','check','masked'])
 @pytest.mark.parametrize('paused',[False,True])
 def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,paused):
     import os
@@ -135,6 +135,7 @@ def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,pa
         (folder/'storage_check.py').write_text('')
         (folder/'update_guard.py').write_text('# read-only guard fixture')
     executable(deploy/'backup.sh','echo backup >> "$CALLS"\n[[ "$FAILURE" != backup ]]\n')
+    executable(deploy/'retention_after_update.sh','echo retention >> "$CALLS"\n[[ "$FAILURE" != retention ]]\n')
     executable(deploy/'preopen_check.sh','echo check >> "$CALLS"\n[[ "$FAILURE" != check ]]\n')
     executable(binpath/'hostname','echo sessionquant-paper\n')
     executable(binpath/'git','echo "git $*" >> "$CALLS"\n')
@@ -171,6 +172,8 @@ exit 0
     if failure in ('build','masked'):assert 'systemctl stop sessionquant.service' not in log
     if failure=='upgrade':
         assert 'backup\n' in log and 'check\n' not in log
+    if failure=='retention':
+        assert 'backup\n' in log and 'retention\n' in log and 'check\n' not in log
     if not failure:
         assert 'docker build --build-arg SQ_BUILD_REVISION='+'a'*40+' --build-arg SQ_BUILD_SOURCE=reviewed_archive' in log
         if paused:
@@ -179,6 +182,7 @@ exit 0
         assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
         assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
         assert log.index('backup\n')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
+        assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('retention\n')<log.index('check\n')
         assert 'is-active --quiet sessionquant-market-close.timer' in log
         assert 'is-active --quiet sessionquant-storage-guard.timer' in log
 

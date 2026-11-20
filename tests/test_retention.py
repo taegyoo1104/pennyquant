@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from contextlib import closing
 
 import pytest
 
@@ -10,7 +11,7 @@ NAME = "sessionquant-20261118T210400Z-test-fixture.tar.gz"
 
 
 @pytest.mark.parametrize("settings", [
-    {"enabled": 1}, {"diagnostics_days": 6}, {"news_days": 29}, {"max_rows": True},
+    {"enabled": 1}, {"intraday_auxiliary": 1}, {"diagnostics_days": 6}, {"news_days": 29}, {"max_rows": True},
     {"max_seconds": 91}, {"batch_size": 501}, {"diagnostics_days": 60, "news_days": 30},
 ])
 def test_policy_rejects_unsafe_limits(settings):
@@ -60,3 +61,40 @@ def test_unknown_recent_or_referenced_metadata_is_kept():
 def test_imported_timestamp_must_prove_expiry_even_with_old_receipt(timestamp, expired):
     metadata = {"received_at": "2026-01-01T00:00:00Z", "timestamp": timestamp}
     assert _unused("quote_snapshots", metadata, NOW, {"news": set(), "selection": set()}) is expired
+
+
+@pytest.mark.parametrize('now,expected', [
+    ('2026-11-20T04:59:59Z', '2026-11-20T04:59:59Z'),  # Nov19 postclose NY
+    ('2026-11-20T05:00:00Z', '2026-11-20T05:00:00Z'),  # Nov20 midnight NY
+    ('2026-11-20T18:00:00Z', '2026-11-20T05:00:00Z'),
+    ('2026-11-20T21:05:00Z', '2026-11-20T21:05:00Z'),
+    ('2026-07-20T15:00:00Z', '2026-07-20T04:00:00Z'),  # daylight saving
+    ('2026-11-27T18:05:00Z', '2026-11-27T18:05:00Z'),  # early close
+])
+def test_intraday_cutoff_preserves_current_session_until_market_close(now, expected):
+    from sessionquant.models import utc
+    from sessionquant.database.retention import retention_cutoff
+    assert retention_cutoff({}, 'intraday', utc(now)) == utc(expected)
+
+
+def test_unknown_calendar_protects_today(monkeypatch):
+    from sessionquant.market import bars
+    from sessionquant.models import utc
+    from sessionquant.database.retention import retention_cutoff
+    monkeypatch.setattr(bars, 'session_bounds', lambda _: None)
+    assert retention_cutoff({}, 'intraday', utc('2026-11-20T22:00:00Z')) == utc('2026-11-20T05:00:00Z')
+
+
+def test_pruned_recording_cannot_be_exported_as_complete(tmp_path):
+    from sessionquant.database.repository import Repository
+    from sessionquant.database.retention import REPLAY_PRUNED
+    from sessionquant.research.bundle import export_recording
+    with closing(Repository(tmp_path/'replay.db', backend='sqlite')) as repo:
+        repo.set_control(REPLAY_PRUNED, {'version': 1, 'runs': {'yesterday': {'backup': NAME}}})
+        for run in (None, 'yesterday'):
+            with pytest.raises(ValueError, match='정리된 재현 자료'):
+                export_recording(repo, tmp_path/'export', run_id=run)
+            assert not (tmp_path/'export').exists()
+        # A different run reaches the normal validation, not the pruning guard.
+        with pytest.raises(ValueError, match='지정한 실행 시작 기록'):
+            export_recording(repo, tmp_path/'export', run_id='today')

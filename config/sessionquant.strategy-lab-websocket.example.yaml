@@ -12,6 +12,7 @@ actual_account_monitor_enabled: false
 recording_enabled: true
 retention:
   enabled: true
+  intraday_auxiliary: true  # 새 백업 후 지난 거래일의 재현·임시 관측 자료 정리. 장부·과거 분봉은 보존.
   diagnostics_days: 7
   news_days: 30
   max_seconds: 90
