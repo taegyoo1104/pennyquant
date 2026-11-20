@@ -200,6 +200,9 @@ class StrategyExplainer:
                     result.update(status='SUCCEEDED',sections=validate(parsed,data),generated_at=utc(self.analyzer._clock()).isoformat())
                 except BudgetBlocked as exc:
                     result.update(status='BUDGET_BLOCKED',error='budget_or_provider_cooldown',limit_reason=exc.code)
+                    ledger = getattr(self.analyzer, 'ledger', None)
+                    if ledger is not None:
+                        result['budget'] = ledger.snapshot(utc(self.analyzer._clock()))
                 except ValidationFailure as exc:
                     result.update(status='INVALID_RESPONSE',validation_error_code=exc.code,failed_field=exc.field)
                 except Exception as exc:

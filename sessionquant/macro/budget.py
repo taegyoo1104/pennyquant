@@ -28,6 +28,10 @@ class BudgetLedger:
         return {'month':now.strftime('%Y-%m'),'spent_usd':month.get('spent','0'),
             'reserved_usd':str(sum((Decimal(item['amount']) for item in month.get('reservations',{}).values()),Decimal(0))),
             'daily_calls':month.get('days',{}).get(now.date().isoformat(),{'primary':0,'escalation':0}),
+            'hourly_calls':month.get('hours',{}).get(now.strftime('%Y-%m-%dT%H'),{'primary':0,'escalation':0}),
+            'daily_primary_cap':self.settings.daily_primary_call_cap,
+            'hourly_primary_cap':self.settings.hourly_primary_call_cap,
+            'monthly_cap_usd':str(self.settings.monthly_hard_budget_usd),
             'pricing_verified':self.settings.pricing_verified,'pricing_basis':'configured_token_rates','currency':'USD'}
 
     async def reserve(self,stage,payload,now,*,call_id=None,metadata=None,before_commit=None):
@@ -37,6 +41,7 @@ class BudgetLedger:
         amount=(Decimal(input_bound)*rate_in+Decimal(output_bound)*rate_out)/Decimal(1000000)
         now=utc(now);month_key=now.strftime('%Y-%m');day=now.date().isoformat();hour=now.strftime('%Y-%m-%dT%H')
         token=call_id or uuid4().hex
+        briefing = stage == 'primary' and (metadata or {}).get('source_kind') == 'strategy_snapshot'
         def update(state):
             state=state or {};month=state.setdefault(month_key,{'spent':'0','days':{},'reservations':{}})
             counts=month['days'].setdefault(day,{'primary':0,'escalation':0})
@@ -45,12 +50,27 @@ class BudgetLedger:
                 raise BudgetBlocked('일일 LLM 호출 한도에 도달했습니다', code='DAILY_CALL_CAP')
             if hourly[stage]>=getattr(self.settings,'hourly_'+stage+'_call_cap'):
                 raise BudgetBlocked('시간당 LLM 호출 한도에 도달했습니다', code='HOURLY_CALL_CAP')
+            briefing_days = month.setdefault('briefing_days', {})
+            briefing_hours = month.setdefault('briefing_hours', {})
+            if stage == 'primary' and not briefing:
+                # The existing cap includes both news and briefing. Reserve a
+                # slice for regular-session narration, without increasing caps
+                # or clearing calls made before this version was deployed.
+                if (counts[stage] - briefing_days.get(day, 0) >=
+                        self.settings.daily_primary_call_cap - self.settings.daily_briefing_reserved_calls):
+                    raise BudgetBlocked('남은 일일 호출은 AI 브리핑용입니다', code='BRIEFING_DAILY_RESERVE')
+                if (hourly[stage] - briefing_hours.get(hour, 0) >=
+                        self.settings.hourly_primary_call_cap - self.settings.hourly_briefing_reserved_calls):
+                    raise BudgetBlocked('남은 시간당 호출은 AI 브리핑용입니다', code='BRIEFING_HOURLY_RESERVE')
             total=Decimal(month['spent'])+sum((Decimal(row['amount']) for row in month['reservations'].values()),Decimal(0))
             cap=self.settings.monthly_soft_budget_usd if stage=='primary' else self.settings.monthly_hard_budget_usd
             if total+amount>min(cap,self.settings.monthly_hard_budget_usd):raise BudgetBlocked('월간 LLM 비용 한도에 도달했습니다', code='MONTHLY_COST_CAP')
             if token in month['reservations']:raise ValueError('LLM 예약 식별자가 중복됩니다.')
             month['reservations'][token]={'amount':str(amount),'stage':stage,'created_at':now.isoformat(),**(metadata or {})}
             counts[stage]+=1;hourly[stage]+=1
+            if briefing:
+                briefing_days[day] = briefing_days.get(day, 0) + 1
+                briefing_hours[hour] = briefing_hours.get(hour, 0) + 1
             if before_commit:before_commit(token,amount)
             return state
         async with self.lock:self.repo.update_control(CONTROL,update,{})

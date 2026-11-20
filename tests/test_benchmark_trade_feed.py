@@ -194,7 +194,7 @@ def test_chart_joins_trade_samples_across_minutes_but_not_reconnects_or_long_gap
     for seconds,price in ((-3,'99'),(-2,'101'),(-1,'102'),(0,'101')):
         feed.accept(trade(at=NOW+timedelta(seconds=seconds),price=price),feed.segment)
     html=benchmark_cards_html([card(feed)])
-    assert html.count('<polyline')==2 and '<circle' not in html
+    assert html.count('<polyline')==2 and html.count('<circle')==2  # Latest-price dot and halo.
     assert '빈칸' not in html and '#60a5fa' in html and '#f87171' in html
     feed.invalidate();feed.segment+=1;feed.acknowledged=True;feed.state='CONNECTED'
     feed.clock=lambda:NOW+timedelta(seconds=1)

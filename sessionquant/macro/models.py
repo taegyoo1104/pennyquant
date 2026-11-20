@@ -136,6 +136,8 @@ class LLMSettings:
     daily_escalation_call_cap: int = 5
     hourly_primary_call_cap: int = 10
     hourly_escalation_call_cap: int = 2
+    daily_briefing_reserved_calls: int = 0
+    hourly_briefing_reserved_calls: int = 0
     format_retry_limit: int = 0
     monthly_soft_budget_usd: Decimal = Decimal("2.0")
     monthly_hard_budget_usd: Decimal = Decimal("3.0")
@@ -185,6 +187,10 @@ class LLMSettings:
                 or self.monthly_soft_budget_usd > self.monthly_hard_budget_usd):
             raise ValueError("LLM 동시 호출·본문·예산 한도를 확인하십시오")
         if self.format_retry_limit>1:raise ValueError('형식 오류 재시도는 최대 1회입니다.')
+        for period in ('daily', 'hourly'):
+            value = getattr(self, period+'_briefing_reserved_calls')
+            if type(value) is not int or not 0 <= value <= getattr(self, period+'_primary_call_cap'):
+                raise ValueError('브리핑 예약 횟수는 전체 AI 호출 한도 안에서 설정해야 합니다.')
         if not self.primary_model.strip() or not self.escalation_model.strip():
             raise ValueError("LLM 모델명이 필요합니다")
         if type(self.enable_event_cache) is not bool or type(self.enable_escalation) is not bool or type(self.pricing_verified) is not bool:

@@ -49,7 +49,8 @@ class MarketReferenceMonitor:
         if self.stream_prices:jobs=[]
         for symbol in self.symbols:
             # A failed optional request must not hide the daily comparison all day.
-            daily_interval = 300 if self.display_only and self.store.state['capabilities'].get(symbol,{}).get('daily',{}).get('status') != 'OBSERVED' else 86400
+            from .daily import previous_close
+            daily_interval = 300 if self.display_only and previous_close(self.store, symbol, now) is None else 86400
             jobs += [('daily',symbol,daily_interval)] if self.stream_prices or preopen else [('candle',symbol,self.candle_seconds),('daily',symbol,daily_interval)] if self.display_only else [
                 ('orderbook',symbol,60),('candle',symbol,self.candle_seconds),('daily',symbol,86400)]
         # Refresh yesterday's close once in preopen and again at the open, not

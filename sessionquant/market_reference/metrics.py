@@ -1,7 +1,6 @@
 """금리 bp·현물 유가로 환산하지 않는 Decimal ETF 시계열 계산."""
 from datetime import timedelta
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 from ..models import utc
 from ..portfolio.models import serialize
 from .contracts import REFERENCES, identity, permission_status
@@ -47,10 +46,8 @@ def build_metrics(store,symbol,now):
             'available_at':max((r['available_at'] for r in present),default=None),'input_ids':[r['id'] for r in present]}
     prices = [r for r in store.rows(symbol,'price',now) if r['currency']=='USD' and r['quality_status'] not in {'INVALID','UNAVAILABLE','REVISION_PENDING'}]
     current = max(prices,key=lambda r:r['event_at']) if prices else last
-    daily = [r for r in store.rows(symbol,'daily',now) if r['currency']=='USD' and r['price'] is not None
-             and r['quality_status'] not in {'INVALID','UNAVAILABLE','REVISION_PENDING'}
-             and utc(r['event_at']).astimezone(ZoneInfo('America/New_York')).date() < now.astimezone(ZoneInfo('America/New_York')).date()]
-    previous = max(daily,key=lambda r:r['event_at']) if daily else None
+    from .daily import previous_close
+    previous = previous_close(store, symbol, now)
     opened = lookup.get(bounds[0]+timedelta(minutes=1)) if bounds else None
     if opened is None:
         candidate = store.state.get('day_opens',{}).get(symbol)

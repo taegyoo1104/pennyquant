@@ -30,6 +30,12 @@ class ReferenceStore:
             return existing
         revision_key = key+':'+str(row['event_at'])
         prior = [r for r in rows if r['event_at'] == row['event_at'] and row['event_at'] is not None]
+        if row['stream'] == 'daily':
+            from .daily import completed
+            # A forming daily candle changing is normal, not a historical
+            # correction. Keep genuine conflicts between completed bars blocked.
+            prior = [r for r in prior if completed(r) and completed(row)
+                     and (r['values'], r['currency']) != (row['values'], row['currency'])]
         if prior:
             row['previous_revision_id'] = prior[-1]['revision_id']
             self.state['revised_keys'] = list(dict.fromkeys([*self.state['revised_keys'],revision_key]))[-4000:]
@@ -75,6 +81,26 @@ class ReferenceStore:
 
     def rows(self,symbol,stream,now):
         revised = set(self.state['revised_keys'])
-        return [r for r in self.state['rows'].get(symbol+':'+stream,[])
-                if utc(r['available_at']) <= now and r['event_at'] is not None and utc(r['event_at']) <= now
-                and symbol+':'+stream+':'+r['event_at'] not in revised]
+        rows = [r for r in self.state['rows'].get(symbol+':'+stream,[])
+                if utc(r['available_at']) <= now and r['event_at'] is not None and utc(r['event_at']) <= now]
+        if stream != 'daily':
+            return [r for r in rows if symbol+':'+stream+':'+r['event_at'] not in revised]
+        from .daily import completed
+        rows = [r for r in rows if completed(r)]
+        result = []
+        for row in rows:
+            peers = [r for r in rows if r['event_at'] == row['event_at']]
+            if any((r['values'], r['currency']) != (row['values'], row['currency']) for r in peers):
+                continue
+            # Old caches marked a final bar as a revision of the forming bar.
+            # Recover its read view only when completed observations agree;
+            # leave the original audit records and trading verification intact.
+            row = deepcopy(row)
+            if row['quality_status'] == 'REVISION_PENDING':
+                reasons = [r for r in row['quality_reasons'] if r != 'revision_unresolved']
+                if any(r.startswith('invalid_') or r in {'currency_unknown_or_mismatch', 'time_reversed_or_future'} for r in reasons):
+                    continue
+                row['quality_status'] = 'UNKNOWN_LATENCY'
+                row['quality_reasons'] = reasons
+            result.append(row)
+        return result

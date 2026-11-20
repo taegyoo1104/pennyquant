@@ -66,6 +66,8 @@ llm:
   format_retry_limit: 0
   daily_primary_call_cap: 600
   hourly_primary_call_cap: 120
+  daily_briefing_reserved_calls: 80
+  hourly_briefing_reserved_calls: 12
   monthly_soft_budget_usd: '3'
   monthly_hard_budget_usd: '3'
 market_filter_enabled: false
