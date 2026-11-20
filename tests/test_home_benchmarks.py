@@ -65,7 +65,7 @@ def test_missing_invalid_or_wrong_day_close_does_not_invent_daily_return(tmp_pat
     (['99','101'],['#60a5fa','#f87171']), (['101','99'],['#f87171','#60a5fa']),
     (['100','100'],['#94a3b8']),
 ])
-def test_center_is_previous_close_and_crossings_switch_color_exactly_at_zero(values,colors):
+def test_auto_range_preserves_previous_close_colors_and_crossing(values,colors):
     points=[(NOW+timedelta(minutes=i),Decimal(v)) for i,v in enumerate(values)]
     root=ElementTree.fromstring('<div>'+_chart(points,Decimal('100'),'SPY')+'</div>')
     lines=root.findall('.//polyline')
@@ -73,14 +73,36 @@ def test_center_is_previous_close_and_crossings_switch_color_exactly_at_zero(val
     for line in lines:
         ys=[float(p.split(',')[1]) for p in line.attrib['points'].split()]
         color=line.attrib['stroke']
-        if color=='#60a5fa':assert min(ys)>=64
-        elif color=='#f87171':assert max(ys)<=64
-        else:assert all(y==64 for y in ys)
+        assert all(16<=y<=112 for y in ys)
+        if color=='#94a3b8':assert all(y==64 for y in ys)
     if len(colors)==2:
         assert lines[0].attrib['points'].split()[-1]=='150.00,64.00'
         assert lines[1].attrib['points'].split()[0]=='150.00,64.00'
-    elif values[0]!='100':
-        assert float(lines[0].attrib['points'].split()[0].split(',')[1])!=64
+    if all(Decimal(v)<100 for v in values):
+        assert root.find('.//path[@class="sq-benchmark-reference-line"]') is None
+        assert '전일 종가 ↑' in ''.join(root.itertext())
+    if all(Decimal(v)>100 for v in values):
+        assert root.find('.//path[@class="sq-benchmark-reference-line"]') is None
+        assert '전일 종가 ↓' in ''.join(root.itertext())
+
+
+def test_large_gap_down_does_not_flatten_another_intraday_fall():
+    points=[(NOW+timedelta(minutes=i),Decimal(v)) for i,v in enumerate(('97','96.9','96.8','96.7'))]
+    root=ElementTree.fromstring('<div>'+_chart(points,Decimal('100'),'SPY')+'</div>')
+    line=root.find('.//polyline')
+    ys=[float(p.split(',')[1]) for p in line.attrib['points'].split()]
+    assert line.attrib['stroke']=='#60a5fa'
+    assert ys==sorted(ys) and ys[-1]-ys[0]>70
+    assert '0%' not in ''.join(root.itertext())
+
+
+def test_asymmetric_crossing_draws_reference_at_its_actual_height():
+    points=[(NOW+timedelta(minutes=i),Decimal(v)) for i,v in enumerate(('99','103'))]
+    root=ElementTree.fromstring('<div>'+_chart(points,Decimal('100'),'SPY')+'</div>')
+    lines=root.findall('.//polyline')
+    crossing=lines[0].attrib['points'].split()[-1]
+    assert crossing==lines[1].attrib['points'].split()[0]
+    assert float(crossing.split(',')[1])>64
 
 
 def test_gaps_future_invalid_and_conflicting_points_do_not_form_a_fake_continuous_line(tmp_path):
