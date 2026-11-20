@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment script
     (['COMPLETE'], 1, True), (['DISABLED'], 1, True),
     (['PARTIAL', 'COMPLETE'], 2, True), (['PARTIAL']*7, 5, True),
     (['PRESENT', 'COMPLETE'], 2, True), (['PARTIAL', 'FAIL'], 2, False),
-    (['INVALID'], 1, False),
+    (['INVALID'], 1, False), (['QUERY_TIMEOUT'], 1, False),
 ])
 def test_update_catchup_is_bounded_and_stops_on_errors(tmp_path, statuses, expected, success):
     root = tmp_path/'repo'
@@ -33,6 +33,8 @@ with calls.open('a') as stream: stream.write(sys.argv[1]+'\\n')
 if status=='FAIL': raise SystemExit(42)
 report={'status':'COMPLETE' if status=='PRESENT' else status, 'dry_run':False,
         'observability':{'backlog_status':'PRESENT' if status=='PRESENT' else 'UNKNOWN'}}
+if status=='QUERY_TIMEOUT':
+    report.update(status='PARTIAL', errors=[{'table':'pq_research_events','code':3024}])
 pathlib.Path(os.environ['REPORT']).write_text(json.dumps(report))
 ''')
     executable(deploy/'retention.sh', 'python3 "$WORKER" "$1"\n')

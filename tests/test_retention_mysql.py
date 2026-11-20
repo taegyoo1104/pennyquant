@@ -358,3 +358,62 @@ def test_observation_failure_keeps_committed_cleanup_and_reports_unknown(mysql_r
     assert report["deleted"] == 1 and not repo.all("quote_snapshots")
     assert report["status"] == "COMPLETE" and report["observability"]["backlog_status"] == "UNKNOWN"
     assert repo.get_control(REPORT)["deleted"] == 1
+
+
+@pytest.mark.parametrize('phase', ['keys', 'payload'])
+def test_read_timeout_is_partial_and_never_deletes_an_unfinished_page(mysql_repositories, tmp_path, monkeypatch, phase):
+    import pymysql
+    from sessionquant.database.mysql_repository import MySQLRepositoryError
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    for index in range(25):
+        seed(repo, 'research_events', str(index), now, kind='engine_batch', run_id='past', data={})
+    execute = repo._execute
+    queries = []
+    def timeout(sql, params=(), **kwargs):
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+            queries.append(sql)
+            if (phase == 'keys' and 'JSON_OBJECT' not in sql) or (phase == 'payload' and len(queries) == 3):
+                raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'private SQL'), 'SELECT')
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', timeout)
+    policy = replace(POLICY, batch_size=25, intraday_auxiliary=True)
+    report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report['status'] == 'PARTIAL' and report['deleted'] == 0
+    assert report['observability']['stop_reason'] == 'QUERY_TIMEOUT'
+    assert report['errors'] == [{'table': 'pq_research_events', 'code': 3024, 'phase': 'READ', 'message': '자료 조회 시간 초과'}]
+    assert not report['tables']['research_events']['complete']
+    assert len(repo.all('research_events')) == 25
+    assert not repo.get_control(CURSORS, {}).get('positions', {}).get('research_events')
+    assert 'private' not in str(report)
+    monkeypatch.setattr(repo, '_execute', execute)
+    resumed = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert resumed['status'] == 'COMPLETE' and resumed['deleted'] == 25
+
+
+def test_large_replay_reads_covering_keys_then_bounded_primary_key_payloads(mysql_repositories, tmp_path, monkeypatch):
+    import json
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    for index in range(23):
+        seed(repo, 'research_events', str(index), now, kind='engine_batch', run_id='past',
+             data={'irrelevant_large_frame': 'x' * 262144})
+    execute = repo._execute
+    plans, payload_sizes = [], []
+    def capture(sql, params=(), **kwargs):
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+            if 'JSON_OBJECT' not in sql:
+                plan = json.loads(execute('EXPLAIN FORMAT=JSON ' + sql, params, fetch='one')[0])
+                plans.append(plan)
+                assert 'ix_namespace_captured' in json.dumps(plan)
+                assert '"using_filesort": true' not in json.dumps(plan)
+            else:
+                assert 'FORCE INDEX (PRIMARY)' in sql and 'seq IN (' in sql
+                assert 'ORDER BY' not in sql
+                payload_sizes.append(len(params) - 1)
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', capture)
+    policy = replace(POLICY, batch_size=23, intraday_auxiliary=True)
+    report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report['deleted'] == 23 and report['status'] == 'COMPLETE'
+    assert plans and payload_sizes == [10, 10, 3]

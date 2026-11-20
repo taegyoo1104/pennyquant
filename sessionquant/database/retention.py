@@ -124,7 +124,7 @@ def _protected_ids(repo, deadline, clock):
             if clock() >= deadline:
                 raise TimeoutError("매매 근거 확인 시간 초과: 자료 정리를 시작하지 않았습니다.")
             rows = repo._execute(
-                f"SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,payload->>'$.{field}' FROM pq_{table} "
+                f"SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,payload->>'$.{field}' FROM pq_{table} FORCE INDEX (ix_namespace_seq) "
                 "WHERE namespace=%s AND seq>%s ORDER BY seq LIMIT 500", (repo.namespace, after), fetch="all")
             for seq, value in rows:
                 if value and value != "null":
@@ -262,7 +262,7 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
         row["observation"]["backlog_status"] == "PRESENT"
         and row["observation"]["generation"]["rows_min"] is not None
         and row["observation"]["generation"]["rows_min"] > row["deleted"] for row in report["tables"].values())
-    summary.update(stop_reason="PASS_COMPLETE" if not limited else "ROW_LIMIT"
+    summary.update(stop_reason="QUERY_TIMEOUT" if report.get("errors") else "PASS_COMPLETE" if not limited else "ROW_LIMIT"
                    if report["scanned"] >= report["policy"]["max_rows"] else "TIME_LIMIT",
                    budget_limited_runs=repeated, attention="CAPACITY_REVIEW" if capacity_review else
                    "BACKLOG" if present else summary["backlog_status"])
@@ -331,11 +331,41 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     stamp = utc(position[0]).replace(tzinfo=None)
                     params += [stamp, stamp, int(position[1])]
                 limit = min(policy.batch_size, policy.max_rows - report["scanned"])
-                rows = repo._execute(
-                    f"SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
-                    f"({_projection(kind)}),({condition}) FROM pq_{kind} "
-                    f"WHERE namespace=%s AND captured_at<%s{after_sql} ORDER BY captured_at,seq LIMIT %s",
-                    (*params, limit), fetch="all")
+                try:
+                    # Read an index-only page before touching large JSON bodies.
+                    # LIMIT on a projection/filesort can otherwise read the whole
+                    # replay table even though the client receives only 200 rows.
+                    keys = repo._execute(
+                        "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at "
+                        f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
+                        f"WHERE namespace=%s AND captured_at<%s{after_sql} ORDER BY captured_at,seq LIMIT %s",
+                        (*params, limit), fetch="all")
+                    if clock() >= deadline:
+                        pending.append((kind, age, condition))
+                        break
+                    rows = []
+                    for offset in range(0, len(keys), 10):
+                        if clock() >= deadline:
+                            break
+                        batch = keys[offset:offset + 10]
+                        placeholders = ",".join("%s" for _ in batch)
+                        rows.extend(repo._execute(
+                            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
+                            f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
+                            f"WHERE namespace=%s AND seq IN ({placeholders})",
+                            (repo.namespace, *(key[0] for key in batch)), fetch="all"))
+                    rows.sort(key=lambda row: (row[1], row[0]))
+                    if clock() < deadline and [(r[0], r[1]) for r in rows] != list(keys):
+                        raise RuntimeError(f"자료 정리 조회 중 pq_{kind} 기록이 변경됐습니다. 재확인이 필요합니다.")
+                except Exception as exc:
+                    from .mysql_repository import MySQLRepositoryError
+                    if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
+                        raise
+                    # Keep the last committed cursor; a timeout never means an
+                    # empty table or authorizes deletion of a partial page.
+                    table["error"] = {"code": 3024, "phase": "READ", "message": "자료 조회 시간 초과"}
+                    pending.insert(0, (kind, age, condition))
+                    break
                 # A slow SELECT must not authorize writes after the budget expired.
                 if clock() >= deadline:
                     pending.append((kind, age, condition))
@@ -379,6 +409,8 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     repo.set_control(CURSORS, {"policy": identity, "positions": positions,
                         "next_kind": pending[0][0] if pending else None})
             report["status"] = "PARTIAL" if pending else "COMPLETE"
+            report["errors"] = [{"table": "pq_" + kind, **value["error"]}
+                                for kind, value in report["tables"].items() if "error" in value]
             _observe_retention(repo, report, previous, protected, removed_sequences, deadline, clock, now)
             report["finished_at"] = datetime.now(timezone.utc).isoformat()
             if apply:

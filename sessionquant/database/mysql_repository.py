@@ -30,6 +30,7 @@ def mysql_failure_message(error, operation):
     code = code if type(code) is int and 0 <= code <= 65535 else None
     action = operation if operation in {'CONNECT','SELECT','INSERT','UPDATE','DELETE','CREATE','ALTER','SET','START'} else 'QUERY'
     hints = {
+        3024:'DB 조회가 제한 시간을 넘겼습니다. 조회 범위·인덱스·서버 부하를 확인하세요.',
         1038:'DB 정렬 메모리가 부족합니다. 순번 조회 인덱스와 정렬 버퍼 설정을 확인하세요.',
         1044:'DB 접근 권한을 확인하세요.', 1045:'DB 계정·비밀번호·접속 허용 대상을 확인하세요.',
         1142:'해당 DB 작업의 테이블 권한을 확인하세요.', 1143:'해당 DB 작업의 열 권한을 확인하세요.',
