@@ -1,10 +1,10 @@
 #!/bin/bash
-# Catch up after this update's backup; never restart the app or rebuild tables.
+# Catch up after a successful backup; never restart the app or rebuild tables.
 set -Eeuo pipefail
 cd /opt/sessionquant
-[[ $# == 1 ]] || { echo '업데이트 직전의 백업 상태가 필요합니다.' >&2; exit 1; }
+[[ $# == 1 ]] || { echo '이번 작업 직전의 백업 상태가 필요합니다.' >&2; exit 1; }
 for sq_pass in 1 2 3 4 5; do
-    echo "업데이트 후 자료 정리: $sq_pass / 5"
+    echo "백업 후 자료 정리: $sq_pass / 5"
     timeout --kill-after=15 120 bash deploy/gcp/retention.sh "$1" < /dev/null
     sq_pending=$(python3 - /var/lib/sessionquant/app/retention-last.json <<'PY'
 import json, sys

@@ -169,7 +169,7 @@ def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):
     executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
     executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
     executable(deploy / "backup.sh", 'echo "UPLOADED new complete.tar.gz" > "$BACKUP_STATUS"\n')
-    executable(deploy / "retention.sh", 'echo retention >> "$CALLS"\nexit 124\n')
+    executable(deploy / "retention_after_update.sh", 'echo retention >> "$CALLS"\nexit 124\n')
     script = tmp_path / "stop.sh"
     script.write_text((DEPLOY / "stop.sh").read_text().replace("/opt/sessionquant", str(root))
                       .replace("/run/sessionquant-stop.lock", str(tmp_path / "lock"))

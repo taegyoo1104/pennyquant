@@ -16,10 +16,11 @@ if ((db_status != 0)); then
         "$(date -u +%FT%TZ)" "$db_status" > /etc/sessionquant/backup-status) || true
     echo 'DB 실행 상태 조회 실패: 이번 백업을 확인하지 못했습니다. 기존 디스크를 보존하고 종료합니다.' >&2
 elif [[ "$db_services" == db ]]; then
-    # Match the enclosing 40-minute systemd limit. A large logical dump may
-    # legitimately take more than the former eight-minute budget.
+    # Reserve time inside the 70-minute service for app stop, a 45-minute
+    # backup, bounded cleanup, DB stop and disk flush. Never report timeout
+    # as a successful upload.
     backup_status_before=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
-    timeout --kill-after=30 1800 /opt/sessionquant/deploy/gcp/backup.sh
+    timeout --kill-after=30 2700 /opt/sessionquant/deploy/gcp/backup.sh
     backup_result=$?
     if ((backup_result != 0)); then
         result=1
@@ -33,14 +34,15 @@ elif [[ "$db_services" == db ]]; then
                 "$(date -u +%FT%TZ)" "$backup_result" > /etc/sessionquant/backup-status) || true
         fi
         if ((backup_result == 124 || backup_result == 137)); then
-            echo '백업 제한 시간 1800초 초과: 미완료 상태를 남기고 DB 디스크를 보존합니다.' >&2
+            echo '백업 제한 시간 2700초 초과: 미완료 상태를 남기고 DB 디스크를 보존합니다.' >&2
         else
             echo "백업 실패: 종료 코드 $backup_result. DB 디스크는 유지됩니다." >&2
         fi
     else
-        # At most 120+15 seconds, inside the enclosing 40-minute service budget.
+        # At most five passes within 600+15 seconds; each pass retains its
+        # own 90-second/row budget and verified-backup checks.
         # A failed backup must never be followed by data deletion.
-        timeout --kill-after=15 120 bash /opt/sessionquant/deploy/gcp/retention.sh "$backup_status_before"
+        timeout --kill-after=15 600 bash /opt/sessionquant/deploy/gcp/retention_after_update.sh "$backup_status_before"
         retention_result=$?
         if ((retention_result != 0)); then
             result=1
