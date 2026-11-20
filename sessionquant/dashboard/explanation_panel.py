@@ -57,9 +57,12 @@ def explanation_status(view):
         from .session_app import timestamp
         return '개장 대기 · '+timestamp(view.get('opens_at'))+'부터 새 AI 브리핑을 준비합니다.'
     if view.get('status') == 'BUDGET_BLOCKED':
+        if view.get('briefing_separate_schedule') and view.get('limit_reason') in {'DAILY_CALL_CAP','HOURLY_CALL_CAP'}:
+            return '이전 요청은 횟수 한도로 중단됐습니다. 현재는 한 시간 간격의 다음 브리핑 요청을 기다립니다.'
         return {
             'HOURLY_CALL_CAP': '시간당 AI 호출 한도에 도달했습니다. 다음 UTC 정시 이후 다시 확인합니다.',
-            'DAILY_CALL_CAP': '오늘의 AI 호출 한도에 도달했습니다. 한국시간 오전 9시 이후 다시 확인합니다.',
+            'DAILY_CALL_CAP': '오늘의 AI 호출 한도에 도달했습니다. 한국시간 오전 9시에 한도가 초기화되며, 새 브리핑은 이후 정규장에 준비합니다.',
+            'BRIEFING_INTERVAL': '직전 브리핑 요청 후 한 시간이 지나기를 기다립니다. 새 브리핑은 정규장에 준비합니다.',
             'MONTHLY_COST_CAP': '프로그램의 월 AI 금액 한도에 도달했습니다. OpenAI 충전 잔액과는 별개입니다.',
             'PROVIDER_COOLDOWN': 'AI 제공 서비스의 오류·요청 제한으로 재시도를 기다립니다.',
         }.get(view.get('limit_reason'), 'AI 호출·금액 한도 또는 제공 서비스의 대기 제한에 걸렸습니다. 이전 기록에는 상세 사유가 없습니다.')
@@ -67,7 +70,7 @@ def explanation_status(view):
         'POSTCLOSE': '정규장이 끝나 새 AI 브리핑을 쉬고 있습니다. 다음 정규장에 다시 준비합니다.',
         'SESSION_WAIT': '정규장 일정 확인 대기 · 정규장 시간이 확인되면 새 AI 브리핑을 준비합니다.',
         'NO_KEY': 'AI 연결 설정이 필요합니다.',
-        'DAILY_LIMIT': '오늘의 AI 설명 횟수를 모두 사용했습니다. 한국시간 오전 9시 이후 다시 확인합니다.',
+        'DAILY_LIMIT': '오늘의 AI 설명 횟수를 모두 사용했습니다. 한국시간 오전 9시에 한도가 초기화되며, 새 브리핑은 이후 정규장에 준비합니다.',
         'INVALID_RESPONSE': '새 AI 답변을 검증하지 못했습니다.',
         'AUDIT_UNAVAILABLE': 'AI 호출 기록을 읽지 못했습니다.',
         'FAILED': '새 AI 요청에 실패했습니다. 뉴스·AI 상세에서 확인할 수 있습니다.',
@@ -88,6 +91,9 @@ def budget_caption(view):
     cap = budget.get('daily_primary_cap')
     if type(used) is not int or type(cap) is not int:
         return ''
+    if budget.get('briefing_separate_schedule'):
+        return (f"뉴스 분석 {budget['daily_news_calls']:,} / {cap:,}회 · 브리핑 {budget['daily_briefing_calls']:,}회 · "
+                '브리핑은 정규장 한 시간 간격이며 월 금액 한도를 함께 적용합니다.')
     return f'분석 시도 기준 · 뉴스·브리핑 합산 오늘 {used:,} / {cap:,}회 · 월 금액 한도와는 별개입니다.'
 
 
@@ -149,6 +155,8 @@ def render_explanation_summary(view):
     st.markdown('<div class="sq-ai"><h3>AI 브리핑</h3>'+content+'<small>'+escape(detail)+'</small></div>', unsafe_allow_html=True)
     if budget_caption(view):
         st.caption(budget_caption(view))
+    if view.get('briefing_separate_schedule') and view.get('next_attempt_at') and view.get('status') not in SESSION_WAITS:
+        st.caption('다음 요청 가능 · '+timestamp(view['next_attempt_at'])+' · 정규장에 새 자료가 있을 때 갱신합니다.')
     if saved and view.get('status') != 'SUCCEEDED':
         st.caption('새 분석 대기 · '+explanation_status(view)+' 위 내용은 이전 분석 시점의 설명입니다.')
     if saved and missing_strategy_decision(saved):

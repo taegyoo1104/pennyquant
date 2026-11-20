@@ -22,11 +22,11 @@ CONTROLS = {
 PAGE_CONTROLS = {
     '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation', 'market_reference', 'benchmark_stream'),
     '시장·종목': ('watchlist_state', 'market_quality', 'market_performance', 'watchlist_rvol',
-                 'history_backfill', 'portfolio_selection', 'market_reference'),
+                 'history_backfill', 'portfolio_selection', 'market_reference', 'benchmark_stream'),
     '전략·백테스트': (),
     '매매 내역': ('actual_account', 'account_status'),
     '뉴스·LLM': ('actual_account', 'account_status', 'watchlist_state', 'news_status', 'strategy_explanation'),
-    '시스템·설정': ('warmup', 'market_reference', 'news_status', 'retention'),
+    '시스템·설정': ('warmup', 'market_reference', 'benchmark_stream', 'news_status', 'retention'),
 }
 
 # 최신 상태 하나와 이력 표를 구분한다. 체결 내보내기·뉴스 집계의 기존 범위는 유지한다.
@@ -69,7 +69,7 @@ MARKET_SECTIONS = {
     '거래량 비교': (('watchlist_rvol', 'history_backfill'), {}),
     '감시·집중 종목': (('watchlist_state',), {'candidates': 300}),
     '매수 판단': (('portfolio_selection',), {}),
-    '시장 참고': (('market_reference',), {'market_regimes': 1, 'quote_snapshots': 300, 'economic_events': 200}),
+    '시장 참고': (('market_reference', 'benchmark_stream'), {'market_regimes': 1, 'quote_snapshots': 300, 'economic_events': 200}),
     '처리 속도': (('market_performance', 'market_quality'), {}),
     '분석 이력': ((), {'candidates': 300}),
 }

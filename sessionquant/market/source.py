@@ -445,8 +445,17 @@ class TossSessionSource:
             # Its scheduler.mark() must not postpone a still-unanalysed candidate.
             candidate_attempts = state.setdefault('last_candidate_stream_visit' if self.quote_feed is not None
                                                   else 'last_candidate_quote_attempt',{})
+            def candidate_order(symbol):
+                if self.quote_feed is not None:
+                    # Stream visits occur even after the HTTP deadline is spent.
+                    # Rotate by real candle attempts, so later names cannot lose
+                    # every turn when the preceding turn crossed a minute boundary.
+                    attempted = state.get('last_candle_attempt',{}).get(symbol,
+                        state.get('last_bars_fetch',{}).get(symbol,''))
+                    return (not candle_due(symbol), attempted, candidate_attempts.get(symbol,''), symbol)
+                return (candidate_attempts.get(symbol,''), symbol)
             chosen = sorted([s for s in focus if s not in priority],
-                            key=lambda s:(candidate_attempts.get(s,''),s))[:self.candidates_per_cycle]
+                            key=candidate_order)[:self.candidates_per_cycle]
             await metadata(chosen,optional=True,reserved_seconds=quote_seconds)
             # Fetch/persist the candidate's bars before taking its actionable quote.
             # A quote delivered first evaluated the previous bar set, and could

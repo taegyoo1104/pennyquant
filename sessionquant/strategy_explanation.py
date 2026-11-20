@@ -44,7 +44,7 @@ without recorded evidence. Shorten wording to fit 700 characters, never cut a se
 class ExplanationSettings:
     enabled: bool = False
     min_interval_seconds: int = 600
-    max_attempts_per_day: int = 20
+    max_attempts_per_day: int | None = 20
     regular_session_only: bool = False
 
     def __post_init__(self):
@@ -52,8 +52,10 @@ class ExplanationSettings:
             raise ValueError('AI 설명 활성화는 불리언이어야 합니다.')
         if type(self.min_interval_seconds) is not int or not 60<=self.min_interval_seconds<=86400:
             raise ValueError('AI 설명 간격은 60~86400초입니다.')
-        if type(self.max_attempts_per_day) is not int or not 1<=self.max_attempts_per_day<=100:
-            raise ValueError('AI 설명 일일 시도 한도는 1~100회입니다.')
+        if self.max_attempts_per_day is not None and (type(self.max_attempts_per_day) is not int or not 1<=self.max_attempts_per_day<=100):
+            raise ValueError('AI 설명 일일 시도 한도는 1~100회 또는 null입니다.')
+        if self.max_attempts_per_day is None and (self.min_interval_seconds < 3600 or not self.regular_session_only):
+            raise ValueError('횟수 제한 없는 브리핑은 정규장 중 최소 한 시간 간격이어야 합니다.')
 
 
 def snapshot(engine, news, now):
@@ -169,14 +171,23 @@ class StrategyExplainer:
             if previous.get('status')!='SUCCEEDED':
                 return self._publish({k:v for k,v in saved.items() if k!='last_success'})
             return None
-        if state.get('last_attempt_at') and now<utc(state['last_attempt_at'])+timedelta(seconds=self.settings.min_interval_seconds):
-            return None
+        separate = getattr(self.analyzer.settings,'briefing_separate_schedule',False)
+        if state.get('last_attempt_at'):
+            next_at = utc(state['last_attempt_at'])+timedelta(seconds=self.settings.min_interval_seconds)
+            if now < next_at:
+                if separate and previous.get('next_attempt_at') != next_at.isoformat():
+                    self._publish({**previous,'status':previous.get('status','PENDING'),
+                        'briefing_separate_schedule':True,'next_attempt_at':next_at.isoformat()})
+                return None
         attempts=state.get('attempts',0) if state.get('day')==now.date().isoformat() else 0
         self.state={**state,'day':now.date().isoformat(),'last_attempt_at':now.isoformat(),'attempts':attempts}
         result={'status':'PENDING','as_of':data['as_of'],'input_hash':key,'synthetic_inputs':data['synthetic'],
                 'model':self.analyzer.settings.primary_model,'llm_call_ids':[],
                 'role':'EXPLANATION_ONLY','live_orders_enabled':False,'facts':data}
-        if attempts>=self.settings.max_attempts_per_day:result['status']='DAILY_LIMIT'
+        if separate:
+            result.update(briefing_separate_schedule=True,
+                next_attempt_at=(now+timedelta(seconds=self.settings.min_interval_seconds)).isoformat())
+        if self.settings.max_attempts_per_day is not None and attempts>=self.settings.max_attempts_per_day:result['status']='DAILY_LIMIT'
         elif not self.analyzer.api_key:result['status']='NO_KEY'
         else:
             self.state['attempts']=attempts+1
@@ -203,6 +214,11 @@ class StrategyExplainer:
                     ledger = getattr(self.analyzer, 'ledger', None)
                     if ledger is not None:
                         result['budget'] = ledger.snapshot(utc(self.analyzer._clock()))
+                        if exc.code == 'BRIEFING_INTERVAL' and result['budget'].get('next_briefing_at'):
+                            result['next_attempt_at'] = result['budget']['next_briefing_at']
+                            self.state['last_attempt_at'] = (utc(result['next_attempt_at'])-
+                                timedelta(seconds=self.settings.min_interval_seconds)).isoformat()
+                            self.repo.set_control(STATE,self.state)
                 except ValidationFailure as exc:
                     result.update(status='INVALID_RESPONSE',validation_error_code=exc.code,failed_field=exc.field)
                 except Exception as exc:

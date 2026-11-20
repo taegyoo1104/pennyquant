@@ -2,6 +2,43 @@
 from ..market_reference.contracts import DEFAULT_REFERENCE_SYMBOLS, REFERENCES
 
 
+def stream_price_observation(stream, symbol, now):
+    """Shared display snapshot for the home cards and reference table."""
+    from datetime import datetime, timezone
+    from ..market_reference.trade_feed import samples, price_sample, timestamp, MAX_AGE
+    from .session_app import decimal_value
+    points, current, latest, connected = [], None, None, False
+    try:
+        known = timestamp(stream['updated_at'])
+        if known <= now:
+            points = samples((stream.get('points') or {}).get(symbol,[]),now)
+            current = price_sample((stream.get('price_samples') or {}).get(symbol),now)
+            latest = (stream.get('latest') or {}).get(symbol)
+            connected = (stream.get('state') == 'CONNECTED' and stream.get('acknowledged') is True
+                         and (now-known).total_seconds() <= 10)
+    except (ValueError,TypeError,KeyError,AttributeError):
+        pass
+    current = current or (points[-1] if points else None)
+    price = decimal_value(current[1]) if current else None
+    event = datetime.fromtimestamp(current[0]/1000,timezone.utc) if current else None
+    received, fresh = None, False
+    if latest and current:
+        try:
+            at = timestamp(latest['received_at'])
+            if (latest['at'] == current[0] and latest['segment'] == current[2]
+                    and decimal_value(latest['price']) == price and event <= at <= now):
+                received = at
+                fresh = connected and (now-event).total_seconds() <= MAX_AGE
+        except (ValueError,TypeError,KeyError,AttributeError):
+            pass
+    status = ('최근 수신' if fresh else '새 체결 대기' if connected else
+              '재접속 중' if stream.get('state') == 'BACKOFF' else '연결 대기')
+    if stream.get('state') in {'STOPPED','STOPPING'}:
+        status = '수신 중지'
+    return {'price':price, 'event_at':event, 'received_at':received, 'fresh':fresh,
+            'status':status, 'points':points}
+
+
 def reference_benchmarks_visible(context):
     return (context.get('benchmark_collection_enabled') is not False
             or bool({'SPY','QQQ','SOXX'} & set(context.get('market_reference_symbols') or [])))
@@ -37,7 +74,7 @@ def observed_price(item, symbol, now, quotes=None):
     return max(choices,key=lambda r:(r['event_at'],r['received_at']))
 
 
-def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True):
+def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True, stream=None):
     from datetime import datetime, timezone
     from ..models import utc
     from .session_app import timestamp, usd
@@ -58,6 +95,13 @@ def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True):
         latest=observed_price(item,symbol,now,quotes)
         try:fresh=bool(latest and 0 <= (now-latest['event_at']).total_seconds() <= float(latest['max_age']))
         except (ValueError,TypeError):fresh=False
+        streamed = bool(stream and stream.get('enabled') and symbol in {'SPY','QQQ','SOXX'})
+        stream_status = None
+        if streamed:
+            trade = stream_price_observation(stream,symbol,now)
+            fresh, stream_status = trade['fresh'], trade['status']
+            latest = ({**trade,'kind':'체결가','source':'토스 웹소켓 체결'}
+                      if trade['price'] is not None else None)
         window=windows.get('30') or {}
         reasons=[]
         if not latest:reasons.append('가격 수신 대기')
@@ -68,7 +112,7 @@ def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True):
         rows.append({'종목': symbol, '의미': label, '용도': '시장 참고 전용',
             '관측 가격':usd(latest['price']) if latest else '—',
             '가격 종류':latest['kind'] if latest else '미수신',
-            '가격 수신':'최근 수신' if fresh else '과거 기록' if latest else '미수신',
+            '가격 수신':stream_status if streamed else '최근 수신' if fresh else '과거 기록' if latest else '미수신',
             '분석 상태':'검증 완료' if valid else '확인 필요', '확인할 자료':' · '.join(reasons) if not valid else '—',
             '지연 구분': 'STALE' if quality=='STALE' else item.get('latency_class','UNKNOWN_LATENCY'),
             '공급원':latest['source'] if latest else '미확인','수집 시각':timestamp(latest['received_at']) if latest else '—',
@@ -81,12 +125,14 @@ def reference_rows(view, now=None, *, quotes=None, show_benchmarks=True):
     return rows
 
 
-def render_references(view, risk=None, fred=None, *, quotes=None, fred_available=True, show_benchmarks=True):
+def render_references(view, risk=None, fred=None, *, quotes=None, fred_available=True, show_benchmarks=True, stream=None):
     import streamlit as st
     from .session_app import _table
     st.subheader('시장 참고 ETF · 거래 후보 제외')
     st.caption('가격 수신과 분석 검증은 별개입니다. 과거 가격은 시각과 함께 표시하고, 호가 중간값은 체결 가격과 구분합니다.')
-    _table(reference_rows(view,quotes=quotes,show_benchmarks=show_benchmarks))
+    _table(reference_rows(view,quotes=quotes,show_benchmarks=show_benchmarks,stream=stream))
+    if stream and stream.get('enabled'):
+        st.caption('SPY·QQQ·SOXX 가격은 메인과 같은 웹소켓 체결 기록입니다. 분석 상태는 별도의 분봉 비교 검증 결과입니다.')
     symbols = '·'.join(s for s in view.get('active_symbols',REFERENCES) if show_benchmarks or s not in {'SPY','QQQ'})
     st.caption(symbols+'는 감시·집중 종목 정원에서 제외됩니다. 권한·가격 비교 가능성이 미확인되면 UNKNOWN으로 표시합니다.')
     if risk:

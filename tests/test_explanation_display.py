@@ -144,3 +144,14 @@ def test_regular_session_limit_is_still_visible_as_a_limit():
     from sessionquant.dashboard.explanation_panel import explanation_status
     text=explanation_status({'status':'BUDGET_BLOCKED','limit_reason':'MONTHLY_COST_CAP'})
     assert '월 AI 금액 한도' in text and '개장 대기' not in text
+
+
+def test_hourly_briefing_counts_are_separate_and_reset_is_not_a_promise_of_offhours_calls():
+    from sessionquant.dashboard.explanation_panel import budget_caption, explanation_status
+    view={'budget':{'daily_calls':{'primary':601},'daily_primary_cap':600,
+        'briefing_separate_schedule':True,'daily_news_calls':600,'daily_briefing_calls':1}}
+    caption=budget_caption(view)
+    assert '뉴스 분석 600 / 600회' in caption and '브리핑 1회' in caption
+    assert '한 시간' in caption
+    status=explanation_status({'status':'BUDGET_BLOCKED','limit_reason':'DAILY_CALL_CAP'})
+    assert '9시에 한도가 초기화' in status and '이후 정규장' in status

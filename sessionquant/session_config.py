@@ -134,6 +134,11 @@ class SessionConfig:
         for name in ("companies", "portfolio", "llm"):
             if not isinstance(getattr(self, name), dict):
                 raise ValueError(f"{name}은 설정 객체여야 합니다.")
+        if self.llm.get('briefing_separate_schedule') is True:
+            explanation = ExplanationSettings(**self.strategy_explanation)
+            if (explanation.min_interval_seconds < 3600 or not explanation.regular_session_only
+                    or explanation.max_attempts_per_day is not None):
+                raise ValueError('별도 브리핑은 정규장 한 시간 간격·일일 횟수 제한 없음으로 설정하세요.')
         for name,low,high in [('company_news_refresh_seconds',180,86400),('macro_news_refresh_seconds',300,86400),
                 ('economic_calendar_refresh_seconds',3600,86400),('company_new_analysis_max_age_hours',1,24),
                 ('macro_new_analysis_max_age_hours',1,72)]:
