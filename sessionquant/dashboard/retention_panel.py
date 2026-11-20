@@ -12,7 +12,7 @@ KINDS = {
     'macro_context_analysis': '거시 사전 점검', 'pipeline_status': '종목 선정 기록',
     'news_events': '기업 뉴스', 'news_analysis': '기업 뉴스 분석',
     'macro_news': '거시 뉴스', 'macro_analysis': '거시 뉴스 분석',
-    'research_events': '연구용 진단 사본',
+    'research_events': '매매 재현·연구 기록',
 }
 
 
@@ -98,6 +98,7 @@ def retention_summary(report, now=None):
         'last_started_at': _timestamp(report.get('started_at')), 'age': _age(report.get('started_at'), now),
         'scanned': _rows(report.get('scanned')), 'deleted': _rows(report.get('deleted')),
         'limit': _rows(policy.get('max_rows')),
+        'intraday_auxiliary': policy.get('intraday_auxiliary') is True,
         'backlog': _rows(observed.get('eligible_backlog_min'), exact=backlog == 'CLEAR'),
         'oldest_eligible_age': _days(observed.get('oldest_eligible_age_days')),
         'stop_reason': {'ROW_LIMIT': '검사 행 수 한도 도달', 'TIME_LIMIT': '검사 시간 한도 도달',
@@ -128,6 +129,9 @@ def render_retention(st, report):
     st.caption(summary['detail'])
     if not summary['available']:
         return
+    if summary['intraday_auxiliary']:
+        st.caption('당일 자료 보관: 장전·장중에는 지난 날짜 자료를, 폐장 후에는 종료된 당일 자료도 새 백업 확인 뒤 정리합니다. '
+                   '체결·손익·재시작 장부와 전략용 과거 분봉은 보존합니다. DB 파일 크기가 즉시 줄어드는 것은 아닙니다.')
     st.caption(f"마지막 정리 시작 {summary['last_started_at']} · {summary['age']}")
     st.write(f"{summary['pass_status']} · 검사 {summary['scanned']} · 삭제 {summary['deleted']}")
     st.caption(f"남은 정리 대상 {summary['backlog']} · 확인한 대상의 최대 나이 {summary['oldest_eligible_age']}")

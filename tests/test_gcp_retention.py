@@ -11,6 +11,42 @@ from test_gcp_deployment import DEPLOY, executable
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment scripts")
 
 
+@pytest.mark.parametrize('statuses,expected,success', [
+    (['COMPLETE'], 1, True), (['DISABLED'], 1, True),
+    (['PARTIAL', 'COMPLETE'], 2, True), (['PARTIAL']*7, 5, True),
+    (['PRESENT', 'COMPLETE'], 2, True), (['PARTIAL', 'FAIL'], 2, False),
+    (['INVALID'], 1, False),
+])
+def test_update_catchup_is_bounded_and_stops_on_errors(tmp_path, statuses, expected, success):
+    root = tmp_path/'repo'
+    deploy = root/'deploy/gcp'
+    deploy.mkdir(parents=True)
+    data = tmp_path/'data'
+    data.mkdir()
+    calls = tmp_path/'calls'
+    worker = tmp_path/'worker.py'
+    worker.write_text('''import json, os, pathlib, sys
+calls=pathlib.Path(os.environ['CALLS'])
+history=calls.read_text().splitlines() if calls.exists() else []
+status=json.loads(os.environ['STATUSES'])[len(history)]
+with calls.open('a') as stream: stream.write(sys.argv[1]+'\\n')
+if status=='FAIL': raise SystemExit(42)
+report={'status':'COMPLETE' if status=='PRESENT' else status, 'dry_run':False,
+        'observability':{'backlog_status':'PRESENT' if status=='PRESENT' else 'UNKNOWN'}}
+pathlib.Path(os.environ['REPORT']).write_text(json.dumps(report))
+''')
+    executable(deploy/'retention.sh', 'python3 "$WORKER" "$1"\n')
+    script = tmp_path/'catchup.sh'
+    script.write_text((DEPLOY/'retention_after_update.sh').read_text().replace('/opt/sessionquant', str(root))
+                      .replace('/var/lib/sessionquant/app', str(data)))
+    result = subprocess.run(['bash', str(script), 'FAILED prior backup'], capture_output=True, text=True, timeout=10,
+                            env={**os.environ, 'CALLS':str(calls), 'WORKER':str(worker),
+                                 'REPORT':str(data/'retention-last.json'), 'STATUSES':json.dumps(statuses)})
+    assert (result.returncode == 0) is success, result.stderr
+    assert calls.read_text().splitlines() == ['FAILED prior backup']*expected
+    assert ('5회 한도' in result.stdout) is (expected == 5)
+
+
 def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE",
                   app_query_exit=0, observability=None):
     root = tmp_path / "repo"

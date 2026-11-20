@@ -1,8 +1,8 @@
 """Bounded Paper maintenance of expired auxiliary data, after a verified backup.
 
-Financial ledgers, RVOL history, replay inputs, cost accounting and controls are
-not age-pruned. Research copies of diagnostic-only records have the same TTL as
-their originals; engine batches and news evidence used by replay remain intact.
+Financial ledgers, RVOL history, cost accounting and recovery controls are never
+age-pruned. Replay is retained by default; the opt-in intraday policy expires raw
+replay inputs after backup and marks affected runs as incomplete for export.
 """
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ import json
 from pathlib import Path
 import re
 from time import monotonic
+from zoneinfo import ZoneInfo
 
 from ..models import utc
 
 REPORT = "data_retention_v1"
 CURSORS = "data_retention_cursors_v1"
+REPLAY_PRUNED = "research_pruned_runs_v1"
 
 
 @dataclass(frozen=True)
@@ -28,9 +30,10 @@ class RetentionPolicy:
     batch_size: int = 200
     max_rows: int = 50000
     max_seconds: int = 90
+    intraday_auxiliary: bool = False
 
     def __post_init__(self):
-        if type(self.enabled) is not bool:
+        if type(self.enabled) is not bool or type(self.intraday_auxiliary) is not bool:
             raise ValueError("자료 정리 사용 여부는 불리언이어야 합니다.")
         for name, low, high in (("diagnostics_days", 7, 365), ("news_days", 30, 3650),
                                 ("batch_size", 1, 500), ("max_rows", 1, 100000), ("max_seconds", 1, 90)):
@@ -56,6 +59,46 @@ RULES = (
 )
 TIME_FIELDS = ("timestamp", "published_at", "received_at", "analyzed_at", "known_at",
                "available_at", "ingested_at", "valid_until", "evaluated_at", "context_at", "checked_at")
+
+
+def retention_rules(policy):
+    if not policy.intraday_auxiliary:
+        return RULES
+    from ..research.journal import KINDS, CONTROLS
+    replay_kinds = sorted(KINDS | CONTROLS | {"recording_start", "recording_stop", "engine_batch", "pipeline_status", "market_history_sessions"})
+    replay_condition = "payload->>'$.kind' IN (" + ",".join("'" + kind + "'" for kind in replay_kinds) + ")"
+    daily = {"research_events", "pipeline_status", "price_samples", "quote_snapshots"}
+    return tuple((kind, "intraday" if kind in daily else age,
+                  replay_condition if kind == "research_events" else condition) for kind, age, condition in RULES)
+
+
+def retention_cutoff(policy, age, now):
+    if age == "intraday":
+        from ..market.bars import session_bounds
+        bounds = session_bounds(now)
+        # Ended sessions can be archived at shutdown. Before/during the next
+        # session protect today's rows; unknown calendars never clear today.
+        if bounds is not None and now >= bounds[1]:
+            return now
+        return now.astimezone(ZoneInfo("America/New_York")).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    return now - timedelta(days=policy[age])
+
+
+def _pruned_runs(repo):
+    marker = repo.get_control(REPLAY_PRUNED, {})
+    if not isinstance(marker, dict) or not isinstance(marker.get("runs", {}), dict):
+        raise ValueError("재현 자료 정리 기록을 확인할 수 없습니다. 자료를 보존합니다.")
+    return dict(marker.get("runs", {}))
+
+
+def _mark_pruned_runs(repo, runs, report, cutoff):
+    recorded = _pruned_runs(repo)
+    for run in runs:
+        # Preserve the first pre-deletion backup, not a later partial backup.
+        recorded.setdefault(run, {"before": cutoff.isoformat(), "backup": report["backup"]})
+    if len(recorded) > 10000:
+        raise ValueError("재현 자료 정리 기록 한도에 도달했습니다. 자료를 보존합니다.")
+    repo.set_control(REPLAY_PRUNED, {"version": 1, "runs": recorded})
 
 
 def backup_name(receipt: str | Path | None, now: datetime) -> str:
@@ -101,10 +144,15 @@ def _projection(kind):
     paths["event_published_at"] = root + ".event.published_at"
     if kind == "research_events":
         paths.update({"journal_" + field: "$." + field for field in ("received_at", "available_at", "ingested_at")})
+        paths["journal_run_id"] = "$.run_id"
     return "JSON_OBJECT(" + ",".join(f"'{key}',JSON_EXTRACT(payload,'{path}')" for key, path in paths.items()) + ")"
 
 
 def _unused(kind, metadata, cutoff, protected):
+    if kind == "research_events" and protected.get("intraday_auxiliary"):
+        run = metadata.get("journal_run_id")
+        if not isinstance(run, str) or not run or len(run) > 128 or run == protected.get("active_run"):
+            return False
     if any(metadata.get(key) in protected["news"] for key in ("id", "news_id", "article_id", "event_id")):
         return False
     if kind == "pipeline_status" and metadata.get("id") in protected["selection"]:
@@ -149,17 +197,18 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
             raise TimeoutError("관측 예산 소진")
         return rows
 
-    for index, (kind, age, condition) in enumerate(RULES):
+    rules = retention_rules(RetentionPolicy(**report["policy"]))
+    for index, (kind, age, condition) in enumerate(rules):
         observation = {"backlog_status": "UNKNOWN", "eligible_rows_min": None, "backlog_exact": False,
                        "oldest_eligible_age_days": None, "oldest_eligible_at": None,
                        "generation": {"rows_min": None, "exact": False, "interval_seconds": None,
                                       "measured_at": None, "high_water_seq": None}}
         report["tables"][kind]["observation"] = observation
-        quota = min(128, remaining // (len(RULES) - index))
+        quota = min(128, remaining // (len(rules) - index))
         if quota < 3 or clock() >= deadline:
             continue
         baseline = _generation_baseline(previous, kind, now)
-        cutoff = now - timedelta(days=report["policy"][age])
+        cutoff = retention_cutoff(report["policy"], age, now)
         try:
             # An index endpoint is a baseline, never an insertion count. Sequence
             # gaps and other namespaces must not be counted as generated rows.
@@ -227,30 +276,42 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
         raise ValueError("자료 정리는 MySQL PAPER_LOCAL에서만 지원합니다.")
     if repo._in_transaction:
         raise ValueError("엔진 트랜잭션 밖에서 정리하세요.")
-    report = {"policy_version": 1, "namespace": repo.namespace, "policy": asdict(policy), "dry_run": not apply, "started_at": now.isoformat(),
+    report = {"policy_version": 2 if policy.intraday_auxiliary else 1, "namespace": repo.namespace, "policy": asdict(policy), "dry_run": not apply, "started_at": now.isoformat(),
               "status": "DISABLED", "scanned": 0, "eligible": 0, "deleted": 0, "tables": {},
               "provider_calls": 0, "order_writes": 0, "llm_generation_calls": 0}
     if not policy.enabled:
         return report
     report["backup"] = backup_name(receipt, now) if apply else None
+    rules = retention_rules(policy)
     deadline = clock() + policy.max_seconds
     with repo.engine_lease() if apply else nullcontext():
         protected = _protected_ids(repo, deadline, clock)
+        if policy.intraday_auxiliary:
+            state = repo.get_control("research_recording_v1", {}) or {}
+            if not isinstance(state, dict) or type(state.get("active", False)) is not bool:
+                raise ValueError("재현 기록 실행 상태를 확인할 수 없습니다.")
+            active_run = state.get("run_id") if state.get("active") else None
+            if state.get("active") and (not isinstance(active_run, str) or not active_run):
+                raise ValueError("실행 중인 재현 기록을 확인할 수 없습니다.")
+            protected.update(intraday_auxiliary=True, active_run=active_run)
+            _pruned_runs(repo)
         previous = repo.get_control(REPORT, {})
         if not isinstance(previous, dict) or previous.get("namespace") != repo.namespace:
             previous = {}
-        removed_sequences = {kind: {"highest": 0, "new_min": 0, "exact": True} for kind, _, _ in RULES}
+        removed_sequences = {kind: {"highest": 0, "new_min": 0, "exact": True} for kind, _, _ in rules}
         saved = repo.get_control(CURSORS, {}) if apply else {}
         identity = {"version": 1, "diagnostics_days": policy.diagnostics_days, "news_days": policy.news_days}
+        if policy.intraday_auxiliary:
+            identity.update(version=2, intraday_auxiliary=True)
         cursors = saved.get("positions", {}) if isinstance(saved, dict) and saved.get("policy") == identity else {}
         positions = dict(cursors)
-        pending = list(RULES)
+        pending = list(rules)
         next_kind = saved.get("next_kind") if saved and saved.get("policy") == identity else None
         if next_kind in {rule[0] for rule in RULES}:
             index = next(i for i, rule in enumerate(pending) if rule[0] == next_kind)
             pending = pending[index:] + pending[:index]
-        for kind, age, _ in RULES:
-            report["tables"][kind] = {"before": (now - timedelta(days=getattr(policy, age))).isoformat(),
+        for kind, age, _ in rules:
+            report["tables"][kind] = {"before": retention_cutoff(report["policy"], age, now).isoformat(),
                 "scanned": 0, "eligible": 0, "deleted": 0, "protected": 0, "complete": False}
         # Protect shutdown against unexpected lock contention. This connection is
         # dedicated to maintenance; the engine uses another connection/lease.
@@ -261,7 +322,7 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
             while pending and report["scanned"] < policy.max_rows and clock() < deadline:
                 kind, age, condition = pending.pop(0)
                 table = report["tables"][kind]
-                cutoff = now - timedelta(days=getattr(policy, age))
+                cutoff = retention_cutoff(report["policy"], age, now)
                 naive = cutoff.replace(tzinfo=None)
                 position = positions.get(kind)
                 after_sql, params = "", [repo.namespace, naive]
@@ -279,17 +340,23 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                 if clock() >= deadline:
                     pending.append((kind, age, condition))
                     break
-                selected = [seq for seq, _, created, updated, data, allowed in rows
-                            if allowed and max(created, updated) < naive and _unused(kind, _decode(data), cutoff, protected)]
+                selected_rows = [(seq, _decode(data)) for seq, _, created, updated, data, allowed in rows
+                                 if allowed and max(created, updated) < naive and _unused(kind, _decode(data), cutoff, protected)]
+                selected = [seq for seq, _ in selected_rows]
                 if clock() >= deadline:
                     pending.append((kind, age, condition))
                     break
                 removed = 0
                 if apply and selected:
                     placeholders = ",".join("%s" for _ in selected)
-                    removed = repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s AND seq IN ({placeholders}) "
-                                            f"AND captured_at<%s AND created_at<%s AND updated_at<%s AND ({condition})",
-                                            (repo.namespace, *selected, naive, naive, naive))
+                    # The replay tombstone and deletion commit together. A
+                    # partially retained run must never pass as a full replay.
+                    with repo.transaction():
+                        removed = repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s AND seq IN ({placeholders}) "
+                                                f"AND captured_at<%s AND created_at<%s AND updated_at<%s AND ({condition})",
+                                                (repo.namespace, *selected, naive, naive, naive))
+                        if removed and kind == "research_events" and policy.intraday_auxiliary:
+                            _mark_pruned_runs(repo, {data["journal_run_id"] for _, data in selected_rows}, report, cutoff)
                     removed_sequences[kind]["highest"] = max(removed_sequences[kind]["highest"], max(selected))
                     baseline = _generation_baseline(previous, kind, now)
                     if baseline:

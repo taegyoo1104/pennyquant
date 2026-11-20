@@ -56,6 +56,7 @@ compose=(docker compose -f deploy/gcp/compose.yaml)
 if [[ "$sq_mode" == --paused-paper ]]; then check_window --stopped; fi
 sq_logging=$("${compose[@]}" exec -T db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -B -e "SELECT @@GLOBAL.log_bin"' < /dev/null)
 [[ "$sq_logging" == 0 ]] || { echo 'DB 변경 기록이 켜져 있습니다. 기존 저장 공간 수정을 먼저 적용하세요.' >&2; exit 1; }
+sq_previous_backup=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
 bash deploy/gcp/backup.sh < /dev/null
 install -d -m 700 /var/lib/sessionquant/update-backups
 sq_backup="/var/lib/sessionquant/update-backups/$(date -u +%Y%m%dT%H%M%SZ)-${sq_target:0:12}"
@@ -74,6 +75,9 @@ systemctl daemon-reload
 # The app is stopped and its original ledger has been backed up. Preserve the
 # strict restart-settings guard; upgrade only the reviewed, flat Paper profile.
 "${compose[@]}" run --rm --no-deps -T app python -m sessionquant.portfolio.position_limit_upgrade < /dev/null
+# The new policy runs only after this update's successful backup, with the app
+# still stopped. Bounded passes may leave a backlog; no physical table rebuild.
+bash deploy/gcp/retention_after_update.sh "$sq_previous_backup" < /dev/null
 bash deploy/gcp/preopen_check.sh < /dev/null
 systemctl enable sessionquant.service sessionquant-cost-guard.timer
 systemctl start sessionquant-cost-guard.timer

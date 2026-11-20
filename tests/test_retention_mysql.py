@@ -29,6 +29,82 @@ def receipt(tmp_path, now):
     return path
 
 
+def test_intraday_retention_expires_replay_but_keeps_today_active_and_financial_evidence(mysql_repositories, tmp_path):
+    from sessionquant.database.retention import REPLAY_PRUNED
+    now = datetime(2026, 11, 20, 18, tzinfo=timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    other = mysql_repositories(environment="PAPER_LOCAL")
+    for kind in ('recording_start', 'engine_batch', 'watchlist_snapshots_v1', 'recording_stop'):
+        seed(repo, 'research_events', kind, now, days=1, kind=kind, run_id='yesterday', data={})
+    seed(other, 'research_events', 'other-run', now, days=1, kind='engine_batch', run_id='other', data={})
+    seed(repo, 'research_events', 'today', now, days=0, kind='engine_batch', run_id='today', data={})
+    seed(repo, 'research_events', 'active', now, days=1, kind='engine_batch', run_id='active', data={})
+    seed(repo, 'research_events', 'new-import', now, days=1, stored_days=0, kind='engine_batch', run_id='new-import', data={})
+    seed(repo, 'research_events', 'bad-time', now, days=1, kind='engine_batch', run_id='bad-time', ingested_at='unknown', data={})
+    seed(repo, 'research_events', 'bad-run', now, days=1, kind='engine_batch', data={})
+    seed(repo, 'research_events', 'unknown-kind', now, days=1, kind='new-unrecognized-kind', run_id='unknown', data={})
+    repo.set_control('research_recording_v1', {'active': True, 'run_id': 'active'})
+    seed(repo, 'quote_snapshots', 'old-quote', now, days=1)
+    seed(repo, 'quote_snapshots', 'today-quote', now, days=0)
+    seed(repo, 'pipeline_status', 'old-focus', now, days=1, kind='watchlist_focus')
+    seed(repo, 'pipeline_status', 'old-selection', now, days=1, kind='portfolio_selection')
+    seed(repo, 'pipeline_status', 'used-selection', now, days=1, kind='portfolio_selection')
+    seed(repo, 'pipeline_status', 'risk-evidence', now, days=1, kind='risk_decision')
+    seed(repo, 'order_intents', 'intent', now, days=1, selection_id='used-selection')
+    keep = ('orders', 'executions', 'positions', 'account_snapshots', 'daily_performance', 'market_bars', 'market_history_sessions', 'llm_usage', 'news_events', 'system_logs', 'market_regimes')
+    for kind in keep:
+        seed(repo, kind, 'keep-'+kind, now, days=1)
+    repo.save_state({'cash': '123.45', 'positions': {'TEST': '0.01'}})
+    before = {kind: repo.all(kind) for kind in keep}
+    policy = replace(POLICY, intraday_auxiliary=True)
+    preview = prune_expired(repo, policy, now=now)
+    assert preview['eligible'] == 7 and preview['deleted'] == 0
+    assert repo.get_control(REPLAY_PRUNED) is None
+    report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report['deleted'] == 7
+    assert repo.get_control(REPLAY_PRUNED)['runs'] == {'yesterday': {'before': '2026-11-20T05:00:00+00:00', 'backup': report['backup']}}
+    assert {row['id'] for row in repo.all('research_events')} == {'today', 'active', 'new-import', 'bad-time', 'bad-run', 'unknown-kind'}
+    assert len(other.all('research_events')) == 1
+    assert {row['id'] for row in repo.all('pipeline_status')} == {'used-selection', 'risk-evidence'}
+    assert {kind: repo.all(kind) for kind in keep} == before
+    assert repo.load_state()['cash'] == '123.45'
+    assert repo.get_control('research_recording_v1')['run_id'] == 'active'
+
+
+def test_postclose_retention_archives_finished_day_and_keeps_first_recovery_backup(mysql_repositories, tmp_path):
+    from sessionquant.database.retention import REPLAY_PRUNED
+    now = datetime(2026, 11, 20, 21, 5, tzinfo=timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    seed(repo, 'research_events', 'closed-batch', now, days=1/24, kind='engine_batch', run_id='closed', data={})
+    assert prune_expired(repo, POLICY, now=now)['eligible'] == 0  # opt-in only
+    policy = replace(POLICY, intraday_auxiliary=True)
+    report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report['deleted'] == 1
+    first = repo.get_control(REPLAY_PRUNED)
+    seed(repo, 'research_events', 'later-import', now, days=1/24, kind='engine_batch', run_id='closed', data={})
+    proof = tmp_path/'new-receipt'
+    proof.write_text(f'UPLOADED {now.isoformat()} sessionquant-20261120T210500Z-second.tar.gz\n')
+    assert prune_expired(repo, policy, now=now, apply=True, receipt=proof)['deleted'] == 1
+    assert repo.get_control(REPLAY_PRUNED) == first
+
+
+def test_failed_replay_tombstone_rolls_back_data_deletion(mysql_repositories, tmp_path, monkeypatch):
+    from sessionquant.database.retention import REPLAY_PRUNED
+    now = datetime(2026, 11, 20, 18, tzinfo=timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    seed(repo, 'research_events', 'old', now, days=1, kind='engine_batch', run_id='old', data={})
+    original = repo.set_control
+    def fail(name, payload):
+        if name == REPLAY_PRUNED:
+            raise RuntimeError('fixture marker failure')
+        original(name, payload)
+    monkeypatch.setattr(repo, 'set_control', fail)
+    with pytest.raises(RuntimeError, match='fixture marker failure'):
+        prune_expired(repo, replace(POLICY, intraday_auxiliary=True), now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert len(repo.all('research_events')) == 1
+    assert repo.get_control(REPLAY_PRUNED) is None
+
+
 def test_retention_preview_and_apply_preserve_finance_rvol_replay_and_references(mysql_repositories, tmp_path):
     now = datetime.now(timezone.utc)
     repo = mysql_repositories(environment="PAPER_LOCAL")
@@ -87,19 +163,21 @@ def test_retention_preview_and_apply_preserve_finance_rvol_replay_and_references
     assert prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))["deleted"] == 0
 
 
-def test_apply_requires_backup_and_exclusive_engine_lease(mysql_repositories, tmp_path):
+@pytest.mark.parametrize('intraday', [False, True])
+def test_apply_requires_backup_and_exclusive_engine_lease(mysql_repositories, tmp_path, intraday):
     now = datetime.now(timezone.utc)
     repo = mysql_repositories(environment="PAPER_LOCAL")
     seed(repo, "news_events", "expired", now)
+    policy = replace(POLICY, intraday_auxiliary=intraday)
     with pytest.raises(ValueError, match="백업"):
-        prune_expired(repo, POLICY, now=now, apply=True)
+        prune_expired(repo, policy, now=now, apply=True)
     owner = mysql_repositories(repo.config.namespace, environment="PAPER_LOCAL")
     with owner.engine_lease(), pytest.raises(RuntimeError, match="다른 엔진"):
-        prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+        prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
     assert len(repo.all("news_events")) == 1 and repo.get_control(REPORT) is None
     live = mysql_repositories(environment="LIVE_LOCAL")
     with pytest.raises(ValueError, match="PAPER_LOCAL"):
-        prune_expired(live, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+        prune_expired(live, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
 
 
 def test_imported_timestamp_protects_records_after_persistence_dates_expire(mysql_repositories, tmp_path):

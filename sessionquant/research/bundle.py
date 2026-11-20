@@ -54,6 +54,11 @@ def events(path):
 def export_recording(repo, output, *, run_id=None):
     """새 디렉터리만 만들며 원래 원장·입력·식별자는 수정하지 않는다."""
     from .quality import quality_report
+    from ..database.retention import _pruned_runs
+    pruned = _pruned_runs(repo)
+    if (run_id is None and pruned) or run_id in pruned:
+        raise ValueError('보관 정책으로 정리된 재현 자료가 있습니다. 정리 전 백업을 별도 환경에 복원하거나 '
+                         '정리되지 않은 실행의 run_id를 지정하세요. 체결·손익 장부는 별도로 보존됩니다.')
     output = Path(output)
     if output.exists(): raise ValueError('기존 내보내기 경로를 사용할 수 없습니다. 새 폴더를 지정하세요.')
     output.mkdir(parents=True)
