@@ -145,6 +145,20 @@ def test_failed_json_row_is_counted_with_safe_location_and_next_row_is_read():
     assert 'SECRET' not in json.dumps(transport)
 
 
+@pytest.mark.parametrize('keep_details',[False,True])
+def test_transport_preserves_recorded_count_when_details_are_missing_or_partial(keep_details):
+    row=batch()
+    body=row['data']['data']
+    body['decision_count']=7
+    if not keep_details:body.pop('decisions')
+    review=reviewer()
+    review.consume(decode_columns(encode_cells(row),'research_events'))
+    result=review.finish()['namespaces']['paper_test']
+    assert result['research']['decision_count']==7
+    assert result['entry_review']['all_in_window']['evaluations']==int(keep_details)
+    assert result['entry_review']['batches_missing_decision_details']==int(not keep_details)
+
+
 def test_bad_column_count_and_invalid_hex_are_bounded_and_never_exported():
     transport={'rows_failed':0,'samples':[],'tables':{}}
     line=b'1\tSECRET\tNULL\t7B7D\n'

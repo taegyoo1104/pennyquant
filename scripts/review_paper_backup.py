@@ -344,7 +344,7 @@ def run(*args, **kwargs):
 
 
 RESEARCH_FIELDS = ('kind', 'available_at', 'data.control_state', 'data.scope_blockers', 'data.manual_halt',
-                   'data.decisions', 'data.quality_rows', 'data.portfolio_selection')
+                   'data.decisions', 'data.quality_rows', 'data.portfolio_selection', 'data.decision_count')
 
 
 class RowDecodeError(ValueError):
@@ -391,7 +391,10 @@ def decode_columns(line, kind):
         fields = {key: cell(index+3, key, as_json=True) for index, key in enumerate(RESEARCH_FIELDS)}
         body = {key.removeprefix('data.'): value for key, value in fields.items() if key.startswith('data.')}
         decisions = body.get('decisions')
-        body['decision_count'] = len(decisions) if isinstance(decisions, list) else 0
+        # Older/compact records may retain a total without all decision details.
+        # Preserve that saved total rather than replacing it with zero/list size.
+        if type(body.get('decision_count')) is not int or body['decision_count'] < 0:
+            body['decision_count'] = len(decisions) if isinstance(decisions, list) else 0
         row['data'] = {'kind': fields['kind'], 'available_at': fields['available_at'], 'data': body}
     else:
         row['data'] = cell(3, 'payload', as_json=True)
