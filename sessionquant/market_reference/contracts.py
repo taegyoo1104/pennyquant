@@ -105,6 +105,13 @@ def observation(symbol,stream,values,event_at,received_at,ingested_at,*,proof=No
             body['series_comparability'] = 'VERIFIED'
     except (ValueError,TypeError,KeyError,AttributeError):
         pass
-    revision = identity({'symbol':symbol,'stream':stream,'event_at':stamp,'values':normalized,'currency':currency,'error':error})
+    revision_data = {'symbol':symbol,'stream':stream,'event_at':stamp,'values':normalized,'currency':currency,'error':error}
+    if stream == 'daily':
+        from .daily import completed
+        # An unchanged final close must be a new observation when the previous
+        # identical price was collected while that trading day was still open.
+        body['daily_complete'] = completed(body)
+        revision_data['daily_complete'] = body['daily_complete']
+    revision = identity(revision_data)
     body.update(id='reference:'+revision,revision_id=revision,previous_revision_id=None)
     return serialize(body)

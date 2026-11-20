@@ -38,11 +38,13 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
         price = _positive(latest['price']) if latest else None
         fresh = bool(price and 0 <= (now-latest['event_at']).total_seconds() <= latest['max_age'])
         change, reference = None, None
+        reference_label = '전일 종가 확인 중'
         try:
             previous = _positive(item.get('previous_close'))
             previous_at = utc(item['previous_close_at'])
             if previous and previous_at <= now and previous_at.astimezone(NY).date() == previous_day:
                 reference = previous
+                reference_label = previous_day.strftime('%m.%d')+f' 종가 ${previous:,.2f} 기준'
             if (reference and price and previous_at <= latest['event_at'] <= now
                     and latest['event_at'].astimezone(NY).date() == now.astimezone(NY).date()):
                 change = (price/reference-1)*100
@@ -68,7 +70,7 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
         cards.append({'symbol':symbol, 'name':name, 'price':f'${price:,.2f}' if price else '—',
             'price_kind':latest['kind'] if price else '관측 가격',
             'price_status':'최근 수신' if fresh else '이전 가격' if price else '수신 대기',
-            'price_fresh':fresh, 'tone':tone, 'reference':reference,
+            'price_fresh':fresh, 'tone':tone, 'reference':reference, 'reference_label':reference_label,
             'change':f'{change:+.2f}%' if change is not None else '전일 대비 확인 중',
             'time_label':latest['event_at'].astimezone(KST).strftime('%m.%d %H:%M:%S KST') if price else '가격 수신을 기다려요.',
             'points':points, 'trend_status':'최근 1시간 · 1분봉 종가' if trend_fresh else '이전 분봉 기록' if points else '분봉 수집 중'})
@@ -205,7 +207,7 @@ def benchmark_cards_html(cards):
         elements.append('<article class="sq-focus-card sq-benchmark-card"><div class="sq-focus-top"><div><div class="sq-focus-symbol">'+e('symbol')+
             '</div><div class="sq-benchmark-name">'+e('name')+'</div></div><span class="sq-focus-badge'+badge+'">'+e('price_status')+
             '</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div>'+
-            '<div class="sq-benchmark-change" style="color:'+color+'">'+e('change')+'<small>전일 종가 대비 · 참고</small></div>'+
+            '<div class="sq-benchmark-change" style="color:'+color+'">'+e('change')+'<small>'+e('reference_label')+'</small></div>'+
             _chart(card['points'],card.get('reference'),card['symbol'],segments=card.get('segments'),trade=card.get('chart_kind')=='trade',empty_message=card.get('empty_message'))+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
             '<div class="sq-focus-time">'+e('time_label')+'</div></article>')
     # Separate raw HTML blocks so Markdown does not absorb the cards into CSS.

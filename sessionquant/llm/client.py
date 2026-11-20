@@ -29,7 +29,7 @@ class BudgetClient:
             metadata['request_started_at']=now.isoformat()
             try:
                 reservation=await owner.ledger.reserve(self.stage,payload,now,call_id=call_id,metadata={
-                    key:metadata.get(key) for key in ('article_id','content_hash','logical_analysis_id','ticker','macro_topic')},
+                    key:metadata.get(key) for key in ('article_id','content_hash','logical_analysis_id','ticker','macro_topic','source_kind')},
                     before_commit=lambda token,amount:owner.audit.requested(token,payload,metadata,now,amount))
             except BudgetBlocked:raise
             except Exception as exc:
