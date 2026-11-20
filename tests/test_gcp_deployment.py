@@ -95,7 +95,8 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     executable(bindir/'docker',f'echo "docker $*" >> "$CALLS"\nif [[ "$1" == run ]]; then echo {delay}; exit {int(error)}; fi\n')
     executable(bindir/'systemctl','echo "systemctl $*" >> "$CALLS"\nif [[ "$1" == is-active ]]; then exit 3; fi\n')
     executable(bindir/'systemd-run','echo "timer $*" >> "$CALLS"\n')
-    executable(bindir/'python3','exit 0\n')  # Storage check tested separately below.
+    # Use a known monotonic epoch plus the requested delay; storage is separate.
+    executable(bindir/'python3','if [[ "$1" == - ]]; then echo "$((1000000000 + $2 * 1000000))"; fi\n')
     script=tmp_path/'start.sh'
     script.write_text((DEPLOY/'start.sh').read_text().replace('/opt/sessionquant',str(root)))
     result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
@@ -105,7 +106,9 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     apps=[i for i,line in enumerate(lines) if ' up -d --wait' in line]
     assert len(timers)==1 and bool(apps) is started
     if started:assert timers[0]<apps[0]
-    assert ('--on-active=900s' if error else f'--on-active={delay or 60}s') in lines[timers[0]]
+    expected = 1_000_000_000 + (900 if error else (delay or 60)) * 1_000_000
+    assert f'--on-boot={expected}us' in lines[timers[0]]
+    assert '--on-active' not in lines[timers[0]]
     assert result.returncode==int(error)
 
 
@@ -229,7 +232,7 @@ def test_start_never_starts_app_when_maintenance_or_storage_recovery_is_needed(t
     executable(bindir/'docker','echo "docker $*" >> "$CALLS"\nif [[ "$1" == run ]]; then echo 3600; fi\n')
     executable(bindir/'systemctl','if [[ "$1" == is-active ]]; then exit 3; fi\n')
     executable(bindir/'systemd-run','echo timer >> "$CALLS"\n')
-    executable(bindir/'python3',f'exit {int(condition=="low-space")}\n')
+    executable(bindir/'python3',f'if [[ "$1" == - ]]; then echo 3600000000; else exit {int(condition=="low-space")}; fi\n')
     script=tmp_path/'start.sh'; script.write_text((DEPLOY/'start.sh').read_text().replace(
         '/opt/sessionquant',str(root)).replace('/etc/sessionquant',str(etc)))
     result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],

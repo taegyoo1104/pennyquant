@@ -10,16 +10,25 @@ if systemctl is-active --quiet sessionquant-market-close.service || systemctl is
     echo '마감 저장·백업이 진행 중입니다.' >&2
     exit 1
 fi
-# Boot-scoped timer; an explicit service restart must not extend today's deadline.
+# Pin to this boot's monotonic clock. OnActiveSec is rebased by daemon-reload;
+# OnBootSec keeps the original instant even when host service files are reloaded.
+shutdown_usec() {
+    python3 - "$1" <<'PY_CLOCK'
+import sys, time
+print(time.monotonic_ns() // 1000 + int(sys.argv[1]) * 1_000_000)
+PY_CLOCK
+}
 if ! delay=$(docker run --rm --network none sessionquant:local python -m sessionquant.market_shutdown); then
     echo '거래소 달력 확인 실패: 매매는 시작하지 않고 15분 후 VM을 종료합니다.' >&2
-    systemd-run --unit=sessionquant-market-close --on-active=900s --property=Type=oneshot --property=TimeoutStartSec=4200 /opt/sessionquant/deploy/gcp/stop.sh
+    sq_close_usec=$(shutdown_usec 900)
+    systemd-run --unit=sessionquant-market-close --on-boot="${sq_close_usec}us" --property=Type=oneshot --property=TimeoutStartSec=4200 /opt/sessionquant/deploy/gcp/stop.sh
     exit 1
 fi
 [[ "$delay" =~ ^[0-9]+$ ]] || exit 1
 systemctl stop sessionquant-market-close.timer sessionquant-market-close.service 2>/dev/null || true
 systemctl reset-failed sessionquant-market-close.service 2>/dev/null || true
-systemd-run --unit=sessionquant-market-close --on-active="$((delay > 0 ? delay : 60))s" \
+sq_close_usec=$(shutdown_usec "$((delay > 0 ? delay : 60))")
+systemd-run --unit=sessionquant-market-close --on-boot="${sq_close_usec}us" \
     --property=Type=oneshot --property=TimeoutStartSec=4200 \
     /opt/sessionquant/deploy/gcp/stop.sh
 if ((delay == 0)); then
