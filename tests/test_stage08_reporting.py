@@ -175,6 +175,7 @@ def test_stale_ranking_is_history_and_five_existing_tabs_are_preserved(tmp_path,
     assert not app.exception and not app.error
     assert len(app.radio(key='dashboard_page').options)==6
     app.radio(key='dashboard_page').set_value('시장·종목').run()
+    app.radio(key='market_detail').set_value('매수 판단').run()
     assert any(metric.label=='현재 최종 후보' and metric.value=='—' for metric in app.metric)
     assert any('마지막 저장된 선정 이력' in caption.value for caption in app.caption)
     repo=Repository(tmp_path/'dashboard.db',backend='sqlite');assert repo.load_state()==before;repo.close()

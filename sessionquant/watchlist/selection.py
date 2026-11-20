@@ -40,17 +40,22 @@ class FairScheduler:
 
 
 class FocusSelector:
-    def __init__(self, size=20, max_age_seconds=120, minimum_hold_seconds=300, refresh_grace_seconds=120):
+    def __init__(self, size=20, max_age_seconds=120, minimum_hold_seconds=300, refresh_grace_seconds=120, method='activity'):
         self.size, self.age, self.hold = size, max_age_seconds, minimum_hold_seconds
         self.refresh_grace = refresh_grace_seconds
+        self.method=method
 
-    def choose(self, metrics, previous, now):
+    def choose(self, metrics, previous, now, *, pinned_symbols=()):
         """관찰 점수는 주문 허가가 아니다. RVOL·계좌 적격성을 계산하거나 대체하지 않는다."""
         eligible = [row for row in metrics if row.get('data_status') == 'VERIFIED'
                     and 0 <= (now-utc(row['known_at'])).total_seconds() <= self.age]
         eligible.sort(key=lambda r: (-Decimal(r['dollar_volume_usd']), r['ticker']))
         liquidity = {r['ticker']: Decimal(len(eligible)-i)/max(1, len(eligible)) for i, r in enumerate(eligible)}
         for row in eligible:
+            if self.method=='turnover':
+                row['focus_score']=str(liquidity[row['ticker']]*100)
+                row['selection_reason']='후보 내 거래대금 순위 · 당일 분봉 수집·매수 조건은 별도 검사'
+                continue
             relative = max(Decimal('-0.02'), min(Decimal('0.02'), Decimal(row['relative_strength_sample'])))
             volatility = min(Decimal('0.02'), abs(Decimal(row['sample_return'])))
             score = liquidity[row['ticker']]*60+(relative+Decimal('.02'))/Decimal('.04')*30+volatility/Decimal('.02')*10
@@ -61,7 +66,8 @@ class FocusSelector:
         metrics_by_symbol = {row['ticker']: row for row in metrics}
         pinned = []
         for row in previous:
-            if row['ticker'] in by_symbol and 0 <= (now-utc(row['focus_since'])).total_seconds() < self.hold:
+            if row['ticker'] in by_symbol and (row['ticker'] in pinned_symbols or
+                    0 <= (now-utc(row['focus_since'])).total_seconds() < self.hold):
                 pinned.append({**by_symbol.pop(row['ticker']), 'focus_since': row['focus_since']})
             elif row['ticker'] not in by_symbol and self.refresh_grace:
                 # Keep collection membership briefly while refreshing inputs.
@@ -104,19 +110,22 @@ class WatchlistManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.allow_synthetic = allow_synthetic
         self.history_selection = history_selection
+        self.pattern_provider = None
         self.provider_explicit = provider is not None
         self.provider = provider or FileMarketCapProvider(config.market_cap_input)
         self.selector = WatchlistSelector(config.watchlist_size, config.watchlist_refresh_days,
                                           missing_cap_policy=config.watchlist_missing_cap_policy)
+        from .us_universe import POLICY
         self.store = WatchlistStore(repo, universe, max_age_days=config.watchlist_refresh_days,
-                                   missing_cap_policy=config.watchlist_missing_cap_policy)
+                                   missing_cap_policy=config.watchlist_missing_cap_policy,
+                                   required_selection_policy=POLICY if config.universe_source=='toss_us' else None)
         self.state = repo.get_control(STATE, {})
         self.state.setdefault('prices', {})
         self.state.setdefault('rankings', {})
         self.state.setdefault('focus', [])
         self.scheduler = FairScheduler(self.state)
         self.focus_selector = FocusSelector(config.focus_size, config.watchlist_data_max_age_seconds,
-                                             config.focus_min_hold_seconds, config.focus_refresh_grace_seconds)
+                                             config.focus_min_hold_seconds, config.focus_refresh_grace_seconds, config.focus_selection)
 
     def read_scope(self):
         return self.store.read_scope()
@@ -125,6 +134,13 @@ class WatchlistManager:
         now = utc(now or self.clock())
         attempt = self.repo.get_control(ATTEMPT, {})
         snapshot = self.store.at(now)
+        if self.config.universe_source == 'toss_us':
+            from .us_universe import selection_session, POLICY
+            bounds = selection_session(now)
+            status = self.store.status(now, allow_synthetic=self.allow_synthetic)
+            if (bounds and status['status']=='VALID' and snapshot.get('selection_policy')==POLICY
+                    and snapshot.get('session_open_at')==bounds[0].isoformat()):
+                return status  # Even a manual force refresh cannot churn today's selected candidates.
         size_changed = bool(snapshot and snapshot.get('size_limit',len(snapshot.get('items',[]))) != self.config.watchlist_size)
         policy_changed = bool(snapshot and snapshot.get('missing_cap_policy','block') != self.config.watchlist_missing_cap_policy
                               and attempt.get('requested_missing_cap_policy') != self.config.watchlist_missing_cap_policy)
@@ -168,6 +184,8 @@ class WatchlistManager:
         status = self.store.status(now, allow_synthetic=self.allow_synthetic)
         members = self.universe.members(now)
         if not status['snapshot'] or status['status'] == 'SYNTHETIC_BLOCKED':
+            return []
+        if self.config.universe_source == 'toss_us' and status['status'] != 'VALID':
             return []
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         return [row['ticker'] for row in status['items'] if row['ticker'] in members and row['ticker'] not in REFERENCE_SYMBOLS][:self.config.watchlist_size]
@@ -229,6 +247,15 @@ class WatchlistManager:
                 volume = decimal(row['tradingVolume'], positive=True)
                 fresh[symbol] = {'as_of_at': stamp.isoformat(), 'known_at': received_at.isoformat(),
                     'dollar_volume_usd': str(amount), 'volume': str(volume), 'source': 'toss:MARKET_TRADING_AMOUNT:1d'}
+                # RankingPrice.basePrice is the previous-day base for MARKET_*
+                # rankings (TOP_GAINERS/LOSERS instead use the period start).
+                # Optional display evidence must never change focus eligibility.
+                price = row.get('price')
+                if isinstance(price, dict):
+                    try:
+                        fresh[symbol]['previous_close'] = str(decimal(price.get('basePrice'), positive=True))
+                    except ValueError:
+                        pass
             except (TypeError, KeyError):
                 continue
         self.state['rankings'] = fresh
@@ -240,6 +267,17 @@ class WatchlistManager:
         current = self.state['prices'].get(symbol, [])
         spy = self.state['prices'].get('SPY', [])
         ranking = self.state['rankings'].get(symbol)
+        if self.config.focus_selection=='turnover':
+            if not current or not ranking:
+                return {**empty,'missing_inputs':['price_or_turnover_missing'],'reason':'현재가·거래대금 수신 대기'}
+            points=[current[0],ranking]
+            age=self.config.watchlist_data_max_age_seconds
+            if any(not 0<=(now-utc(r['as_of_at'])).total_seconds()<=age or utc(r['known_at'])>now for r in points):
+                return {**empty,'missing_inputs':['observation_stale_or_future'],'reason':'현재가·거래대금 갱신 대기'}
+            return {**empty,**ranking,'data_status':'VERIFIED','reason':'최신 현재가·거래대금 확인',
+                'known_at':current[0]['known_at'],'as_of_at':current[0]['as_of_at'],
+                'metric_basis':'turnover_only','sample_return':None,'relative_strength_sample':None,
+                'valid_until':min(utc(r['as_of_at'])+timedelta(seconds=age) for r in points).isoformat()}
         if len(current) < 2 or len(spy) < 2 or not ranking:
             missing, labels = [], []
             for values, prefix, label in ((current,'symbol','종목'),(spy,'spy','시장(SPY)')):
@@ -273,7 +311,12 @@ class WatchlistManager:
             self.state['focus'] = []
             return []
         metrics = [self._metric(s, now) for s in self.light_symbols(now)]
-        self.state['focus'] = self.focus_selector.choose(metrics, self.state['focus'], now)
+        if self.config.focus_rebalance_minutes:
+            from .focus_schedule import choose_scheduled
+            changed = choose_scheduled(self, metrics, now)
+            if changed:self.repo.set_control(STATE,self.state)
+        else:
+            self.state['focus'] = self.focus_selector.choose(metrics, self.state['focus'], now)
         return [row['ticker'] for row in self.state['focus']]
 
     @snapshot_reads
@@ -347,9 +390,14 @@ class WatchlistManager:
                 'last_detail_at': self.state.get('last_detail_success', {}).get(symbol),
                 'focus_valid_until':focused.get(symbol,{}).get('valid_until'),
                 'focus_monitor_until':focused.get(symbol,{}).get('monitor_until'),
+                'focus_since':focused.get(symbol,{}).get('focus_since'),
+                'focus_pattern_retained':focused.get(symbol,{}).get('pattern_retained',False),
                 'focus_refresh_pending':bool(focused.get(symbol,{}).get('refresh_wait_until')),
                 'last_detail_attempt_at': self.scheduler.last.get(symbol), 'light_data_status': metric['data_status'],
                 'last_price_at': self.state['prices'].get(symbol, [{}])[0].get('as_of_at'),
+                'last_price': self.state['prices'].get(symbol, [{}])[0].get('price'),
+                'day_price_base': {key: self.state['rankings'].get(symbol, {}).get(key)
+                    for key in ('previous_close', 'as_of_at', 'known_at', 'source')},
                 'entry_blockers': self.entry_blockers(symbol, now)})
         previous = self.state.get('focus_recorded_at')
         identity = sorted(focused)
@@ -372,7 +420,9 @@ class WatchlistManager:
             self.state['recorded_watchlist_id'] = watchlist_id
         self.repo.set_control(STATE, self.state)
         self.repo.set_control(VIEW, {**status, 'updated_at': now.isoformat(), 'items': rows,
+            'universe_source': self.config.universe_source,
             'watchlist_limit': self.config.watchlist_size, 'focus_limit': self.config.focus_size,
+            'focus_schedule':self.state.get('focus_schedule',{}),
             'history_selection':history, 'operating_count':len(operating),
             'data_max_age_seconds':self.config.watchlist_data_max_age_seconds, 'max_age_days':self.config.watchlist_refresh_days,
             'focus_count': len(focused), 'source_state': {k: v for k, v in self.state.items() if k not in {'prices', 'rankings'}},

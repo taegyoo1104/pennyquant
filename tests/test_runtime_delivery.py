@@ -145,12 +145,12 @@ def test_late_delivery_is_auditable_and_replays_to_identical_paper_state(observe
     assert restored.broker.to_state() == observed.engine.broker.to_state()
 
 
-def test_delivery_marker_rejects_future_and_retimed_quotes(observed):
+def test_delivery_marker_rejects_future_and_before_receipt(observed):
     raw = next(row for row in observed.rows if row['kind'] == 'bar')
     with pytest.raises(ValueError):
         event_time({**raw, 'delivered_at': (event_time(raw)-timedelta(seconds=1)).isoformat()})
     quote = next(row for row in observed.rows if row['kind'] == 'quote')
     with pytest.raises(ValueError):
-        event_time({**quote, 'delivered_at': (NOW+timedelta(seconds=2)).isoformat()})
+        event_time({**quote, 'delivered_at': (event_time(quote)-timedelta(seconds=1)).isoformat()})
     with pytest.raises(ValueError):
         observed.engine.apply_batch([{**raw, 'delivered_at': (NOW+timedelta(seconds=1)).isoformat()}], NOW)

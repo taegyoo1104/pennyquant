@@ -52,8 +52,10 @@ class DashboardData:
     watchlist_rvol: dict = field(default_factory=dict)
     history_backfill: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
+    benchmark_stream: dict = field(default_factory=dict)
     fred_references: list = field(default_factory=list)
     news_status: dict = field(default_factory=dict)
+    strategy_explanation: dict = field(default_factory=dict)
     portfolio_selection: dict = field(default_factory=dict)
     news_flow: dict = field(default_factory=dict)
     warmup: dict = field(default_factory=dict)
@@ -100,13 +102,16 @@ def age_seconds(value: Any, now: datetime) -> float | None:
         return None
 
 
-def load_database(path: str | Path, *, page=None, news_section=None) -> DashboardData:
+def load_database(path: str | Path, *, page=None, news_section=None, panel=None) -> DashboardData:
     """선택한 화면의 기록만 읽는다. 중간 실패는 이미 읽은 자료를 지우지 않는다."""
     from sessionquant.dashboard.load_plan import CONTROLS, SOURCE_LABELS, read_plan
-    controls, tables = read_plan(page, news_section=news_section)
-    include_fred = page is None or page == '시장·종목'
-    include_news = page is None or page in {'뉴스·LLM', '대시보드'}
-    pending = {'state', *controls, *tables}
+    controls, tables = read_plan(page, news_section=news_section, panel=panel)
+    include_state = panel is None or panel == 'live'
+    include_fred = page is None or (page == '시장·종목' and panel in {None, '시장 참고'})
+    include_news = page is None or page == '뉴스·LLM' or (page == '대시보드' and panel in {None, 'news'})
+    pending = {*controls, *tables}
+    if include_state:
+        pending.add('state')
     if include_fred:
         pending.add('fred_references')
     if 'news_status' in controls:
@@ -137,7 +142,8 @@ def load_database(path: str | Path, *, page=None, news_section=None) -> Dashboar
         repository = Repository(path, initialize=False)
         from contextlib import nullcontext
         with repository.transaction() if hasattr(repository,'transaction') else nullcontext():
-            result.state = read('state', repository.load_state) or {}
+            if include_state:
+                result.state = read('state', repository.load_state) or {}
             for name in controls:
                 key, _ = CONTROLS[name]
                 value = read(name, lambda: repository.get_control(key))
@@ -239,13 +245,18 @@ def build_view(data: DashboardData, now: datetime | None = None) -> dict:
         value = qty * mark if mark is not None else None
         weight = value / equity * 100 if value is not None and equity is not None and equity > 0 else None
         stop = decimal_value(row.get("stop_price"))
+        entry_fee = decimal_value(row.get("entry_fee", "0"))
+        cost = qty * avg + entry_fee if avg is not None and avg > 0 and entry_fee is not None and entry_fee >= 0 else None
+        pnl = value - cost if value is not None and mark > 0 and cost is not None else None
+        return_pct = pnl / cost * 100 if pnl is not None and cost > 0 else None
         position_view.append({
             "종목": symbol, "보유 수량": str(qty), "평균 매수가": usd(avg), "평가액": usd(value),
             "비중": f"{weight:.1f}%" if weight is not None else "—",
             "최초 진입 금액": usd(row.get("initial_amount", row.get("initial_notional"))),
             "추가매수 금액": usd(row.get("add_amount", row.get("add_notional"))),
             "추가매수 횟수": row.get("add_count", row.get("adds", row.get("additions", 0))), "손절 기준": usd(stop),
-            "평가 손익": usd((mark - avg) * qty - decimal_value(row.get("entry_fee"), Decimal(0))) if mark is not None and avg is not None else "—",
+            "평가 손익": usd(pnl),
+            "평가 수익률": f"{return_pct:+.2f}%" if return_pct is not None else "—",
             "가격 기준": "최근 매수호가" if mark is not None else "시세 미확인/만료",
         })
     usage = data.tables.get("llm_usage", [])
@@ -268,7 +279,7 @@ def _table(rows: list[dict], message: str = "아직 저장된 기록이 없습�
         from sessionquant.dashboard.labels import display_rows
         visible,unknown=display_rows(rows)
         st.dataframe(pd.DataFrame(visible), hide_index=True, width="stretch")
-        if unknown:
+        if unknown and st.session_state.get('dashboard_raw_data', False):
             with st.popover('원본 기록 보기'):
                 st.json(rows)
     else:
@@ -293,17 +304,26 @@ def _news_rows(rows: list[dict]) -> list[dict]:
     return result
 
 
-def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=None, selected_page=None) -> None:
+def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=None, selected_page=None,
+                     panel=None, styled=False) -> None:
     import streamlit as st
     from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
-    style()
+    if not styled:
+        style()
     page=selected_page or st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
     news_section = None
     if page == '뉴스·LLM':
         from sessionquant.dashboard.load_plan import NEWS_SECTIONS
         news_section = st.radio('뉴스 상세', tuple(NEWS_SECTIONS), horizontal=True, key='news_detail')
-    data=load_database(path,page=page,news_section=news_section)
+    data=load_database(path,page=page,news_section=news_section,panel=panel)
     view=build_view(data)
+    show_benchmarks = data.context.get('benchmark_collection_enabled') is not False
+    if page == '대시보드' and panel == 'news' and not data.error and view['environment'] != 'PAPER_LOCAL':
+        return
+    if page == '대시보드' and panel == 'live' and not data.error and view['environment'] != 'PAPER_LOCAL':
+        # 실계좌 조회 홈은 기존 표시 범위를 유지한다.
+        data=load_database(path,page=page)
+        view=build_view(data)
     account=view['account']
     from sessionquant.dashboard.labels import label
     if page != '대시보드' or view['environment']!='PAPER_LOCAL':
@@ -323,16 +343,46 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             st.info(' · '.join(missing)+' · 조회 미완료')
         return not missing
     if view['synthetic']: st.warning('합성 데이터 데모 · 실제 시장 성과가 아닙니다.')
+    if page == '대시보드' and view['environment'] != 'PAPER_LOCAL' and panel != 'news' and available('watchlist_state'):
+        from sessionquant.dashboard.focus_summary import render_focus_summary
+        render_focus_summary(data.watchlist_state,data.context.get('strategy_lab'))
+    if data.context.get('strategy')=='pullback_simple' and page != '대시보드' and panel != 'news':
+        st.info('전략 실험 · 상승 추세 → 1~4개 봉 조정 → 확정봉 반등. LLM은 판단을 설명하며 뉴스는 보조 가점입니다.')
+        st.caption('과거 20일 분봉·RVOL은 진입 필수가 아닙니다. 당일 분봉·최신 호가와 주문 제한은 검사합니다. 매수 판단 표에서 조건별 결과를 확인하세요.')
+        if page == '시장·종목' and panel in {None, '매수 판단'}:
+            from sessionquant.dashboard.status_labels import blocker_summary, llm_status_label
+            summary=data.context.get('strategy_lab') or {}
+            with st.expander('전략 → AI → 주문 상세 기록'):
+                st.caption('마지막 평가 기록: '+timestamp(summary.get('evaluated_at'))+' · 주문 승인과 체결은 별개입니다.')
+                _table([{'종목':r['symbol'],
+                    '전략 조건':' / '.join(c['label']+(' ✓' if c['passed'] else ' 대기') for c in r['checks']) or '판단 자료 준비',
+                    'AI 분석':llm_status_label(r['llm_status']),'뉴스 가점':r['llm_points'],
+                    'LLM 호출 근거':', '.join(r['llm_call_ids']) or '없음',
+                    '주문 판단':r['order_status'],'대기 이유':blocker_summary(r['blockers']) or '없음',
+                    '주문 의도':r['order_intent_id'] or '없음'} for r in summary.get('rows',[])],
+                    '매매 판단 기록을 기다립니다.')
+
+
+    if (page == '뉴스·LLM' or (page == '대시보드' and view['environment'] != 'PAPER_LOCAL')) and panel != 'live':
+        from sessionquant.dashboard.explanation_panel import render_explanation
+        render_explanation(data.strategy_explanation)
     if data.context.get('paper_data_policy')=='observed_paper_v1':
         if page != '대시보드':
             st.info('합성 자료 사용 · 거래는 모의로 진행합니다.' if view['synthetic'] else '실제 시세 사용 · 거래는 모의로 진행합니다.')
         if page=='시스템·설정':
             st.caption('실제 계좌 권한은 확인하지 않습니다. 소수점 거래와 미확인 거래정지·기업행동, 거래량 비교 조건은 모의 가정으로 기록합니다.')
     if page=='대시보드':
-        render_overview(data,view,path,usage_path,usage_environment)
+        if panel is not None and view['environment'] == 'PAPER_LOCAL':
+            from sessionquant.dashboard.operations_overview import render_operations
+            render_operations(data,view,path,panel=panel)
+        else:
+            render_overview(data,view,path,usage_path,usage_environment)
     elif page=='전략·백테스트': render_strategies(data,view)
     elif page=='시스템·설정': render_system(data,view)
-    if page == '시장·종목' and available('market_regimes', 'quote_snapshots'):
+    def market_section(name):
+        return page == '시장·종목' and panel in {None, name}
+
+    if market_section('시장 참고') and show_benchmarks and available('market_regimes', 'quote_snapshots'):
         st.subheader("시장 방향과 데이터 상태")
         st.write(f"**{view['regime_label']}**")
         reason = view["regime_detail"].get("reason", view["regime_detail"].get("reasons", ""))
@@ -349,11 +399,12 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                                     "제공 시각": timestamp(quote.get("timestamp")), "수집 시각": timestamp(quote.get("received_at"))})
         _table(market_rows, "SPY·QQQ의 최신 확정봉과 호가를 기다리고 있습니다.")
         st.caption("SPY·QQQ가 모두 최신 상태이고 확정봉 추세가 확인되어야 시장 방향을 사용합니다. FRED는 일별 참고 자료이며 TLT는 금리, USO는 원유 현물 가격으로 표시하지 않습니다.")
-    if page == '시장·종목':
+    if market_section('시장 참고'):
         if available('market_reference'):
-            from sessionquant.dashboard.reference_panel import render_references
+            from sessionquant.dashboard.reference_panel import render_references, reference_benchmarks_visible
             render_references(data.market_reference, data.context.get('macro_reference_risk'), data.fred_references,
-                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable)
+                quotes=view['quotes'], fred_available='fred_references' not in data.unavailable,
+                show_benchmarks=reference_benchmarks_visible(data.context))
         if available('economic_events'):
             from sessionquant.dashboard.news_panel import calendar_rows
             schedule = calendar_rows(data.tables['economic_events'])
@@ -364,20 +415,27 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     if page == '시장·종목':
         if view['environment'] == 'PAPER_LOCAL':
             from sessionquant.dashboard.market_quality_panel import render_quality
-            if available('market_quality', 'market_performance'):
-                render_quality(data.market_quality,performance=data.market_performance)
+            if market_section('시세·품질') and available('market_quality'):
+                render_quality(data.market_quality,performance=data.market_performance,details=panel is None,
+                               show_benchmarks=show_benchmarks)
+            if panel == '처리 속도' and available('market_quality', 'market_performance'):
+                from sessionquant.dashboard.market_quality_panel import render_quality_details
+                render_quality_details(data.market_quality, data.market_performance, show_benchmarks=show_benchmarks)
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
-            if available('watchlist_rvol', 'history_backfill'):
-                render_watchlist_rvol(data.watchlist_rvol,data.history_backfill)
+            if market_section('거래량 비교') and available('watchlist_rvol', 'history_backfill'):
+                render_watchlist_rvol(data.watchlist_rvol,data.history_backfill,
+                                     paper_policy=data.context.get('paper_data_policy'),
+                                     strategy=data.context.get('strategy'))
         from sessionquant.dashboard.watchlist_panel import render_watchlist
         if view['environment'] == 'PAPER_LOCAL':
-            if available('watchlist_state'):
+            if market_section('감시·집중 종목') and available('watchlist_state'):
                 render_watchlist(data.watchlist_state, None if 'candidates' in data.unavailable else data.tables['candidates'])
             from sessionquant.dashboard.selection_panel import render_selection
-            if available('portfolio_selection'):
+            if market_section('매수 판단') and available('portfolio_selection'):
                 render_selection(data.portfolio_selection)
         else:
-            st.caption('시총 감시·집중 분석 정책은 PAPER_LOCAL에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
+            st.caption('시총 감시·집중 분석 정책은 모의매매에 적용합니다. 현재 실계좌 조회·제한적 검증 경로는 별도입니다.')
+    if market_section('분석 이력'):
         st.subheader("기술 분석 이력과 진입 근거")
         if not available('candidates'):
             return
@@ -407,8 +465,18 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         cols = st.columns(3)
         cols[0].metric("실현 손익", usd(account.get("realized_pnl")))
         cols[1].metric("일일 기준 자산", usd(account.get("day_start_equity")))
-        cols[2].metric("초기 계획", "2종목 중심")
-        st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
+        limits = (data.state.get('broker') or {}).get('settings') or {}
+        maximum, preferred = limits.get('max_positions'), limits.get('preferred_positions')
+        policy = data.state.get('candidate_selection') or {}
+        if type(maximum) is int and type(preferred) is int and 1 <= preferred <= maximum <= 5:
+            limit = maximum if policy.get('allow_above_preferred') or policy.get('enabled') is False else preferred
+            cols[2].metric("동시 보유 한도", f"{limit}종목")
+        else:
+            cols[2].metric("동시 보유 한도", "확인 대기")
+        if data.context.get('strategy', data.state.get('strategy')) == 'pullback_simple':
+            st.caption('현재 단순 눌림목 전략: 추가매수 없음. 최초 매수 목표는 자산의 20%이며, 손절 기준 가격에 도달하면 매도합니다. 실제 매수 금액은 현금·손절 거리·비용에 따라 줄어들 수 있습니다.')
+        else:
+            st.caption("기본값: 최초 진입 20% · 추가매수 최대 1회/20% · 종목당 최대 40% · 전체 최대 80% · 종목 위험 예산 0.75% · 일일 손실 한도 2%. 실제 주문 금액은 현금·손절 거리·비용·브로커 규칙에 따라 더 작아질 수 있습니다.")
         if view['environment'] == 'PAPER_LOCAL':
             st.caption('현재 한 전략만 단독 평가합니다. 10%는 고정 대기 조건이 아닌 설정 목표이며, 이익 보호·악재·손절·시간 청산이 먼저 작동할 수 있습니다. 일일 2%는 신규 매수 중단 기준으로 갭·장애 손실을 보장하지 않습니다.')
             risk = data.context.get('risk_snapshot') or {}
@@ -469,7 +537,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                     '수수료 항목':row.get('fee_breakdown'),'미체결 사유':row.get('unfilled_reason'),
                     '접수 시각':timestamp(row.get('accepted_at'))} for row in data.tables['orders']])
         with st.expander("체결 기록"):
-            _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "수량": str(row.get("qty", "")),
+            st.caption('매도 이유는 해당 주문에 기록된 사유입니다. 과거 체결은 연결된 주문에서 확인하며, 근거가 없으면 기록 없음으로 표시합니다.')
+            _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "매도 이유": row.get('매도 이유', '기록 없음') if str(row.get('side')).lower()=='sell' else '—', "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
                      '체결 모델':row.get('fill_model_version','실제 브로커' if row.get('execution_mode')=='live' else 'UNKNOWN'),
                      '예상 가격':usd(row.get('expected_price')),'가격 차이(bps)':row.get('slippage_bps'),
@@ -480,9 +549,15 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         st.caption("화면은 엔진에 제어 요청을 전달합니다. 실제 주문·취소·체결 확인은 실행 중인 엔진에서 처리합니다.")
 
 
-def refresh_interval(page, enabled=True):
+def refresh_interval(page, enabled=True, *, panel=None):
     """조회량에 맞춘 화면 갱신 주기. 거래 제어 요청은 주기와 무관하게 처리한다."""
-    return {'대시보드': 5, '시장·종목': 10, '뉴스·LLM': 30}.get(page) if enabled else None
+    if not enabled:
+        return None
+    if page == '대시보드' and panel == 'news':
+        return 60
+    if page == '시장·종목' and panel in {'처리 속도', '분석 이력'}:
+        return None
+    return {'대시보드': 5, '시장·종목': 10, '뉴스·LLM': 30}.get(page)
 
 
 def main() -> None:
@@ -491,7 +566,7 @@ def main() -> None:
 
     # 상세 화면이 렌더링되지 않아도 확인/검색 위젯의 세션 값을 보존한다.
     for key in list(st.session_state):
-        if key.startswith(('confirm-','trade_','llm-','strategy_','news_')):
+        if key.startswith(('confirm-','trade_','llm-','strategy_','news_', 'market_detail')):
             st.session_state[key]=st.session_state[key]
 
     parser = argparse.ArgumentParser(description="SessionQuant 통합 대시보드")
@@ -500,24 +575,45 @@ def main() -> None:
     parser.add_argument("--db", default=os.getenv("SQ_DB", "data/sessionquant-paper-local.db"))
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
-    from sessionquant.dashboard.overview import PAGES
+    from sessionquant.dashboard.navigation import restore_navigation, remember_navigation
+    restore_navigation(st.query_params, st.session_state)
+    from sessionquant.dashboard.overview import PAGES, style
+    style()
     with st.sidebar:
         st.title("SessionQuant")
         page=st.radio('화면',PAGES,key='dashboard_page',label_visibility='collapsed')
         st.divider()
         refresh = st.toggle("자동 갱신", value=True, key='dashboard_auto_refresh',
-                            help='메인 5초 · 시장·종목 10초 · 뉴스 30초마다 저장된 기록을 다시 읽습니다.')
-        interval = refresh_interval(page, refresh)
-        st.caption(f'이 화면은 {interval}초마다 갱신합니다.' if interval else '이 화면은 수동으로 새로고침합니다.')
+                            help='시장 흐름 차트 2초 · 시세·보유 5초 · 선택한 시장 표 10초 · 메인 뉴스 집계 60초. 꺼도 수집과 매매는 계속됩니다.')
         if st.button("화면 새로고침", width="stretch"):
             st.rerun()
+        st.toggle('원본 기록도 보기', value=False, key='dashboard_raw_data',
+                  help='상세 진단용입니다. 켜면 추가 자료를 화면에 표시하므로 느려질 수 있습니다.')
         st.caption("한국시간 · 미국 달러")
+
+    panel = None
+    if page == '시장·종목':
+        from sessionquant.dashboard.load_plan import MARKET_SECTIONS
+        panel = st.radio('확인할 자료', tuple(MARKET_SECTIONS), horizontal=True, key='market_detail')
+    remember_navigation(st.query_params, st.session_state, page, panel)
+    interval = refresh_interval(page, refresh, panel=panel)
+    st.sidebar.caption(f'현재 상태는 {interval}초마다 갱신합니다.' if interval else '현재 표는 수동으로 갱신합니다.')
+    if page == '대시보드' and refresh:
+        st.sidebar.caption('시장 흐름 차트는 2초, 뉴스·AI 요약은 60초마다 갱신합니다.')
 
     @st.fragment(run_every=interval)
     def monitor() -> None:
-        render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,usage_environment=args.usage_environment,selected_page=page)
+        render_dashboard(Path(args.db),usage_path=Path(args.usage_db) if args.usage_db else None,
+                         usage_environment=args.usage_environment,selected_page=page,
+                         panel='live' if page == '대시보드' else panel,styled=True)
 
     monitor()
+    if page == '대시보드':
+        @st.fragment(run_every=refresh_interval(page, refresh, panel='news'))
+        def news_summary() -> None:
+            render_dashboard(Path(args.db), selected_page=page, panel='news', styled=True)
+
+        news_summary()
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ def selection_view(frame,now=None):
 def entry_rows(view):
     """Show why each saved candidate stopped, without turning old approval into a live state."""
     from .session_app import timestamp
+    from .status_labels import blocker_summary, llm_status_label
     statuses={'BLOCKED':'입력·시장 조건 미충족','SIGNAL':'전략 신호 있음','WAITING':'전략 조건 대기'}
     result=[]
     for row in view['rows']:
@@ -26,17 +27,27 @@ def entry_rows(view):
             *([row['allocation_reason']] if row.get('allocation_reason') else [])]))
         if indicators.get('strategy_diagnostics'):
             reasons=[reason for reason in reasons if reason!='technical_signal_absent']
+        pattern=indicators.get('strategy_pattern') or {}
+        checks={c['key']:('통과' if c['passed'] else '미충족') for c in pattern.get('checks',[])}
+        news=row.get('news_score_signal') or {}
         result.append({'종목':row.get('symbol'),'기록 시각':timestamp(row.get('evaluated_at')),
             '현재성':'현재 평가' if view['active'] else '이전 평가 · 갱신 대기',
             '시장 방향':row.get('regime','UNKNOWN'),'전략 RVOL':indicators.get('relative_volume'),
             '전략 판단':statuses.get(indicators.get('strategy_status'),'이전 버전 · 상세 기록 확인'),
-            '주문 판단':row.get('portfolio_status','UNKNOWN'),'대기·차단 이유':', '.join(reasons) or '—'})
+            '상승 추세':checks.get('trend','—'),'조정':checks.get('correction','—'),
+            '반등':checks.get('rebound','—'),
+            'LLM 분석 상태':llm_status_label(news.get('status','UNKNOWN')),
+            'LLM 가점':round(indicators.get('score_components',{}).get('news',0)*10,4),
+            'LLM 근거':', '.join(news.get('analysis_ids',[])) or '없음',
+            '주문 의도':row.get('order_intent_id') or '없음',
+            '주문 판단':row.get('portfolio_status','UNKNOWN'),'대기·차단 이유':blocker_summary(reasons) or '—'})
     return result
 
 
 def render_selection(frame):
     import streamlit as st
     from .session_app import _table,timestamp
+    from .status_labels import blocker_details, blocker_summary
     frame=frame or {};view=selection_view(frame)
     st.subheader('집중 목록 → 최종 후보 → Paper 진입 승인')
     columns=st.columns(3)
@@ -59,12 +70,27 @@ def render_selection(frame):
             '업종 값':sector.get('value') if status.get('sector')=='VERIFIED' else None,
             '동일 업종 노출':', '.join(row.get('exposure_overlap',{}).get('same_sector_symbols',[])),
             '높은 지수 상관 노출':', '.join(row.get('exposure_overlap',{}).get('high_index_correlation_symbols',[])),
-            '포트폴리오 결과':row.get('portfolio_status'),'차단·거절':', '.join([*row.get('blockers',[]),*([row['allocation_reason']] if row.get('allocation_reason') else [])]),
+            '포트폴리오 결과':row.get('portfolio_status'),'차단·거절':blocker_summary([*row.get('blockers',[]),*([row['allocation_reason']] if row.get('allocation_reason') else [])]),
             '호가 발생':timestamp(row.get('quote_at')),'확정봉':timestamp(row.get('indicators',{}).get('last_closed_at')),
             '주문 의도':row.get('order_intent_id')})
     with st.expander('후보 점수·뉴스·업종 상세'):
         _table(rows,'집중 후보의 동일 시점 선정 기록이 없습니다.')
+    with st.expander('대기 이유 구분해서 보기'):
+        reasons = []
+        for row in view['rows']:
+            codes = [*row.get('blockers', []), *(row.get('indicators') or {}).get('strategy_diagnostics', [])]
+            if row.get('allocation_reason'):
+                codes.append(row['allocation_reason'])
+            for reason in blocker_details(codes):
+                reasons.append({'종목': row.get('symbol'), '구분': reason['category'], '대기 이유': reason['label'],
+                                '사유 코드': reason['code']})
+        # Codes are validated by blocker_details. Preserve them for diagnosis rather
+        # than translating unknown identifiers back to a generic placeholder.
+        if reasons:
+            st.dataframe(reasons, hide_index=True, width='stretch')
+        else:
+            st.caption('저장된 대기 사유가 없습니다. 매수 승인을 뜻하지는 않습니다.')
     st.caption('미확인 뉴스·업종은 가점 0이며 검증된 중립과 구분합니다. 시장 참고 ETF와 거시 LLM 해설은 종목 가점에 포함하지 않습니다.')
-    if frame:
+    if frame and st.session_state.get('dashboard_raw_data', False):
         with st.expander('선택 근거·뉴스/업종 입력·시장 위험 상세'):
             st.json(frame)

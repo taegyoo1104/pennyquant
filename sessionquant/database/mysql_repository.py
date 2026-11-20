@@ -30,6 +30,7 @@ def mysql_failure_message(error, operation):
     code = code if type(code) is int and 0 <= code <= 65535 else None
     action = operation if operation in {'CONNECT','SELECT','INSERT','UPDATE','DELETE','CREATE','ALTER','SET','START'} else 'QUERY'
     hints = {
+        1038:'DB 정렬 메모리가 부족합니다. 순번 조회 인덱스와 정렬 버퍼 설정을 확인하세요.',
         1044:'DB 접근 권한을 확인하세요.', 1045:'DB 계정·비밀번호·접속 허용 대상을 확인하세요.',
         1142:'해당 DB 작업의 테이블 권한을 확인하세요.', 1143:'해당 DB 작업의 열 권한을 확인하세요.',
         1146:'필요한 DB 테이블이 없습니다.', 1153:'DB의 최대 전송 크기를 초과했습니다.',
@@ -358,7 +359,7 @@ class MySQLRepository:
         if type(batch_size) is not int or not 1 <= batch_size <= 2000:raise ValueError('페이지 크기를 확인하세요.')
         after = 0
         while True:
-            rows = self._execute(f'SELECT seq,payload FROM {table} WHERE namespace=%s AND seq>%s ORDER BY seq LIMIT %s',
+            rows = self._execute(f'SELECT seq,payload FROM {table} FORCE INDEX (ix_namespace_seq) WHERE namespace=%s AND seq>%s ORDER BY seq LIMIT %s',
                                  (self.namespace,after,batch_size),fetch='all')
             if not rows:break
             for seq,payload in rows:
@@ -366,7 +367,10 @@ class MySQLRepository:
                 yield seq,json.loads(payload) if isinstance(payload,str) else payload
 
     def all(self, kind: str) -> list[dict]:
-        rows = self._execute(f"SELECT payload FROM {self._kind(kind)} WHERE namespace=%s ORDER BY seq",
+        # Scan the existing namespace/sequence index in order. Allowing a filesort
+        # here can copy wide JSON values into a small per-connection sort buffer
+        # and fail with 1038 even when the VM has ample free RAM.
+        rows = self._execute(f"SELECT payload FROM {self._kind(kind)} FORCE INDEX (ix_namespace_seq) WHERE namespace=%s ORDER BY seq",
                              (self.namespace,), fetch="all")
         return [self._decode(row[0]) for row in rows]
 
@@ -374,7 +378,7 @@ class MySQLRepository:
         table = self._kind(kind)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
             raise ValueError("limit은 1~10000 정수여야 합니다")
-        rows = self._execute(f"SELECT payload FROM {table} WHERE namespace=%s ORDER BY seq DESC LIMIT %s",
+        rows = self._execute(f"SELECT payload FROM {table} FORCE INDEX (ix_namespace_seq) WHERE namespace=%s ORDER BY seq DESC LIMIT %s",
                              (self.namespace, limit), fetch="all")
         return [self._decode(row[0]) for row in reversed(rows)]
 
@@ -389,7 +393,7 @@ class MySQLRepository:
         """Keep namespace isolation and filter prechecks before the display limit."""
         if type(limit) is not int or not 1 <= limit <= 10000:
             raise ValueError('요청 조회 개수는 1~10000 정수여야 합니다.')
-        rows = self._execute("SELECT payload FROM pq_llm_calls WHERE namespace=%s "
+        rows = self._execute("SELECT payload FROM pq_llm_calls FORCE INDEX (ix_namespace_seq) WHERE namespace=%s "
             "AND JSON_EXTRACT(payload,'$.network_attempted')=CAST('true' AS JSON) "
             "ORDER BY seq DESC LIMIT %s",(self.namespace,limit),fetch='all')
         return [self._decode(row[0]) for row in reversed(rows)]

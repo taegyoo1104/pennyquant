@@ -848,3 +848,56 @@ def test_mysql_split_market_checkpoint_recovery(mysql_repositories, tmp_path, mo
         check(tmp_path)
     else:
         check(tmp_path, monkeypatch)
+
+
+def test_mysql_wide_json_ordered_reads_avoid_filesort_and_preserve_namespace(mysql_repositories, monkeypatch):
+    """A bad sort plan can exhaust 32KiB; indexed readers must not sort JSON."""
+    import json
+    import pymysql
+    repo, other = mysql_repositories(), mysql_repositories()
+    for i in range(8):
+        row = {'id':str(i), 'body':'x' * 262144, 'network_attempted':i % 3 == 0}
+        repo.record('news_analysis', row)
+        repo.record('llm_calls', row)
+        other.record('news_analysis', {**row, 'id':'other-'+str(i)})
+        other.record('llm_calls', {**row, 'id':'other-'+str(i)})
+    repo.record('llm_calls', {'id':'string-flag', 'body':'x'*262144, 'network_attempted':'true'})
+    # In-place updates preserve the original insertion ordering.
+    repo.record('news_analysis', {'id':'2', 'body':'y'*262144})
+    with repo.db.cursor() as cursor:
+        cursor.execute('SET SESSION sort_buffer_size=32768')
+        cursor.execute('SET SESSION optimizer_switch="prefer_ordering_index=off"')
+        # Reproduce the JSON/filesort failure independent of optimizer statistics.
+        # The production query's exact old plan requires its own EXPLAIN evidence.
+        with pytest.raises(pymysql.MySQLError) as exc:
+            cursor.execute('SELECT payload FROM pq_news_analysis IGNORE INDEX (ix_namespace_seq, PRIMARY) '
+                           'WHERE namespace=%s ORDER BY seq DESC LIMIT 10000', (repo.namespace,))
+            cursor.fetchall()
+        assert exc.value.args[0] == 1038
+    captured = []
+    original = repo._execute
+    def record_query(sql, params=(), **kwargs):
+        if sql.startswith('SELECT') and 'ORDER BY seq' in sql:
+            captured.append((sql, params))
+        return original(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', record_query)
+    assert [r['id'] for r in repo.all('news_analysis')] == [str(i) for i in range(8)]
+    assert [r['id'] for r in repo.recent('news_analysis', 3)] == ['5','6','7']
+    assert [r['id'] for _, r in repo.iter_records('news_analysis', batch_size=3)] == [str(i) for i in range(8)]
+    assert [r['id'] for r in repo.recent_llm_attempts(2)] == ['3','6']
+    from sessionquant.macro.service import NewsPipeline
+    news = NewsPipeline.__new__(NewsPipeline)
+    news.repo, news._analyses, news._economic = repo, {}, {}
+    news._restore()  # The same restore path used before the engine/feed starts.
+    assert set(news._analyses) == {str(i) for i in range(8)}
+    def has_filesort(value):
+        if isinstance(value, dict):
+            return value.get('using_filesort') is True or any(has_filesort(v) for v in value.values())
+        return isinstance(value, list) and any(has_filesort(v) for v in value)
+    for sql, params in captured:
+        with repo.db.cursor() as cursor:
+            cursor.execute('EXPLAIN FORMAT=JSON '+sql, params)
+            plan = json.loads(cursor.fetchone()[0])
+        assert not has_filesort(plan), plan
+        assert 'ix_namespace_seq' in json.dumps(plan)
+    assert [r['id'] for r in other.recent('news_analysis', 2)] == ['other-6','other-7']

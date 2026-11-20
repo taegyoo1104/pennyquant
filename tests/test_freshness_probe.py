@@ -8,6 +8,25 @@ from scripts import check_market_freshness as probe
 from scripts.check_market_freshness import KEYS, read_controls, summarize
 
 
+@pytest.mark.parametrize('configured,explicit,expected',[
+    (None,None,'config/sessionquant.realtime-paper.example.yaml'),
+    ('',None,'config/sessionquant.realtime-paper.example.yaml'),
+    ('config/sessionquant.strategy-lab-websocket.example.yaml',None,'config/sessionquant.strategy-lab-websocket.example.yaml'),
+    ('config/sessionquant.strategy-lab-websocket.example.yaml','selected.yaml','selected.yaml'),
+])
+def test_cli_uses_active_profile_unless_explicitly_selected(monkeypatch,capsys,configured,explicit,expected):
+    if configured is None:monkeypatch.delenv('SQ_SESSION_CONFIG',raising=False)
+    else:monkeypatch.setenv('SQ_SESSION_CONFIG',configured)
+    paths=[]
+    def read(path):
+        paths.append(path)
+        return {}
+    monkeypatch.setattr(probe,'read_controls',read)
+    assert probe.main(['--config',explicit] if explicit else [])==0
+    assert paths==[expected]
+    assert json.loads(capsys.readouterr().out)['order_writes']==0
+
+
 def test_probe_exports_timing_evidence_without_freeform_payloads():
     now=datetime(2026,11,18,14,47,23,tzinfo=timezone.utc)
     controls={KEYS[0]:{'items':[{'symbol':'PG','observed_at':'2026-11-18T14:46:52Z',

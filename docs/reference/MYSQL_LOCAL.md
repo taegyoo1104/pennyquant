@@ -1,6 +1,10 @@
 # 로컬 MySQL 8 연결과 데이터 관리
 
-SessionQuant의 실제 시세 모의 운영은 로컬 MySQL을 기본으로 사용합니다. 설치된 MySQL 서버를 재설치하거나 기존 DB를 삭제할 필요가 없습니다. 합성 예제와 과거 SQLite 재생은 SQLite에서도 실행할 수 있습니다. MySQL 연결에 실패하면 SQLite로 자동 전환하지 않고 실행을 중지합니다.
+설치된 로컬 MySQL에 연결하거나 장부를 점검·이관할 때 쓰는 명령 참조입니다. 처음 실행하는 순서는 [시작 안내](../GETTING_STARTED.md)를 따르고, GCP 서버 설정은 [GCP 안내](../GCP_PAPER.md)를 따릅니다.
+
+[문서 목록](../README.md) · [매매 흐름](../TRADING_PROCESS.md) · [용어 설명](../GLOSSARY.md)
+
+이 안내는 로컬 PC에서 MySQL로 실제 시세 모의매매를 실행하는 경우에 적용합니다. GCP는 VM 안의 DB 컨테이너 설정을 사용합니다. 설치된 MySQL 서버를 재설치하거나 기존 DB를 삭제할 필요가 없습니다. 합성 예제와 과거 SQLite 재생은 SQLite에서도 실행할 수 있습니다. MySQL 연결에 실패하면 SQLite로 자동 전환하지 않고 실행을 중지합니다.
 
 이 저장소를 개발하는 서버에서는 사용자 PC의 `127.0.0.1`에 접근할 수 없습니다. 아래 설정과 `db-check`는 본인 PC에서 실행하세요. 비밀번호와 API 키를 채팅이나 Git에 올리지 마세요.
 
@@ -15,7 +19,7 @@ MySQL Workbench에서 설치된 로컬 서버에 관리자 계정으로 연결�
 GitHub 변경사항을 받은 뒤 프로젝트의 PowerShell 터미널에서 실행합니다.
 
 ```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements.lock
+.\venv\Scripts\python.exe -m pip install --require-hashes -r requirements.lock
 .\venv\Scripts\python.exe -m pip install --no-deps -e .
 
 $env:SQ_DB_BACKEND = "mysql"
@@ -37,6 +41,8 @@ $env:SQ_MYSQL_PASSWORD = [System.Net.NetworkCredential]::new("", $secret).Passwo
 
 값이 누락됐다면 `setup-env`를 실행해 한 번 입력하세요. 파일은 Git/Docker에서 제외되며 실주문 활성화는 저장하지 않습니다.
 
+`--db`의 경로는 MySQL에서 실행 공간(네임스페이스)을 구분하는 이름이며 실제 SQLite 파일을 만드는 뜻이 아닙니다. 명령의 `data/sessionquant-paper-local.db`는 예시입니다. 추천 WebSocket 실험은 설정의 `db_path`에 대응하는 `data/sessionquant-strategy-lab-ws-v1.db`를 사용하므로 다른 장부를 조회하지 않도록 맞춥니다.
+
 `db-check`는 접속과 테이블 구성을 확인하고 행 수·용량을 출력합니다. 정상 결과의 `ready`는 `true`입니다. 비밀번호를 출력하거나 실제 주문을 전송하지 않습니다. 새 DB의 테이블은 첫 연결 시 자동 생성됩니다.
 
 새 설정의 `SQ_`가 우선하고 예전 `PQ_` 환경변수도 호환됩니다. `PQ_MYSQL_`만 사용하면 기존 기본 DB·사용자 이름 `pennyquant`를 유지합니다. `SQ_ENVIRONMENT`가 설정된 경우 네임스페이스는 예를 들어 `paper_local_sessionquant-paper-local`이 됩니다. 환경이 없던 이전 원장의 네임스페이스는 이름만 바뀌었다는 이유로 수정하지 않습니다.
@@ -48,17 +54,17 @@ $env:SQ_MYSQL_PASSWORD = [System.Net.NetworkCredential]::new("", $secret).Passwo
 | 시세·기술적 분석 | 수신한 1분봉, 호가, 거래 후보, 스캐너 점수, 시장 국면 |
 | 뉴스 | 기업 공시·RSS·Alpaca 자료, 거시·세계 뉴스, 원문 URL, 공개·수신 시각 |
 | LLM | 사건 분류·근거·불확실성, 모델·프롬프트 버전, 실제 토큰 사용량과 계산 비용 |
-| 거래 장부 | 신호, 주문 의도, 모의 주문, 실제 모의 체결, 소수점 포지션, 수수료·손익 |
+| 거래 장부 | 신호, 주문 의도, 모의 주문, 모의 체결, 소수점 포지션, 수수료·손익 |
 | 계좌·위험 | 현금·평가금액, 일일 손실 제한, 청산 상태, 알림, 대사 기록 |
 | 재시작 | 처리 커서, 주문 멱등성 기록, 시장 문맥, 위험 상태, 실행 환경 |
 
 기존 `pq_` 테이블은 과거 기록 호환성을 위해 유지합니다. 이름은 영어로 유지하며 내용은 한국어 설명을 포함할 수 있습니다. JSON 원장은 금액·수량을 정확한 소수 문자열로 저장하고, `sq_financial_ledger`는 관련 수치를 MySQL `DECIMAL(65,30)`으로 함께 저장합니다. 금융 수치 투영과 원장은 같은 트랜잭션으로 기록됩니다. `sq_schema_versions`에서 스키마 적용 이력을 확인할 수 있습니다.
 
-모의·실거래 환경은 `PAPER_LOCAL`, `LIVE_LOCAL`, `LIVE_GCP`별 네임스페이스를 사용하고 실제 운영에서는 서로 다른 DB 계정·DB도 사용하세요. 현재 Phase 0~4 실행기는 `PAPER_LOCAL`만 허용합니다. 동일 MySQL 네임스페이스의 엔진 중복 실행은 서버 잠금으로 차단합니다. 서로 다른 서버·DB의 동일 실계좌 중복 실행 방지는 Phase 5~6에서 계좌 단위 활성 엔진 관리와 함께 검증해야 합니다.
+모의·실거래 환경은 `PAPER_LOCAL`, `LIVE_LOCAL`, `LIVE_GCP`별 네임스페이스를 사용하고 실제 운영에서는 서로 다른 DB 계정·DB도 사용하세요. 일반 `run` 실행기는 `PAPER_LOCAL`만 허용합니다. 동일 MySQL 네임스페이스의 엔진 중복 실행은 서버 잠금으로 차단합니다. 서로 다른 서버·DB의 동일 실계좌 중복 실행 방지는 Phase 5~6에서 계좌 단위 활성 엔진 관리와 함께 검증해야 합니다.
 
 ## 4. 예상 용량
 
-용량은 수집 종목 수, 호가 수집 주기, 기사 본문 길이, 로그 양에 따라 달라집니다. 하루 390분·월 22거래일, 20개 관심 종목 중 매 주기 7개 호가, 10초 간격의 예에서는 대략 **일 30~100MB, 월 0.5~3GB**를 초기 계획 범위로 잡을 수 있습니다. 이는 상한이나 실제 측정 결과가 아닙니다. S&P 500 전체를 고빈도로 저장하면 이보다 크게 늘어납니다. 1초 수집은 동일 조건에서 시장 데이터만 10초 수집보다 약 9배 많아질 수 있습니다.
+용량은 수집 종목 수, 호가 수집 주기, 기사 본문 길이, 로그 양에 따라 달라집니다. 하루 390분·월 22거래일, 20개 관심 종목 중 매 주기 7개 호가, 10초 간격의 예에서는 대략 **일 30~100MB, 월 0.5~3GB**를 초기 계획 범위로 잡을 수 있습니다. 이는 상한이나 현재 WebSocket 프로필의 측정 결과가 아닙니다. S&P 500 전체를 고빈도로 저장하면 이보다 크게 늘어납니다. 1초 수집은 동일 조건에서 시장 데이터만 10초 수집보다 약 9배 많아질 수 있습니다.
 
 MySQL 바이너리 로그, 백업, JSONL 수집 파일은 별도 용량입니다. 초기 여유 디스크 20GB 이상을 확보하고 첫 1~2주 실제 측정치로 보관 기간을 정하세요. 상세 계산과 주의사항은 [DATABASE_STORAGE.md](DATABASE_STORAGE.md)를 참고하세요.
 
@@ -70,7 +76,7 @@ MySQL 바이너리 로그, 백업, JSONL 수집 파일은 별도 용량입니다
 
 ## 5. 보관 기간 정리
 
-자동 삭제는 기본으로 하지 않습니다. 처음에는 예상 삭제 건수만 확인하세요.
+아래 `db-prune` 명령은 기본적으로 미리보기만 하며 `--apply` 없이 삭제하지 않습니다. 별도 자동 보관 정책은 선택한 YAML에 따릅니다. 추천 strategy-lab는 진단 7일·뉴스 30일 정리를 켜지만, 실제 적용은 백업 성공을 확인하는 GCP 종료 절차와 연결됩니다. [저장·보관 기준](DATABASE_STORAGE.md)을 먼저 확인하세요.
 
 ```powershell
 .\venv\Scripts\python.exe -m sessionquant db-prune --db data/sessionquant-paper-local.db --days 7 --kinds price_samples,quote_snapshots

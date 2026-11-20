@@ -1,6 +1,7 @@
 """수신 시각 순서대로 시장 자료를 쌓고 기술적 매매 후보를 평가한다."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import math
@@ -39,7 +40,7 @@ class MarketEngine:
                  max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
                  min_rvol: float = 1.0, allow_neutral: bool = False, use_market_filter: bool = True, strict_data: bool = False,
                  paper_data_policy='strict'):
-        if strategy not in {"momentum", "pullback", "gap_breakout", "vwap"}:
+        if strategy not in {"momentum", "pullback", "pullback_simple", "gap_breakout", "vwap"}:
             raise ValueError("지원하지 않는 전략입니다")
         self.universe, self.strategy = universe, strategy
         self.strict_data = strict_data
@@ -58,7 +59,7 @@ class MarketEngine:
         self.allow_neutral = allow_neutral
         if type(use_market_filter) is not bool or type(allow_neutral) is not bool:
             raise ValueError("시장 필터·중립장 허용 설정은 불리언이어야 합니다")
-        # 시장 필터 해제는 과거 자료 비교 실험에서만 호출자가 사용한다.
+        # 시장 필터 적용 여부는 별도 Paper 설정 또는 과거 자료 비교에서 명시한다.
         self.use_market_filter = use_market_filter
         self.bars: dict[str, list[Bar]] = {}
         self.quotes: dict[str, Quote] = {}
@@ -66,6 +67,7 @@ class MarketEngine:
         self.rvol: dict[str, dict] = {}
         self.sector_strength: dict[str, tuple[float, datetime]] = {}
         self.history_provider = None
+        self._regime_cache = None
 
     def on_bar(self, bar: Bar) -> None:
         if bar.received_at < bar.timestamp:
@@ -76,6 +78,8 @@ class MarketEngine:
             if (existing.timestamp, existing.open, existing.high, existing.low, existing.close, existing.volume) == signature:
                 return
         values.append(bar)
+        if bar.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
+            self._regime_cache.clear()
         # 20거래일 RVOL 비교 이력을 유지하되 오래된 원본은 DB에서 보존한다.
         cutoff = bar.received_at - timedelta(days=50)
         self.bars[bar.symbol] = [x for x in values if x.timestamp >= cutoff][-20000:]
@@ -86,6 +90,8 @@ class MarketEngine:
         previous = self.quotes.get(quote.symbol)
         if previous is None or (quote.timestamp, quote.received_at) >= (previous.timestamp, previous.received_at):
             self.quotes[quote.symbol] = quote
+            if quote.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
+                self._regime_cache.clear()
 
     def set_eligibility(self, symbol: str, eligibility: InstrumentEligibility) -> None:
         if symbol != eligibility.symbol:
@@ -117,8 +123,26 @@ class MarketEngine:
         return relative_volume(total, through, self.bars.get(symbol, []), symbol=symbol,
                                min_sessions=min_sessions, corporate_actions_verified=comparability_verified)
 
+    @contextmanager
+    def evaluation_scope(self):
+        """Share benchmark work only within one serialized engine transaction."""
+        previous, self._regime_cache = self._regime_cache, {}
+        try:
+            yield
+        finally:
+            if previous is not None:
+                previous.clear()
+            self._regime_cache = previous
+
     def regime(self, now: datetime) -> RegimeResult:
-        return classify_regime(self.bars, self.quotes, now, max_quote_age_seconds=self.max_quote_age_seconds)
+        key = (utc(now), self.max_quote_age_seconds)
+        if self._regime_cache is not None and key in self._regime_cache:
+            return self._regime_cache[key]
+        result = classify_regime(self.bars, self.quotes, now, max_quote_age_seconds=self.max_quote_age_seconds)
+        if self._regime_cache is not None:
+            self._regime_cache.clear()
+            self._regime_cache[key] = result
+        return result
 
     def evaluate(self, symbol: str, now: datetime, *, news_score: float = .5,
                  news_blocked: bool = False) -> MarketDecision:
@@ -165,6 +189,7 @@ class MarketEngine:
                 'eligibility':jsonable(eligibility) if eligibility else None,
                 'quote_fresh':bool(quote and quote.symbol == symbol and quote.timestamp <= quote.received_at <= now
                     and all(0 <= (now-t).total_seconds() <= self.max_quote_age_seconds for t in [quote.timestamp,quote.received_at])),
+                'rvol_required':self.strategy != 'pullback_simple',
                 'quote_at':quote.timestamp.isoformat() if quote else None,
                 'quote_received_at':quote.received_at.isoformat() if quote else None}
         elif rvol is None:
@@ -176,7 +201,7 @@ class MarketEngine:
                         max_quote_age_seconds=self.max_quote_age_seconds,
                         max_eligibility_age_seconds=self.max_eligibility_age_seconds,
                         max_spread_pct=self.max_spread_pct, min_dollar_volume=self.min_dollar_volume,
-                        min_rvol=self.min_rvol, require_evidence=self.strict_data, paper_assumptions=experimental)
+                        min_rvol=self.min_rvol, require_evidence=self.strict_data, paper_assumptions=experimental, require_rvol=self.strategy != "pullback_simple")
         from ..market_reference.contracts import REFERENCE_SYMBOLS
         if symbol in REFERENCE_SYMBOLS:
             blockers.append('market_reference_not_trading_candidate')
@@ -201,6 +226,11 @@ class MarketEngine:
                                             "market_filter_enabled": self.use_market_filter,
                                             'strategy_diagnostics':strategy_diagnostics,
                                             'strategy_status':'BLOCKED' if blockers else 'SIGNAL' if signal else 'WAITING'}
+        if self.strategy == 'pullback_simple':
+            from .simple_pullback import inspect_pattern, progress
+            indicator_values['strategy_pattern'] = inspect_pattern(data)
+            indicator_values['strategy_progress'] = progress(data)
+            indicator_values['rvol_required'] = False
         if quality is not None:
             quality['blockers'] = list(dict.fromkeys(blockers))
             self.quality_rows[symbol] = quality
@@ -215,6 +245,8 @@ class MarketEngine:
                          "rvol": self.rvol, "sector_strength": self.sector_strength})
 
     def restore(self, payload: dict) -> None:
+        if self._regime_cache is not None:
+            self._regime_cache.clear()
         if payload.get("schema_version") != 1:
             raise ValueError("지원하지 않는 시장 상태 복구 형식입니다")
         self.bars, self.quotes, self.eligibility, self.rvol, self.sector_strength = {}, {}, {}, {}, {}

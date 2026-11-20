@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from sessionquant.dashboard.operations_overview import operation_cards
+from sessionquant.dashboard.operations_overview import operation_cards, home_focus
 from sessionquant.dashboard.session_app import DashboardData, build_view
 from sessionquant.database.repository import Repository
 from sessionquant.trading_controls import begin_session
@@ -36,6 +36,17 @@ def test_home_focus_count_excludes_expired_saved_focus():
         {'focused':True,'focus_valid_until':(NOW-timedelta(seconds=1)).isoformat()},
         {'focused':True,'focus_valid_until':'invalid'}])
     assert operation_cards(data,build_view(data,NOW),NOW)[1]['detail'].startswith('집중 1개')
+
+
+def test_home_does_not_claim_monitoring_when_engine_heartbeat_expires_first():
+    data = ready_data()
+    data.watchlist_state['items'] = [{'ticker': 'AAPL', 'focused': True,
+        'focus_monitor_until': (NOW+timedelta(minutes=20)).isoformat()}]
+    assert home_focus(data, build_view(data, NOW), NOW)[0]['monitored']
+    data.engine_state['heartbeat'] = (NOW-timedelta(seconds=61)).isoformat()
+    cards = home_focus(data, build_view(data, NOW), NOW)
+    assert not cards[0]['monitored'] and cards[0]['title'] == '목록 갱신 대기'
+    assert data.watchlist_state['status'] == 'VALID'  # Presentation never rewrites saved facts.
 
 
 @pytest.mark.parametrize('field',['heartbeat','timestamp','received_at'])

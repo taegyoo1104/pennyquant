@@ -12,17 +12,19 @@ CONTROLS = {
     'history_backfill': ('watchlist_history_backfill_v1', '분봉 준비'),
     'portfolio_selection': ('portfolio_selection_v1', '매수 후보 선정'),
     'market_reference': ('market_reference_view_v1', '시장 참고 지표'),
+    'benchmark_stream': ('benchmark_trade_view_v1', '시장 흐름 실시간 차트'),
     'news_status': ('session_news_status', '뉴스 수집 상태'),
     'warmup': ('startup_data_warmup_v1', '자료 준비'),
+    'strategy_explanation': ('strategy_explanation_v1', 'AI 전략 설명'),
 }
 
 PAGE_CONTROLS = {
-    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status'),
+    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation', 'market_reference', 'benchmark_stream'),
     '시장·종목': ('watchlist_state', 'market_quality', 'market_performance', 'watchlist_rvol',
                  'history_backfill', 'portfolio_selection', 'market_reference'),
     '전략·백테스트': (),
     '매매 내역': ('actual_account', 'account_status'),
-    '뉴스·LLM': ('actual_account', 'account_status', 'watchlist_state', 'news_status'),
+    '뉴스·LLM': ('actual_account', 'account_status', 'watchlist_state', 'news_status', 'strategy_explanation'),
     '시스템·설정': ('warmup', 'market_reference', 'news_status'),
 }
 
@@ -59,7 +61,31 @@ NEWS_SECTIONS = {
 }
 
 
-def read_plan(page, *, news_section=None):
+# 펼쳐 놓지 않은 화면의 큰 상태·이력을 자동 갱신 때 함께 읽지 않는다.
+MARKET_SECTIONS = {
+    '시세·품질': (('market_quality',), {}),
+    '거래량 비교': (('watchlist_rvol', 'history_backfill'), {}),
+    '감시·집중 종목': (('watchlist_state',), {'candidates': 300}),
+    '매수 판단': (('portfolio_selection',), {}),
+    '시장 참고': (('market_reference',), {'market_regimes': 1, 'quote_snapshots': 300, 'economic_events': 200}),
+    '처리 속도': (('market_performance', 'market_quality'), {}),
+    '분석 이력': ((), {'candidates': 300}),
+}
+
+
+def read_plan(page, *, news_section=None, panel=None):
+    if panel is not None:
+        if page == '대시보드' and panel == 'benchmarks':
+            return ('context','market_reference','benchmark_stream'), {}
+        if page == '대시보드' and panel == 'live':
+            return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup', 'market_reference'), {
+                'executions': 1, 'quote_snapshots': 300}
+        if page == '대시보드' and panel == 'news':
+            return ('context', 'engine_state', 'news_status', 'strategy_explanation'), {'news_ingestions': 300}
+        if page == '시장·종목' and panel in MARKET_SECTIONS:
+            controls, tables = MARKET_SECTIONS[panel]
+            return ('context', *controls), tables
+        raise ValueError('지원하지 않는 대시보드 구역입니다.')
     if page is None:
         tables = {}
         for plan in PAGE_TABLES.values():

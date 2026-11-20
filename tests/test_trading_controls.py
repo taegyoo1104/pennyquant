@@ -49,6 +49,8 @@ def test_startup_waits_for_button_and_risk_exits_work_while_stopped(tmp_path):
         assert engine.broker.positions
         engine.apply_batch(quotes(events,entry+timedelta(seconds=4)),entry+timedelta(seconds=4))
         assert not engine.broker.positions
+        sells=[r for r in repo.all('executions') if r['side']=='sell']
+        assert sells and all(r['reason']=='manual_market_sell' for r in sells)
     finally: repo.close()
 
 

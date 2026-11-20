@@ -32,7 +32,13 @@ class TossSessionSource:
     def __init__(self, client: TossMarketClient | None = None, *, candidates_per_cycle: int = 2, clock=None,
                  watchlist=None, max_api_calls=24, light_refresh_seconds=30, ranking_refresh_seconds=60,
                  max_cycle_seconds=15, history_pages_per_cycle=1, on_priority_batch=None, reference_monitor=None,
-                 history_store=None, watchlist_candles_per_cycle=4, warmup=None):
+                 history_store=None, watchlist_candles_per_cycle=4, warmup=None,
+                 include_benchmarks=True, current_session_only=False, quote_feed=None):
+        if type(include_benchmarks) is not bool or type(current_session_only) is not bool:
+            raise ValueError('시장 참조·당일 수집 설정은 불리언이어야 합니다.')
+        self.benchmark_symbols=('SPY','QQQ') if include_benchmarks else ()
+        self.current_session_only=current_session_only
+        self.quote_feed=quote_feed
         if type(candidates_per_cycle) is not int or not 1 <= candidates_per_cycle <= 10:
             raise ValueError("한 주기에 상세 수집할 종목 수는 1~10개입니다")
         self.client = client or TossMarketClient()
@@ -75,7 +81,7 @@ class TossSessionSource:
         chosen = [candidates[(self.cursor + i) % len(candidates)] for i in range(count)] if candidates else []
         if candidates:
             self.cursor = (self.cursor + count) % len(candidates)
-        selected = list(dict.fromkeys(["SPY", "QQQ", *priority_symbols, *chosen]))
+        selected = list(dict.fromkeys([*self.benchmark_symbols, *priority_symbols, *chosen]))
         batch, metadata = MarketBatch(), {}
         try:
             response = await self.client.stocks(selected)
@@ -148,7 +154,7 @@ class TossSessionSource:
         state = manager.state
         budget = ReadCallBudget(self.max_api_calls)
         token = retry_budget.set(budget)
-        priority = list(dict.fromkeys([*priority_symbols, 'SPY', 'QQQ']))
+        priority = list(dict.fromkeys([*priority_symbols, *self.benchmark_symbols]))
         measurements = []
         updated_history = set()
         latest_quotes = {}
@@ -157,9 +163,9 @@ class TossSessionSource:
             measurements.append({'source':source,'symbol':symbol,'priority':not optional,'status':reason,
                 'read_attempts':0,'duration_seconds':0.0,'observed_at':utc(self.clock()).isoformat()})
 
-        async def call(source, method, *args, symbol='*', optional=False, reserved=0, **kwargs):
+        async def call(source, method, *args, symbol='*', optional=False, reserved=0, reserved_seconds=0, **kwargs):
             budget.reserved = 0
-            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
+            group = 'MARKET_DATA_CHART' if method.__name__ in {'candles','reference_candles'} else 'STOCK_ALL' if method.__name__ == 'stocks_all' else 'STOCK' if method.__name__ == 'stocks' else 'SECTOR' if method.__name__ in {'sectors','sector_stocks'} else 'MARKET_DATA'
             until = state.get('reference_backoff_groups',{}).get(group)
             if until and utc(self.clock()) < utc(until):
                 skipped(source,symbol,optional,'provider_group_backoff')
@@ -167,10 +173,13 @@ class TossSessionSource:
             if state.get('backoff_until') and utc(self.clock()) < utc(state['backoff_until']):
                 skipped(source,symbol,optional,'provider_backoff')
                 return None
-            remaining = optional_deadline-monotonic()
+            available_seconds = optional_deadline-monotonic()
+            remaining = available_seconds-reserved_seconds
             if optional and remaining <= 0:
-                state['optional_deadline_reached'] = True
-                skipped(source,symbol,optional,'deadline_skipped')
+                reason = 'quote_time_reserved' if available_seconds > 0 and reserved_seconds else 'deadline_skipped'
+                if available_seconds <= 0:
+                    state['optional_deadline_reached'] = True
+                skipped(source,symbol,optional,reason)
                 return None
             before, began = budget.used, monotonic()
             status = 'UNKNOWN'
@@ -203,11 +212,11 @@ class TossSessionSource:
                     'observed_at':utc(self.clock()).isoformat()})
             return None
 
-        async def metadata(symbols, *, optional=False):
+        async def metadata(symbols, *, optional=False, reserved_seconds=0):
             missing = [s for s in symbols if s not in self._metadata_at or (utc(self.clock())-self._metadata_at[s]).total_seconds() >= 86400]
             if not missing:
                 return
-            result = await call('toss_stocks',self.client.stocks,missing,optional=optional)
+            result = await call('toss_stocks',self.client.stocks,missing,optional=optional,reserved_seconds=reserved_seconds)
             if result is None:
                 return
             values = result if isinstance(result,list) else result.get('stocks') if isinstance(result,dict) else None
@@ -230,12 +239,21 @@ class TossSessionSource:
             stamp = self._metadata_at.get(symbol,utc(self.clock()))
             return toss_eligibility(symbol,self._metadata.get(symbol),stamp)
 
-        async def quotes(symbols, *, optional=False, reserved=0):
+        async def quotes(symbols, *, optional=False, reserved=0, reserved_seconds=0):
             for symbol in symbols:
                 evidence = eligibility(symbol)
+                if self.quote_feed is not None:
+                    # Stream delivery is independent of candle HTTP work. Only risk
+                    # symbols without fresh stream data spend REST orderbook calls.
+                    if symbol not in self.benchmark_symbols:
+                        batch.eligibility.append(evidence)
+                    if optional:
+                        state.setdefault('last_candidate_stream_visit',{})[symbol]=utc(self.clock()).isoformat()
+                    if optional or self.quote_feed.latest(symbol,utc(self.clock())) is not None:
+                        continue
                 before = budget.used
                 quote = await call('toss_orderbook',self.client.quote,symbol,exchange=evidence.exchange,
-                    tradable=False,symbol=symbol,optional=optional,reserved=reserved)
+                    tradable=False,symbol=symbol,optional=optional,reserved=reserved,reserved_seconds=reserved_seconds)
                 if optional and budget.used > before:
                     manager.scheduler.mark(symbol,utc(self.clock()))
                     if symbol not in {'SPY','QQQ'}:
@@ -246,12 +264,12 @@ class TossSessionSource:
                     batch.quotes.append(quote)
                     latest_quotes[symbol] = quote
                     state.setdefault('last_quote_success',{})[symbol] = utc(self.clock()).isoformat()
-                if symbol not in {'SPY','QQQ'}:
+                if self.quote_feed is None and symbol not in {'SPY','QQQ'}:
                     batch.eligibility.append(evidence)
 
         async def deliver(*, priority=True):
             nonlocal optional_deadline
-            if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars):
+            if self.on_priority_batch and (batch.bars or batch.quotes or batch.cached_bars or (self.quote_feed is not None and batch.eligibility)):
                 batch.observed_at = utc(self.clock())
                 began = monotonic()
                 self.on_priority_batch(batch)
@@ -268,6 +286,9 @@ class TossSessionSource:
 
         def accept(symbol,bars, *, cached=False):
             nonlocal optional_deadline
+            if self.current_session_only:
+                bounds=session_bounds(utc(self.clock()))
+                bars=[bar for bar in bars if bounds and bounds[0]<bar.timestamp<=bounds[1]]
             if self.history_store is not None and bars and not cached:
                 began = monotonic()
                 self.history_store.ingest(bars)
@@ -296,14 +317,14 @@ class TossSessionSource:
             minute = utc(self.clock()).replace(second=0,microsecond=0)
             return not last or utc(last).replace(second=0,microsecond=0) < minute
 
-        async def candles(symbol, *, optional=False, reserved=0):
+        async def candles(symbol, *, optional=False, reserved=0, reserved_seconds=0):
             last = state.setdefault('last_bars_fetch',{})
             stamp = utc(self.clock())
             if not candle_due(symbol):
                 return
             before = budget.used
             response = await call('toss_candles',self.client.candles,symbol,count=200,symbol=symbol,
-                                  optional=optional,reserved=reserved)
+                                  optional=optional,reserved=reserved,reserved_seconds=reserved_seconds)
             if budget.used > before:
                 manager.scheduler.mark(symbol,utc(self.clock()))
                 state.setdefault('last_candle_attempt',{})[symbol] = utc(self.clock()).isoformat()
@@ -355,14 +376,20 @@ class TossSessionSource:
             from ..watchlist.toss_capitalization import TossMarketCapProvider
             if isinstance(manager.provider,TossMarketCapProvider):
                 async def cap_read(stream,symbol):
-                    method,args = (self.client.sectors,()) if stream=='sectors' else (self.client.sector_stocks,(symbol,))
+                    method,args = ((self.client.sectors,()) if stream=='sectors' else
+                                   (self.client.stocks_all,(symbol,)) if stream=='stocks_all' else
+                                   (self.client.sector_stocks,(symbol,)))
                     return await call('market_cap:'+stream,method,*args,symbol=symbol or '*',optional=True)
                 try:
                     await manager.provider.advance(cap_read,limit=1)
                 except (ValueError,TypeError,KeyError):
-                    batch.errors.append({'source':'market_cap','message':'토스 섹터 시총 형식 미확인; 기존 검증 목록을 보존합니다.'})
+                    batch.errors.append({'source':'market_cap','symbol':'*','error_type':'DataQualityError',
+                                         'message':'토스 종목 목록·시총 형식 미확인; 확인되지 않은 목록으로 매수하지 않습니다.'})
             current_snapshot=manager.store.at(utc(self.clock())) or {}
             force_cap=isinstance(manager.provider,TossMarketCapProvider) and manager.provider.state.get('complete',False) and current_snapshot.get('contract')!='toss_reported_security_krw_v1'
+            if isinstance(manager.provider,TossMarketCapProvider) and manager.provider.us_catalog:
+                force_cap = manager.provider.state.get('complete',False) and (
+                    current_snapshot.get('session_open_at') != manager.provider.state.get('session'))
             await manager.refresh(utc(self.clock()),force=force_cap)
             if self.warmup is not None:
                 async def warmup_read(symbol,cursor):
@@ -382,11 +409,17 @@ class TossSessionSource:
             focus_started = monotonic()
             state['pre_focus_phase_seconds'] = round(focus_started-started,3)
             optional_deadline = focus_started + self.max_cycle_seconds
+            # Calls reserved by count do not reserve wall-clock time. Keep the
+            # final part of this SAME window for actionable candidate quotes,
+            # even when prices/rankings/candles time out. No extra retry budget.
+            quote_seconds = 0. if self.quote_feed is not None else min(5., self.max_cycle_seconds / 2)
+            state['candidate_quote_reserved_seconds'] = quote_seconds
             pool = manager.light_symbols(utc(self.clock()))
             current = utc(self.clock())
-            if not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds:
+            light_symbols = list(dict.fromkeys([*pool,*self.benchmark_symbols]))
+            if light_symbols and (not state.get('last_light_attempt_at') or (current-utc(state['last_light_attempt_at'])).total_seconds() >= self.light_refresh_seconds):
                 before = budget.used
-                rows = await call('toss_prices',self.client.prices,list(dict.fromkeys([*pool,'SPY','QQQ'])),optional=True)
+                rows = await call('toss_prices',self.client.prices,light_symbols,optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_light_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:
@@ -396,7 +429,7 @@ class TossSessionSource:
                         batch.errors.append({'source':'toss_prices','symbol':'*','error_type':'DataQualityError','message':'현재가 배치 검증 실패'})
             if pool and (not state.get('last_ranking_attempt_at') or (current-utc(state['last_ranking_attempt_at'])).total_seconds() >= self.ranking_refresh_seconds):
                 before = budget.used
-                rows = await call('toss_rankings',self.client.rankings,ranking_type='MARKET_TRADING_AMOUNT',count=100,optional=True)
+                rows = await call('toss_rankings',self.client.rankings,ranking_type='MARKET_TRADING_AMOUNT',count=100,optional=True,reserved_seconds=quote_seconds)
                 if budget.used > before:
                     state['last_ranking_attempt_at'] = utc(self.clock()).isoformat()
                 if rows is not None:
@@ -408,29 +441,30 @@ class TossSessionSource:
             focus = manager.focus(utc(self.clock()))
             # Background candle collection is not a candidate quote/decision visit.
             # Its scheduler.mark() must not postpone a still-unanalysed candidate.
-            candidate_attempts = state.setdefault('last_candidate_quote_attempt',{})
+            candidate_attempts = state.setdefault('last_candidate_stream_visit' if self.quote_feed is not None
+                                                  else 'last_candidate_quote_attempt',{})
             chosen = sorted([s for s in focus if s not in priority],
                             key=lambda s:(candidate_attempts.get(s,''),s))[:self.candidates_per_cycle]
-            await metadata(chosen,optional=True)
+            await metadata(chosen,optional=True,reserved_seconds=quote_seconds)
             # Fetch/persist the candidate's bars before taking its actionable quote.
             # A quote delivered first evaluated the previous bar set, and could
             # already be stale by the later candle/background delivery. Keep the
             # original risk-quote delivery above, and reserve candidate quote calls.
             for symbol in chosen:
-                await candles(symbol,optional=True,reserved=len(chosen))
+                await candles(symbol,optional=True,reserved=0 if self.quote_feed is not None else len(chosen),reserved_seconds=quote_seconds)
             if chosen:
                 # Startup/DB work may have aged the initial regime quotes. Refresh
                 # near-expiry observations under the SAME retry/deadline budget;
                 # neither timestamps nor the engine's 30-second gate are changed.
                 current = utc(self.clock())
                 refresh_age = 30-min(15,len(chosen)+3)
-                references = [s for s in ('SPY','QQQ') if s not in latest_quotes or
+                references = [s for s in self.benchmark_symbols if s not in latest_quotes or
                     any((current-t).total_seconds() >= refresh_age for t in
                         (latest_quotes[s].timestamp,latest_quotes[s].received_at))]
                 for symbol in references:
                     if budget.limit-budget.used <= len(chosen):
                         break
-                    await quotes([symbol],optional=True,reserved=len(chosen))
+                    await quotes([symbol],optional=True,reserved=len(chosen),reserved_seconds=quote_seconds)
             await quotes(chosen,optional=True)
             # Do not put the whole background watchlist between a fresh quote and
             # its decision. Those updates get their own batched delivery below.
@@ -462,9 +496,9 @@ class TossSessionSource:
             state['focus_phase_seconds'] = round(monotonic()-focus_started,3)
             if self.reference_monitor is not None:
                 async def reference_read(stream,symbol):
-                    from ..market_reference.contracts import REFERENCES
-                    methods = {'stocks':(self.client.stocks,(list(REFERENCES),),{}),
-                               'prices':(self.client.prices,(list(REFERENCES),),{}),
+                    reference_symbols=list(self.reference_monitor.symbols)
+                    methods = {'stocks':(self.client.stocks,(reference_symbols,),{}),
+                               'prices':(self.client.prices,(reference_symbols,),{}),
                                'orderbook':(self.client.orderbook,(symbol,),{}),
                                'candle':(self.client.reference_candles,(symbol,),{}),
                                'daily':(self.client.reference_candles,(symbol,),{'interval':'1d','count':5})}
@@ -484,13 +518,15 @@ class TossSessionSource:
             order = sorted([s for s in dict.fromkeys(history_targets) if history.get(s,{}).get('cursor') and not history[s].get('done')],
                            key=lambda s:(history[s].get('last_attempt_at',''),s))
             bounds = session_bounds(utc(self.clock()))
+            if self.current_session_only and not bounds:
+                order=[]
             if bounds:
                 # SPY/QQQ regime/VWAP needs this session, not the stock RVOL's
                 # twenty prior sessions. Stop once paging has crossed the open;
                 # this records the search bound, NOT verified minute coverage.
                 # candles() rearms a current-session gap after a late restart.
                 for symbol in order[:]:
-                    if symbol in {'SPY','QQQ'} and utc(history[symbol]['cursor']) <= bounds[0]:
+                    if (self.current_session_only or symbol in {'SPY','QQQ'}) and utc(history[symbol]['cursor']) <= bounds[0]:
                         history[symbol].update(done=True,status='SESSION_WINDOW_REACHED')
                         order.remove(symbol)
             for symbol in order[:self.history_pages_per_cycle]:

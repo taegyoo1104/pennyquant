@@ -6,6 +6,7 @@ older image. Export only bounded, explicit diagnostic fields, never credentials.
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 import re
 import sys
 import time
@@ -235,7 +236,7 @@ def capture(config_path, samples, interval, *, reader=None, clock=None, wall=Non
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',default='config/sessionquant.realtime-paper.example.yaml')
+    parser.add_argument('--config',default=os.getenv('SQ_SESSION_CONFIG') or 'config/sessionquant.realtime-paper.example.yaml')
     parser.add_argument('--samples',type=int,default=1,help='1–61 samples; multiple samples produce JSON Lines')
     parser.add_argument('--interval',type=int,default=10,help='5–60 seconds between read starts (default: 10)')
     args = parser.parse_args(argv)

@@ -1,0 +1,81 @@
+# 기획 구현 검증용 Paper 설정. 기존 모의 장부와 분리합니다.
+environment: PAPER_LOCAL
+database_backend: mysql
+db_path: ../data/sessionquant-strategy-lab-v1.db
+universe_path: ../data/toss-us-universe.json
+universe_source: toss_us
+source: toss
+poll_seconds: 2
+paper_data_policy: observed_paper_v1
+actual_account_monitor_enabled: false
+recording_enabled: true
+retention:
+  enabled: true
+  diagnostics_days: 7
+  news_days: 30
+  max_seconds: 90
+news_enabled: true
+strategy: pullback_simple
+watchlist_enabled: true
+watchlist_size: 50
+watchlist_missing_cap_policy: exclude
+watchlist_candles_per_cycle: 0
+focus_size: 10
+focus_selection: turnover
+focus_rebalance_minutes: 30
+focus_min_hold_seconds: 0  # 개별 편입 시각 대신 정규장 개장 기준 30분 슬롯 사용
+focus_refresh_grace_seconds: 120
+market_cap_provider: toss
+watchlist_refresh_days: 1
+company_news_refresh_seconds: 180
+macro_news_refresh_seconds: 900
+candidate_selection:
+  enabled: true
+  use_news_score: true
+  use_sector_score: false
+  final_candidate_limit: 5
+  quote_alignment_seconds: 2
+  allow_above_preferred: false
+  max_same_sector: null
+  max_high_index_correlation: null
+  index_correlation_threshold: 0.85
+  correlation_minutes: 30
+  fail_closed_diversification: true
+portfolio:
+  initial_cash: '100'
+  preferred_positions: 3
+  max_positions: 3  # 보유와 미체결 매수 종목을 합산한 상한
+  initial_weight: '0.20'
+  add_weight: '0.20'
+  max_symbol_weight: '0.40'
+  max_gross_weight: '0.80'
+  risk_per_symbol: '0.0075'
+  daily_loss_limit: '0.02'
+macro_reference_filter:
+  enabled: false
+  paper_shadow_only: true
+llm_debug_audit:
+  enabled: false
+macro_context_llm:
+  enabled: false
+llm:
+  primary_model: gpt-4.1-mini
+  enable_escalation: false
+  format_retry_limit: 0
+  daily_primary_call_cap: 600
+  hourly_primary_call_cap: 120
+  monthly_soft_budget_usd: '3'
+  monthly_hard_budget_usd: '3'
+market_filter_enabled: false
+market_reference:
+  enabled: true
+  symbols: [SPY, QQQ, SOXX]
+  display_only: true
+  price_seconds: 30
+  candle_seconds: 60
+  calls_per_cycle: 2
+strategy_explanation:
+  enabled: true
+  regular_session_only: true
+  min_interval_seconds: 300
+  max_attempts_per_day: 80

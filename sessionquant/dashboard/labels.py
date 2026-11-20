@@ -16,6 +16,11 @@ LABELS = {
     'strategy_price_above_support_missing':'VWAP·이동평균 위로 상승 대기',
     'strategy_recent_high_breakout_missing':'최근 고점 돌파 대기',
     'strategy_breakout_volume_missing':'돌파 거래량 증가 대기',
+    'pullback_simple':'단순 눌림목',
+    'simple_trend_missing':'15분 상승 추세 대기',
+    'simple_correction_missing':'1~4개 조정봉·조정 폭 조건 대기',
+    'simple_rebound_missing':'직전 고가 위 확정봉 반등 대기',
+    'simple_pattern_unavailable':'당일 전략 자료 준비 중',
     'strategy_first_pullback_missing':'첫 번째 조정봉 대기',
     'strategy_second_pullback_missing':'두 번째 조정봉 대기',
     'strategy_pullback_support_missing':'VWAP·이동평균 부근 지지 대기',
@@ -42,7 +47,7 @@ LABELS = {
     'startup_data_not_ready':'시작 자료 준비 중',
     'PAPER_LOCAL':'모의매매','LIVE_LOCAL':'실제 계좌','LIVE_GCP':'실제 계좌',
     'UNKNOWN':'확인 필요','NOT_STARTED':'아직 시작 안 함','WAITING':'시작 버튼 대기',
-    'RUNNING':'실행 중','STOPPED':'종료','LIQUIDATING':'매도 진행 중','OFFLINE':'연결 확인 필요',
+    'RUNNING':'실행 중','STOPPED':'종료','LIQUIDATING':'매도 진행 중','OFFLINE':'프로그램 종료',
     'VALID':'사용 가능','VERIFIED':'확인됨','AVAILABLE':'사용 가능','PARTIAL':'일부 확인 필요',
     'COMPLETE':'준비 완료','INCOMPLETE':'자료 부족','STALE':'오래된 자료','EXPIRED':'유효기간 지남',
     'BLOCKED':'보류','READY':'준비 완료','WATCH':'관찰 중','CALCULATED':'계산됨','CLOSED':'장 종료',
@@ -131,15 +136,92 @@ LABELS = {
     'WITHIN_ESTIMATES':'예상 한도 이내','NO_OBSERVATION':'관측 자료 없음','SHADOW':'참고만 표시',
     'toss_prices':'토스 현재가 일괄 조회','toss_rankings':'토스 거래대금 순위',
     'toss_orderbook':'토스 호가','toss_candles':'토스 분봉','toss_stocks':'토스 종목 정보',
-    'deadline_skipped':'시간 부족으로 조회 대기','budget_exhausted':'주기 요청 한도 도달',
+    'deadline_skipped':'시간 부족으로 조회 대기',
+    'quote_time_reserved':'호가 조회 시간 확보로 다음 회차 대기','budget_exhausted':'주기 요청 한도 도달',
     'provider_backoff':'공급자 재조회 대기','provider_group_backoff':'해당 자료 재조회 대기',
     'symbol_prices_missing':'종목 현재가 미수신','symbol_second_price_missing':'종목 비교 가격 1회 부족',
     'spy_prices_missing':'시장(SPY) 현재가 미수신','spy_second_price_missing':'시장(SPY) 비교 가격 1회 부족',
     'turnover_missing':'거래대금 미확인','observation_stale_or_future':'관찰 자료 지연·미래 시각',
     'observation_window_mismatch':'종목·시장 관측 구간 불일치',
+    # Scanner/selection codes are persisted before the strategy can run.
+    'universe_unknown_stale_or_nonmember':'종목 목록 미확인·만료 또는 대상 밖',
+    'instrument_symbol_mismatch':'종목 정보의 티커 불일치',
+    'instrument_eligibility_unknown':'종목 거래 조건 미수신',
+    'instrument_eligibility_stale_or_future':'종목 거래 조건의 확인 시각 오류·만료',
+    'instrument_eligibility_expired':'종목 거래 조건 유효기간 지남',
+    'instrument_tradable_unverified_or_restricted':'거래 가능 여부 미확인·제한',
+    'instrument_fractional_unverified_or_restricted':'소수점 거래 여부 미확인·제한',
+    'instrument_halted_unverified_or_restricted':'거래정지 여부 미확인·제한',
+    'instrument_corporate_action_unverified_or_restricted':'기업행동 여부 미확인·제한',
+    'quote_time_or_symbol_invalid':'호가의 종목·시각 불일치',
+    'quote_halted':'거래정지 호가',
+    'quote_depth_missing':'매수·매도 호가 수량 부족',
+    'spread_too_wide':'매수·매도 가격 차이가 큼',
+    'closed_bars_missing_or_stale':'확정 5분봉 미수신·갱신 지연',
+    'technical_history_incomplete':'매매 지표를 계산할 당일 분봉 부족',
+    'insufficient_liquidity':'당일 거래량·거래대금 부족',
+    'candidate_bar_time_mismatch':'최신 확정 5분봉 미반영',
+    'candidate_quote_stale_or_unknown':'주문용 호가 미수신·갱신 지연',
+    'candidate_quote_time_mismatch':'비교 후보 간 호가 시각 차이',
+    'technical_signal_absent':'전략 매수 신호 없음',
+    'signal_already_consumed':'이미 주문한 전략 신호',
+    'duplicate_symbol_signal':'같은 종목의 중복 신호',
+    'market_reference_not_trading_candidate':'시장 참고용 ETF · 매수 대상 아님',
+    'macro_reference_risk_restriction':'시장 참고 지표의 위험 제한',
+    'focus_time_expired':'집중 분석 자료의 유효기간 지남',
+    'focus_time_unverified':'집중 분석 자료의 시각 미확인',
+    'market_provider_backoff':'시세 공급자 재조회 대기',
+    'websocket_quote_unavailable':'실시간 호가 확인 전 매수 대기',
+    'price_or_turnover_missing':'현재가·거래대금 미수신',
+    'watchlist_history_unknown':'감시 목록의 과거 기록 미확인',
+    'watchlist_history_expired_or_partial':'감시 목록의 과거 기록 만료·부족',
+    'watchlist_history_synthetic_blocked':'합성 감시 목록은 실제 자료로 사용 불가',
+    'watchlist_history_membership_unknown':'당시 감시 대상 여부 미확인',
+    'watchlist_synthetic_blocked':'합성 감시 목록은 실제 자료로 사용 불가',
+    'focus_history_unknown_or_stale':'당시 집중 분석 자료 미확인·만료',
+    'outside_historical_focus':'당시 집중 분석 대상 밖',
+    'quote_unknown_or_stale':'호가 미수신·갱신 지연',
+    'closed_bars_unknown_or_stale':'확정 분봉 미수신·갱신 지연',
+    'outside_regular_session':'정규장 시간 아님',
+    'outside_entry_window':'매수 가능 시간 아님',
+    'market_not_bullish':'상승장 조건 미충족',
+    'confirmed_company_risk':'확인된 기업 위험',
+    'trend_unconfirmed':'상승 추세 미확인',
+    'invalid_evidence':'주문 판단 자료 오류',
+    'invalid_stop':'손절 가격 조건 미충족',
+    'account_order_state_unknown':'주문 처리 상태 미확인',
+    'pending_order_or_exit':'기존 주문·청산 처리 중',
+    'add_conditions_not_met':'추가매수 조건 미충족',
+    'add_would_average_down':'하락 중 추가매수 제한',
+    'invalid_add_stop':'추가매수 손절 가격 조건 미충족',
+    'position_exists':'이미 보유한 종목',
+    'existing_risk_limit_breached':'기존 보유 위험 한도 초과',
+    'position_limit':'최대 보유 종목 수 도달',
+    'pending_mark_reference_unknown':'예약 주문의 평가 가격 미확인',
+    'allocation_or_cash_limit':'투자 비중·가용 현금 부족',
+    'risk_budget_insufficient':'허용 손실 범위 내 주문 금액 부족',
+    'exit_stop_unverified':'손절 가격 미확인',
+    'sector_diversification_unknown':'업종 분산 자료 미확인',
+    'same_sector_limit':'같은 업종 보유 한도 도달',
+    'index_correlation_unknown':'시장 지수와의 상관관계 미확인',
+    'high_index_correlation_limit':'비슷하게 움직이는 종목의 보유 한도 도달',
+    'RANKED':'후보 비교 중','FINAL_CANDIDATE':'최종 후보','APPROVED':'주문 승인',
+    'ALLOCATION_REJECTED':'수량·위험 조건으로 보류','approved':'주문 승인',
+    'SIGNAL':'전략 신호 있음','UNAVAILABLE':'판단 자료 부족','NO_SIGNAL':'전략 신호 없음',
+    'DATA_WAIT':'확정봉 자료 대기','TREND_MISSING':'상승 조건 대기',
+    'TREND':'상승 확인 · 조정 대기','CORRECTION':'조정 중 · 반등 대기',
+    'REBOUND':'반등 확인','TOO_LONG':'조정 기간 초과','TOO_DEEP':'조정 하락 폭 초과',
+    'PREOPEN':'개장 전','AFTER_HOURS':'장 종료 후','STOPPING':'종료 중',
+    'MISSING':'미수신','NO_DATA':'수신 자료 없음',
+    'IDLE':'구독 대상 대기','CHANGING':'실시간 시세 구독 변경 중',
+    'CONNECTING':'실시간 시세 연결 중','SUBSCRIBED':'실시간 시세 구독 확인',
+    'DISCONNECTED':'실시간 시세 연결 끊김','BACKOFF':'실시간 시세 재연결 대기',
+    'DISABLED':'사용 안 함','NOT_REQUIRED':'필수 아님','IGNORED':'반영 안 함',
+    'NONE':'기록 없음','PENDING':'처리 대기','FIXTURE':'검증용 가상 결과',
 }
 
 COLUMNS = {
+    'blockers':'차단 사유','readiness_blockers':'준비 대기 이유',
     'strategy_status':'전략 판단','strategy_diagnostics':'전략 대기 이유',
     'read_attempts':'실제 조회 시도 수','focus_missing_inputs':'집중 선정 부족 자료',
     'retry_deferred':'재조회 대기','retry_after':'다음 조회 가능 시각',
@@ -188,6 +270,14 @@ def display_rows(rows):
         return name
     def value(item,key=''):
         nonlocal unknown
+        if key == '사유 코드':
+            from .status_labels import safe_reason_code
+            return safe_reason_code(item) or '원문 표시 제외'
+        if key in {'blockers','readiness_blockers','차단 사유','대기·차단 이유','제한 사유','차단·거절','신규 진입 차단'}:
+            from .status_labels import blocker_details, blocker_summary, is_reason_list
+            if is_reason_list(item):
+                unknown = unknown or any(not row['known'] for row in blocker_details(item))
+                return blocker_summary(item)
         if isinstance(item,bool):return '예' if item else '아니요'
         if isinstance(item,dict):
             if any(k not in COLUMNS and not re.search('[가-힣]',k) for k in item):unknown=True
@@ -217,7 +307,10 @@ def market_hours_label(now):
         times=schedule_times(now)
         if times is None:return '정규장 아님 · 뉴스 확인 가능'
         if now < times['opens_at'] or now >= times['closes_at']:return '장외 시간 · 뉴스 확인 가능'
-        if now < times['entry_start']:return '개장 후 자료 수집 중 · 매수 시간 대기'
+        if now < times['entry_start']:
+            from zoneinfo import ZoneInfo
+            starts = times['entry_start'].astimezone(ZoneInfo('Asia/Seoul')).strftime('%H:%M')
+            return f'매수 시작 대기 · {starts} KST부터 조건 확인'
         if now >= times['entry_end']:return '신규 매수 마감 · 보유 종목 관리'
         return '정규장 · 매수 조건 확인 시간'
     except (ValueError,TypeError,RuntimeError):return '시장 시간 확인 필요'

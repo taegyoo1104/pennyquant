@@ -53,12 +53,14 @@ class ReferenceStore:
     def save(self):
         self.repo.set_control(STATE,self.state)
 
-    def publish(self,now):
+    def publish(self,now,*,symbols=None):
         from .metrics import build_metrics
-        from .contracts import REFERENCES
+        from .contracts import DEFAULT_REFERENCE_SYMBOLS
+        symbols=list(DEFAULT_REFERENCE_SYMBOLS) if symbols is None else list(symbols)
         result = {'updated_at':utc(now).isoformat(),'purpose':'MARKET_REFERENCE','live_orders_enabled':False,
+                  'active_symbols':symbols,
                   'duplicate_count':self.state['duplicate_count'],'capabilities':self.state['capabilities'],'items':{}}
-        for symbol in REFERENCES:
+        for symbol in symbols:
             metrics = build_metrics(self,symbol,now)
             result['items'][symbol] = metrics
             previous = self.state.setdefault('metrics',{}).get(symbol)
