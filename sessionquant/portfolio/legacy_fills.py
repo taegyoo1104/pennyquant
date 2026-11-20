@@ -4,7 +4,8 @@ from decimal import Decimal, ROUND_DOWN
 from .models import ZERO, QUANTITY_STEP, FractionalFill, FractionalPosition, aware, decimal
 
 
-def process_legacy_quote(broker, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None) -> list[FractionalFill]:
+def process_legacy_quote(broker, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None,
+                         buy_fill_guard=None) -> list[FractionalFill]:
     now = aware(now or quote.received_at)
     broker.roll_session(now)
     broker.expire_orders(now)
@@ -54,6 +55,11 @@ def process_legacy_quote(broker, quote, now: datetime | None = None, *, max_fill
             continue
         pnl = ZERO
         if side == 'buy':
+            if buy_fill_guard is not None:
+                reason = buy_fill_guard(order, quote)
+                if reason:
+                    order.unfilled_reason = reason
+                    continue
             position = broker.positions.get(intent.symbol)
             if position is not None and intent.is_add and price < position.avg_price:
                 broker._alert('add_execution_below_average',now,'추가매수 주문 후 평균가 아래에서 모의 체결되었습니다. 위험 예산을 확인하세요.',intent.symbol)

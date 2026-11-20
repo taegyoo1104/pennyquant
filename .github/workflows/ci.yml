@@ -6,7 +6,7 @@ name: SessionQuant 회귀 검사
   workflow_dispatch:
     inputs:
       run_mysql:
-        description: 격리 MySQL 통합 검사도 실행
+        description: 수동 실행에서도 격리 MySQL 통합 검사 실행 (push·PR은 자동)
         required: false
         type: boolean
         default: false
@@ -56,7 +56,8 @@ jobs:
         run: python -m pytest -q
 
   mysql:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_mysql
+    # PR/push changes must pass both storage backends. Manual runs may opt out.
+    if: github.event_name != 'workflow_dispatch' || inputs.run_mysql
     needs: test
     runs-on: ubuntu-24.04
     timeout-minutes: 20

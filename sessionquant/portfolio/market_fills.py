@@ -5,7 +5,8 @@ from decimal import Decimal, ROUND_DOWN
 from .models import ZERO, QUANTITY_STEP, FractionalPosition, aware, decimal
 
 
-def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill_qty=None, paper_tradable=None):
+def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill_qty=None, paper_tradable=None,
+                         buy_fill_guard=None):
     now = aware(now or quote.received_at)
     if broker.last_event_at and now < broker.last_event_at:
         return []
@@ -76,6 +77,11 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
                 continue
         pnl = ZERO
         if side == 'buy':
+            if buy_fill_guard is not None:
+                reason = buy_fill_guard(order, quote)
+                if reason:
+                    order.unfilled_reason = reason
+                    continue
             position = broker.positions.get(intent.symbol)
             if position is not None and intent.is_add and price < position.avg_price:
                 broker._alert('add_execution_below_average',now,'추가매수 주문 후 가격 갭으로 평균가보다 낮게 체결되었습니다. 체결을 취소로 숨기지 않고 위험을 재점검합니다.',intent.symbol)

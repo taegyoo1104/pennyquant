@@ -58,7 +58,12 @@ with open(sys.argv[1],encoding='utf-8') as stream:
 status=report['status']
 if status not in {'COMPLETE','PARTIAL','DISABLED'} or report['dry_run'] is not False:
     raise ValueError('자료 정리 결과를 확인할 수 없습니다.')
-print(f"{status} scanned={report['scanned']} deleted={report['deleted']}")
+observability=report.get('observability',{})
+backlog=observability.get('backlog_status','UNKNOWN')
+attention=observability.get('attention','UNKNOWN')
+if backlog not in {'CLEAR','PRESENT','UNKNOWN'} or attention not in {'CLEAR','BACKLOG','UNKNOWN','CAPACITY_REVIEW'}:
+    raise ValueError('자료 정리 관측 결과를 확인할 수 없습니다.')
+print(f"{status} scanned={report['scanned']} deleted={report['deleted']} backlog={backlog} attention={attention}")
 PY
 )
 chown 1000:1000 "$part"

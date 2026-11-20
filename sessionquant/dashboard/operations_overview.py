@@ -142,7 +142,7 @@ def render_operations(data, view, path, *, panel=None):
                 positions = (data.state.get('broker') or {}).get('positions') or {}
                 with st.container(key='home_controls'):
                     render_controls(repo, positions=[{'symbol':s,**r} for s,r in positions.items()],
-                                    environment=view['environment'], compact=True)
+                                    environment=view['environment'], compact=True, ledger_state=data.state)
         except Exception:
             st.warning('매매 제어 연결을 확인하세요. 시스템·설정에서 상태를 볼 수 있습니다.')
     else:

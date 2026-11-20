@@ -77,6 +77,7 @@ def start(repo, engine, *, source):
         'exit_policy': serialize(engine.exit_policy),
         'candidate_selection':serialize(engine.candidate_selector.settings),
         'source_reference_filter':serialize(engine.macro_reference_risk.settings) if engine.macro_reference_risk else None,
+        'execution_guard_version':1 if engine.execution_guard.enabled else None,
         'recording_version': 1})
     for name in CONTROLS:
         value = repo.get_control(name)
@@ -104,6 +105,9 @@ def frame(engine, events, now, *, manual_halt):
         'news_contexts': engine._batch_news_contexts, 'scope_blockers': engine._batch_scope_blockers,
         'decisions': engine._batch_decisions,
         'quote_entry_allowed':engine._batch_quote_entry_allowed if engine.quote_entry_guard is not None else None,
+        'execution_checks':engine.execution_guard.checks if engine.execution_guard.enabled else None,
+        'execution_guard_version':1 if engine.execution_guard.enabled else None,
+        'execution_check_overflow':engine.execution_guard.overflow_count,
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars',
                          'strategy_bars','strategy_rvol','strategy_rvol_status','collection_warnings')}
                          for symbol,row in engine.market.quality_rows.items() if symbol in {item['symbol'] for item in engine._batch_decisions}],

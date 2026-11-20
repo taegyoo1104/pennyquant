@@ -50,7 +50,7 @@ class SessionEngine:
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
                  candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None,
-                 benchmark_collection_enabled=None,market_reference_symbols=None):
+                 benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
@@ -143,6 +143,12 @@ class SessionEngine:
             raise ValueError("기존 PennyQuant DB는 호환 실행 경로로 열거나 새 DB를 지정하세요.")
         self.manager = PortfolioManager(self.broker,self.exit_policy)
         self.exit_manager = SessionExitManager(self.broker)
+        from .portfolio.execution_guard import BuyExecutionGuard
+        if research_replay and execution_clock is not None:
+            raise ValueError('기록 재생에는 실제 실행 시계를 사용할 수 없습니다.')
+        self.execution_guard = BuyExecutionGuard(self.broker, execution_clock,
+            last_checked_at=(stored or {}).get('last_execution_check_at'),
+            eligibility_check=self._execution_eligibility_allowed)
         # Display-only latest assessment; never an entry/exit input. Preserve its
         # original timestamp through heartbeat-only ticks and restarts.
         self._lab_rows=((self.repo.get_control('sessionquant_context',{}) or {}).get('strategy_lab',{}).get('rows',[])
@@ -273,6 +279,8 @@ class SessionEngine:
                  "synthetic": self.synthetic, "use_news": self.use_news, "use_market_filter": self.use_market_filter, "broker": broker_state,
                  "cursor": self.cursor, "last_time": self.last_time.isoformat() if self.last_time else None,
                  'last_decision_at':self.last_decision_at.isoformat() if self.last_decision_at else None,
+                 'last_execution_check_at':self.execution_guard.last_checked_at.isoformat()
+                     if self.execution_guard.last_checked_at else None,
                  "market_symbols": sorted(self.market_symbols), "consumed_signals": sorted(self.consumed_signals),
                  "risk_records": self.risk_records}
         self.repo.save_state(state)
@@ -337,6 +345,13 @@ class SessionEngine:
             self._batch_quote_entry_allowed[symbol]=bool(self.quote_entry_guard(symbol,now))
         return self._batch_quote_entry_allowed[symbol]
 
+    def _execution_eligibility_allowed(self, quote, now):
+        from .market.scanner import eligibility_blockers
+        return not eligibility_blockers(quote.symbol, self.market.eligibility.get(quote.symbol), now,
+            max_eligibility_age_seconds=self.market.max_eligibility_age_seconds,
+            require_evidence=self.market.strict_data,
+            paper_assumptions=self.market.paper_data_policy == 'observed_paper_v1')
+
     @timed('engine_batch')
     def apply_batch(self, events: list[dict], now: datetime, *, cursor: int | None = None, controls: dict | None = None):
         if self.failed:
@@ -355,6 +370,7 @@ class SessionEngine:
         self._batch_candidate_scope=[]
         self.selection_frame=None
         self._batch_quote_entry_allowed = {}
+        self.execution_guard.begin_batch()
         self._batch_scope_blockers = {} if self.watchlist_policy is not None or self.quote_entry_guard is not None else None
         try:
             scope = getattr(self.watchlist_policy, 'read_scope', nullcontext)
@@ -422,7 +438,9 @@ class SessionEngine:
                         from .market.paper_policy import paper_eligibility
                         paper_tradable = (paper_eligibility(self.market.eligibility.get(quote.symbol),now)['allowed']
                             and self._quote_entry_allowed(quote.symbol,now))
-                    self.broker.process_quote(quote, now, paper_tradable=paper_tradable)
+                    self.broker.process_quote(quote, now, paper_tradable=paper_tradable,
+                        buy_fill_guard=(lambda order, book: self.execution_guard.fill_blocker(order, book, now))
+                            if self.execution_guard.enabled else None)
                 for symbol in list(self.broker.positions):
                     quote = self.market.quotes.get(symbol)
                     risk = self.risk_context(now,symbol)
@@ -527,22 +545,34 @@ class SessionEngine:
                         support_confirmed=signal.allow_add, rebound_confirmed=signal.allow_add,
                         major_bad_news=risk.get("major_adverse") is True, add=add, signal_id=signal.id,
                         session_allowed=self.exit_manager.permits_entry(now), strategy=self.strategy)
-                    self.repo.record('pipeline_status',{'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
+                    risk_decision={'id':'risk:'+signal.id,'kind':'risk_decision','symbol':decision.symbol,
                         'timestamp':now,'approved':allocation.approved,'reason':allocation.reason,'audit':allocation.audit,'exit_policy':serialize(self.exit_policy),
-                        **({'selection_id':frame['id'],'candidate_rank':selected['rank'],'candidate_score':decision.score} if frame else {})})
+                        **({'selection_id':frame['id'],'candidate_rank':selected['rank'],'candidate_score':decision.score} if frame else {})}
+                    self.repo.record('pipeline_status',risk_decision)
                     if selected is not None:
                         selected.update(portfolio_status='APPROVED' if allocation.approved else 'ALLOCATION_REJECTED',
                             allocation_reason=allocation.reason,approved=allocation.approved,allocation_audit=allocation.audit,
                             order_intent_id=allocation.intent.client_id if allocation.approved else None)
                     if allocation.approved:
-                        self.repo.record("order_intents", serialize(allocation.intent)|{'signal_id':signal.id,'risk_audit':allocation.audit,'risk_policy_version':2,
+                        intent_record=serialize(allocation.intent)|{'signal_id':signal.id,'risk_audit':allocation.audit,'risk_policy_version':2,
                             'paper_data_policy':self.market.paper_data_policy,
                             'paper_assumptions':decision.indicators.get('paper_eligibility'),
                             'strategy_rvol':decision.indicators.get('relative_volume'),
                             'strategy_rvol_status':decision.indicators.get('data_quality',{}).get('strategy_rvol_status'),
                             **({'selection_id':frame['id'],'candidate_rank':selected['rank'],'candidate_score':decision.score,
-                                'selection_policy_version':frame['policy_version']} if frame else {})})
+                                'selection_policy_version':frame['policy_version']} if frame else {})}
+                        execution=self.execution_guard.check('submission',allocation.intent,quote,now)
+                        if execution is not None and not execution['allowed']:
+                            self.repo.record('pipeline_status',{**risk_decision,'approved':False,
+                                'reason':execution['reason'],'execution_check':execution})
+                            if selected is not None:
+                                selected.update(portfolio_status='ALLOCATION_REJECTED',approved=False,
+                                    allocation_reason=execution['reason'],order_intent_id=None,execution_check=execution)
+                            continue
                         self.broker.submit_order(allocation.intent)
+                        # Keep audit persistence in this transaction, after the
+                        # final execution check and in-memory submission.
+                        self.repo.record("order_intents",intent_record)
                         self.consumed_signals.add(signal.id)
                         if frame:
                             frame['approved_count']+=1

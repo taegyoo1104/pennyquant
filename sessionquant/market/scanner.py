@@ -47,16 +47,13 @@ class InstrumentEligibility:
                 raise ValueError(f"{name} 값은 true·false·null이어야 합니다")
 
 
-def scan(universe: UniverseStore, symbol: str, quote: Quote | None, eligibility: InstrumentEligibility | None,
-         data: Indicators, now: datetime, *, relative_volume: float | None = None,
-         max_quote_age_seconds: float = 30, max_eligibility_age_seconds: float = 60,
-         max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
-         min_rvol: float = 1.0, require_evidence: bool = False, paper_assumptions: bool = False, require_rvol: bool = True) -> list[str]:
-    """진입 차단 사유를 모두 반환한다. 매도 가능 여부는 별도로 관리한다."""
+def eligibility_blockers(symbol: str, item: InstrumentEligibility | None, now: datetime, *,
+                         max_eligibility_age_seconds: float = 60, require_evidence: bool = False,
+                         paper_assumptions: bool = False) -> list[str]:
+    """종목 자격만 재검사한다. 전략·시장·호가와 매도 조건은 적용하지 않는다."""
     now = utc(now)
     blockers = []
-    if not universe.contains(symbol, now):
-        blockers.append("universe_unknown_stale_or_nonmember")
+    eligibility = item
     if paper_assumptions:
         from .paper_policy import paper_eligibility
         blockers.extend(paper_eligibility(eligibility,now)['blockers'])
@@ -82,6 +79,22 @@ def scan(universe: UniverseStore, symbol: str, quote: Quote | None, eligibility:
                     blockers.append('eligibility_unverified')
         if eligibility.exchange.upper() not in EXCHANGES:
             blockers.append("exchange_unverified")
+    return list(dict.fromkeys(blockers))
+
+
+def scan(universe: UniverseStore, symbol: str, quote: Quote | None, eligibility: InstrumentEligibility | None,
+         data: Indicators, now: datetime, *, relative_volume: float | None = None,
+         max_quote_age_seconds: float = 30, max_eligibility_age_seconds: float = 60,
+         max_spread_pct: float = .003, min_dollar_volume: float = 2_000_000,
+         min_rvol: float = 1.0, require_evidence: bool = False, paper_assumptions: bool = False, require_rvol: bool = True) -> list[str]:
+    """진입 차단 사유를 모두 반환한다. 매도 가능 여부는 별도로 관리한다."""
+    now = utc(now)
+    blockers = []
+    if not universe.contains(symbol, now):
+        blockers.append("universe_unknown_stale_or_nonmember")
+    blockers.extend(eligibility_blockers(symbol, eligibility, now,
+        max_eligibility_age_seconds=max_eligibility_age_seconds,
+        require_evidence=require_evidence, paper_assumptions=paper_assumptions))
     if quote is None:
         blockers.append("quote_missing")
     else:

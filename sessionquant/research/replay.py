@@ -68,6 +68,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
     if not starts or not starts[0]['data']['initial_flat']:
         raise ValueError('초기 포지션·주문이 없는 시점부터 기록한 묶음이 필요합니다.')
     first = starts[0]['data']
+    guard_versions = {row['run_id']: row['data'].get('execution_guard_version') for row in starts}
+    if any(version is not None and (type(version) is not int or version != 1) for version in guard_versions.values()):
+        raise ValueError('지원하지 않는 매수 실행 검사 기록 버전입니다.')
     if len({row['data'].get('paper_data_policy','strict') for row in starts}) != 1:
         raise ValueError('Paper 거래 조건이 바뀐 기록은 분리해서 평가해야 합니다.')
     from ..portfolio.selection import CandidateSettings
@@ -109,6 +112,7 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
         seen, counts = set(), Counter(repo.get_control('recording_risk_counts',{}))
         decisions = Counter(repo.get_control('recording_decision_counts',{}))
         reference_state_counts = Counter(repo.get_control('recording_reference_state_counts',{}))
+        execution_guard_counts = Counter(repo.get_control('recording_execution_guard_counts',{}))
         frames = 0
         for index,row in enumerate(events(bundle/'events.jsonl'),1):
             if row['id'] in seen:continue
@@ -126,6 +130,17 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                     news.contexts = data.get('news_contexts') or {}
                     allowed=data.get('quote_entry_allowed')
                     engine.quote_entry_guard=(lambda symbol,now,values=allowed: values.get(symbol,False)) if allowed is not None else None
+                    guard_version = data.get('execution_guard_version', guard_versions.get(row['run_id']))
+                    if guard_version is not None and (type(guard_version) is not int or guard_version != 1):
+                        raise ValueError('지원하지 않는 매수 실행 검사 기록 버전입니다.')
+                    if guard_versions.get(row['run_id']) == 1 or guard_version == 1:
+                        # Missing/null evidence in a guarded run is not the old
+                        # explicitly disabled contract. It must block buys.
+                        engine.execution_guard.recorded = data.get('execution_checks')
+                        if engine.execution_guard.recorded is None:
+                            engine.execution_guard.recorded = {}
+                    elif guard_version is None:
+                        engine.execution_guard.recorded = None
                     scope.blockers = data.get('scope_blockers')
                     scope.symbols=data.get('candidate_scope_symbols') or []
                     scope.expiries={row['symbol']:row.get('scope_valid_until') for row in (data.get('portfolio_selection') or {}).get('rows',[])}
@@ -142,6 +157,10 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                             engine.broker.exit_intents.setdefault(symbol,{'reason':'operator_stop_all',
                                 'opened_at':position.opened_at.isoformat(),'requested_at':stamp.isoformat(),'attempt':0})
                     engine.apply_batch(data['events'],stamp,cursor=index)
+                    for check in engine.execution_guard.checks:
+                        if not check['allowed']:
+                            execution_guard_counts[check['reason']] += 1
+                    execution_guard_counts['runtime_execution_check_limit'] += engine.execution_guard.overflow_count
                     frames += 1
                     if in_window:
                         key = engine.reference_risk_status.get('status','NOT_EVALUATED')
@@ -161,6 +180,7 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                 repo.set_control('recording_risk_counts',dict(counts))
                 repo.set_control('recording_decision_counts',dict(decisions))
                 repo.set_control('recording_reference_state_counts',dict(reference_state_counts))
+                repo.set_control('recording_execution_guard_counts',dict(execution_guard_counts))
         return {'state':engine.broker.to_state(),'context':repo.get_control('sessionquant_context'),
             'fills':jsonable(engine.broker.fills),'orders':jsonable(list(engine.broker.orders.values())),
             'curve':repo.all('account_snapshots'),'regimes':repo.all('market_regimes'),
@@ -169,6 +189,7 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
             'entry_intents':repo.all('order_intents'),'risk_state_counts':dict(counts),'decision_counts':dict(decisions),
             'portfolio_selections':[row for row in repo.all('pipeline_status') if row.get('kind')=='portfolio_selection'],
             'candidate_settings':serialize(candidate_options),'paper_data_policy':engine.market.paper_data_policy,
+            'execution_guard_denials':{reason:count for reason,count in execution_guard_counts.items() if count},
             'reference_state_decisions':dict(reference_state_counts),'missing_news_contexts':news.missing,
             'bundle_id':manifest['bundle_id'],'policy':policy,'policy_contract_version':'recorded_policy_v1',
             'risk_settings':serialize(risk_options),'frames_this_execution':frames,'llm_api_calls':0,

@@ -136,6 +136,11 @@ def test_partial_cleanup_resumes_and_rotates_tables_even_at_one_row_budget(mysql
     assert sum(report["deleted"] for report in reports) == 4
     assert not repo.all("news_events") and not repo.all("news_ingestions")
     assert reports[-1]["status"] == "COMPLETE"
+    assert all(report["inspected"] <= 1 for report in reports)
+    assert reports[0]["observability"]["backlog_status"] == "UNKNOWN"
+    assert reports[0]["observability"]["eligible_backlog_min"] is None
+    assert reports[0]["observability"]["stop_reason"] == "ROW_LIMIT"
+    assert reports[1]["observability"]["attention"] == "CAPACITY_REVIEW"
 
 
 def test_elapsed_budget_stops_before_delete_and_disabled_policy_is_inert(mysql_repositories, tmp_path, monkeypatch):
@@ -152,6 +157,9 @@ def test_elapsed_budget_stops_before_delete_and_disabled_policy_is_inert(mysql_r
     monkeypatch.setattr(repo, "_execute", slow_query)
     report = prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now), clock=lambda: clock[0])
     assert report["status"] == "PARTIAL" and report["deleted"] == 0
+    assert report["observability"]["backlog_status"] == "UNKNOWN"
+    assert report["observability"]["observation_scanned"] == 0
+    assert report["observability"]["stop_reason"] == "TIME_LIMIT"
     assert len(repo.all("news_ingestions")) == 1
     assert prune_expired(repo, replace(POLICY, enabled=False), apply=True)["status"] == "DISABLED"
 
@@ -175,3 +183,100 @@ def test_checkpoint_failure_can_repeat_safely_without_skipping_rows(mysql_reposi
     report = prune_expired(repo, POLICY, now=now, apply=True, receipt=proof)
     assert report["status"] == "COMPLETE" and report["deleted"] == 1
     assert not repo.all("news_ingestions")
+
+
+def test_observations_measure_actual_namespace_arrivals_without_warning_on_young_rows(mysql_repositories, tmp_path):
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    other = mysql_repositories(environment="PAPER_LOCAL")
+    first = prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert first["tables"]["quote_snapshots"]["observation"]["generation"]["rows_min"] is None
+    assert first["observability"]["backlog_status"] == "CLEAR"
+    for index in range(12):
+        other.import_record("quote_snapshots", {"id": str(index), "timestamp": now}, str(index))
+    for index in range(2):
+        repo.import_record("quote_snapshots", {"id": str(index), "timestamp": now}, str(index))
+    later = now + timedelta(seconds=60)
+    report = prune_expired(repo, POLICY, now=later, apply=True, receipt=receipt(tmp_path, later))
+    measured = report["tables"]["quote_snapshots"]["observation"]["generation"]
+    assert measured["rows_min"] == 2 and measured["exact"] is True
+    assert measured["interval_seconds"] == 60
+    assert report["deleted"] == 0 and report["observability"]["attention"] == "CLEAR"
+    assert report["inspected"] <= POLICY.max_rows
+
+
+def test_arrival_sample_is_a_lower_bound_when_capped(mysql_repositories, tmp_path):
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    for index in range(100):
+        repo.import_record("quote_snapshots", {"id": str(index), "timestamp": now}, str(index))
+    later = now + timedelta(seconds=120)
+    report = prune_expired(repo, POLICY, now=later, apply=True, receipt=receipt(tmp_path, later))
+    measured = report["tables"]["quote_snapshots"]["observation"]["generation"]
+    assert 0 < measured["rows_min"] < 100 and measured["exact"] is False
+    assert measured["interval_seconds"] == 120
+    assert report["observability"]["attention"] == "CLEAR"
+
+
+def skip_old_quotes(repo, now):
+    repo.set_control(CURSORS, {"policy": {"version": 1, "diagnostics_days": 7, "news_days": 30},
+                              "positions": {"quote_snapshots": [(now - timedelta(days=20)).isoformat(), 1]}})
+
+
+def test_complete_cursor_pass_does_not_claim_older_backfill_is_gone(mysql_repositories, tmp_path):
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    seed(repo, "quote_snapshots", "older-backfill", now)
+    skip_old_quotes(repo, now)
+    report = prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report["status"] == "COMPLETE" and report["deleted"] == 0
+    observation = report["tables"]["quote_snapshots"]["observation"]
+    assert observation["backlog_status"] == "PRESENT" and observation["eligible_rows_min"] == 1
+    assert observation["backlog_exact"] is True and observation["oldest_eligible_age_days"] == 45
+    assert report["observability"]["attention"] == "BACKLOG"
+
+
+def test_protected_sample_prefix_is_unknown_instead_of_zero_backlog(mysql_repositories, tmp_path):
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    seed(repo, "signals", "signal", now, news_id="keep")
+    for index in range(128):
+        seed(repo, "quote_snapshots", str(index), now, news_id="keep")
+    seed(repo, "quote_snapshots", "unseen-expired", now, days=44)
+    skip_old_quotes(repo, now)
+    report = prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    observation = report["tables"]["quote_snapshots"]["observation"]
+    assert report["status"] == "COMPLETE" and report["deleted"] == 0
+    assert observation["backlog_status"] == "UNKNOWN" and observation["eligible_rows_min"] is None
+    assert report["observability"]["backlog_status"] == "UNKNOWN"
+    assert report["observability"]["eligible_backlog_min"] is None
+    assert len(repo.all("quote_snapshots")) == 129
+
+
+def test_arrivals_include_new_rows_deleted_during_this_cleanup(mysql_repositories, tmp_path):
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    later = now + timedelta(seconds=60)
+    seed(repo, "quote_snapshots", "imported-old", later)
+    report = prune_expired(repo, POLICY, now=later, apply=True, receipt=receipt(tmp_path, later))
+    measured = report["tables"]["quote_snapshots"]["observation"]["generation"]
+    assert measured["rows_min"] == 1 and measured["exact"] is True
+    assert measured["high_water_seq"] > 0 and report["deleted"] == 1
+
+
+def test_observation_failure_keeps_committed_cleanup_and_reports_unknown(mysql_repositories, tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    seed(repo, "quote_snapshots", "expired", now)
+    original = repo._execute
+    def failed_observation(sql, *args, **kwargs):
+        if "MAX_EXECUTION_TIME(250)" in sql:
+            raise RuntimeError("fixture observation failure")
+        return original(sql, *args, **kwargs)
+    monkeypatch.setattr(repo, "_execute", failed_observation)
+    report = prune_expired(repo, POLICY, now=now, apply=True, receipt=receipt(tmp_path, now))
+    assert report["deleted"] == 1 and not repo.all("quote_snapshots")
+    assert report["status"] == "COMPLETE" and report["observability"]["backlog_status"] == "UNKNOWN"
+    assert repo.get_control(REPORT)["deleted"] == 1

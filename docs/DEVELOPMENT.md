@@ -69,7 +69,7 @@ $env:PQ_TEST_MYSQL = "0"
 python -m pytest -q
 ```
 
-[CI 설정](../.github/workflows/ci.yml)은 push·PR 때 Python 3.12에서 설치, 의존성 검사, CLI 확인, Ruff, 오프라인 pytest를 실행합니다. MySQL 검사는 자동으로 항상 실행되지 않습니다. GitHub Actions의 수동 실행에서 `run_mysql`을 선택하면 폐기 가능한 MySQL 8.4에 `tests/test_mysql_integration.py`와 `tests/test_retention_mysql.py`를 실행합니다. 로컬에서 같은 검사를 실행할 때도 별도 테스트 DB와 `PQ_TEST_MYSQL=1`, `PQ_MYSQL_*` 접속 변수를 사용합니다.
+[CI 설정](../.github/workflows/ci.yml)은 push·PR 때 Python 3.12에서 설치, 의존성 검사, CLI 확인, Ruff, 오프라인 pytest를 실행합니다. 이 검사가 통과하면 폐기 가능한 MySQL 8.4에서도 `tests/test_mysql_integration.py`와 `tests/test_retention_mysql.py`를 자동 실행합니다. GitHub Actions의 수동 실행에서는 `run_mysql` 선택 여부로 MySQL 검사를 켜거나 끌 수 있습니다. 로컬에서 같은 검사를 실행할 때도 별도 테스트 DB와 `PQ_TEST_MYSQL=1`, `PQ_MYSQL_*` 접속 변수를 사용합니다.
 
 CI 통과는 사용자 계정 연결·유료 LLM 응답·실제 장중 성과를 증명하지 않습니다. 서버에 자동 배포하는 CD는 구현하지 않았습니다. GitHub 브랜치, VM의 체크아웃 커밋, Docker 이미지, 실제 선택한 설정을 각각 확인해야 합니다.
 

@@ -366,6 +366,41 @@ class MySQLRepository:
                 after = seq
                 yield seq,json.loads(payload) if isinstance(payload,str) else payload
 
+    def iter_credit_usage(self, checked_at, *, batch_size=500):
+        """Keep only credit fields and provably relevant/ambiguous usage rows.
+
+        captured_at cannot exclude legacy rows safely: invalid source timestamps
+        were replaced with import time. Validate fields on the server rather than
+        downloading full history, retaining uncertain rows for the caller.
+        """
+        if type(batch_size) is not int or not 1 <= batch_size <= 2000:
+            raise ValueError('페이지 크기를 확인하세요.')
+        cutoff=utc(checked_at).strftime('%Y-%m-%dT%H:%M:%S')
+        fields=('timestamp','request_started_at','cost_usd','cost_status')
+        projection='JSON_OBJECT('+','.join(f"'{name}',JSON_EXTRACT(payload,'$.{name}')" for name in fields)+')'
+        settled="JSON_UNQUOTE(JSON_EXTRACT(payload,'$.timestamp'))"
+        started=f"COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payload,'$.request_started_at')),''),{settled})"
+        pattern=(r'^[1-9][0-9]{3}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])'
+            r'T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,6})?[+]00:00$')
+        def canonical(value):
+            year=f'CAST(LEFT({value},4) AS UNSIGNED)'
+            leap=f'(MOD({year},4)=0 AND (MOD({year},100)<>0 OR MOD({year},400)=0))'
+            return (f'(CASE WHEN REGEXP_LIKE({value},%s,\'c\') THEN '
+                f"CAST(SUBSTRING({value},9,2) AS UNSIGNED)<=CASE SUBSTRING({value},6,2) "
+                f"WHEN '02' THEN 28+{leap} WHEN '04' THEN 30 WHEN '06' THEN 30 "
+                "WHEN '09' THEN 30 WHEN '11' THEN 30 ELSE 31 END ELSE 0 END)")
+        old=f'{canonical(settled)} AND {canonical(started)} AND LEFT({settled},19)<%s AND LEFT({started},19)<%s'
+        after=0
+        while True:
+            rows=self._execute(f'SELECT seq,{projection} FROM pq_llm_usage FORCE INDEX (ix_namespace_seq) '
+                f'WHERE namespace=%s AND seq>%s AND NOT COALESCE(({old}),0) ORDER BY seq LIMIT %s',
+                (self.namespace,after,pattern,pattern,cutoff,cutoff,batch_size),fetch='all')
+            if not rows:break
+            for seq,payload in rows:
+                after=seq
+                yield self._decode(payload)
+            if len(rows)<batch_size:break
+
     def all(self, kind: str) -> list[dict]:
         # Scan the existing namespace/sequence index in order. Allowing a filesort
         # here can copy wide JSON values into a small per-connection sort buffer
@@ -410,6 +445,27 @@ class MySQLRepository:
     def load_state(self) -> dict | None:
         row = self._execute("SELECT payload FROM pq_engine_state WHERE namespace=%s", (self.namespace,), fetch="one")
         return self._decode(row[0]) if row else None
+
+    def load_dashboard_state(self) -> dict | None:
+        from .dashboard_projection import STATE, expression, decode
+        row = self._execute(f"SELECT {expression(STATE, 'mysql')} FROM pq_engine_state WHERE namespace=%s",
+                            (self.namespace,), fetch='one')
+        return decode(row[0], STATE) if row else None
+
+    def load_dashboard_order(self, client_id: str, *, recovery_state=True) -> dict | None:
+        if not isinstance(client_id, str) or not client_id or len(client_id) > 200:
+            raise ValueError('주문 식별자를 확인하세요.')
+        from .dashboard_projection import ORDER, expression, decode
+        if not recovery_state:
+            row = self._execute(f"SELECT {expression(ORDER, 'mysql')} FROM pq_orders "
+                "WHERE namespace=%s AND record_hash=%s", (self.namespace, sha256(client_id.encode()).digest()), fetch='one')
+            return decode(row[0], ORDER) if row else None
+        target = '$.broker.orders.' + json.dumps(client_id, ensure_ascii=False)
+        row = self._execute(f"SELECT {expression(ORDER, 'mysql')} FROM "
+            "(SELECT JSON_EXTRACT(payload,%s) AS payload FROM pq_engine_state WHERE namespace=%s) AS selected_order",
+            (target, self.namespace), fetch='one')
+        result = decode(row[0], ORDER) if row else None
+        return result or None
 
     @staticmethod
     def _control_name(name: str):

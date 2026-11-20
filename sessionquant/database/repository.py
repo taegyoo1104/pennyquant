@@ -116,6 +116,41 @@ class Repository:
                 after = seq
                 yield seq,json.loads(payload)
 
+    def iter_credit_usage(self, checked_at, *, batch_size=500):
+        """Project credit fields; retain ambiguous legacy times for Python checks.
+
+        Only validated UTC rows entirely before the check are excluded. This
+        avoids downloading old/wide payloads; JSON timestamp validation still
+        scans the ledger in SQLite because legacy rows have no time index.
+        """
+        from ..models import utc
+        if type(batch_size) is not int or not 1 <= batch_size <= 2000:
+            raise ValueError('페이지 크기를 확인하세요.')
+        cutoff=utc(checked_at).strftime('%Y-%m-%dT%H:%M:%S')
+        fields=('timestamp','request_started_at','cost_usd','cost_status')
+        # Multi-path extraction preserves JSON booleans; rebuilding json_object
+        # from scalar extracts would silently turn an invalid boolean cost into 0/1.
+        projection='json_extract(payload,'+','.join(f"'$.{name}'" for name in fields)+')'
+        settled="json_extract(payload,'$.timestamp')"
+        started=f"coalesce(nullif(json_extract(payload,'$.request_started_at'),''),{settled})"
+        def canonical(value):
+            return (f"(substr({value},11,1)='T' AND substr({value},1,4)<>'0000' "
+                f"AND datetime(substr({value},1,19),'+0 days')=replace(substr({value},1,19),'T',' ') "
+                f"AND substr({value},-6)='+00:00' AND (length({value})=25 OR "
+                f"(length({value}) BETWEEN 27 AND 32 AND substr({value},20,1)='.' "
+                f"AND substr({value},21,length({value})-26) NOT GLOB '*[^0-9]*')))")
+        old=f"{canonical(settled)} AND {canonical(started)} AND substr({settled},1,19)<? AND substr({started},1,19)<?"
+        after=0
+        while True:
+            rows=self.db.execute(f'SELECT seq,{projection} FROM llm_usage WHERE seq>? '
+                f'AND NOT coalesce(({old}),0) ORDER BY seq LIMIT ?',
+                (after,cutoff,cutoff,batch_size)).fetchall()
+            if not rows:break
+            for seq,payload in rows:
+                after=seq
+                yield dict(zip(fields,json.loads(payload)))
+            if len(rows)<batch_size:break
+
     def all(self, kind: str) -> list[dict]:
         if kind not in KINDS:
             raise ValueError(f"unknown record kind {kind}")
@@ -206,6 +241,28 @@ class Repository:
     def load_state(self) -> dict | None:
         row = self.db.execute("SELECT payload FROM engine_state WHERE id=1").fetchone()
         return json.loads(row[0]) if row else None
+
+    def load_dashboard_state(self) -> dict | None:
+        """Project current holdings/bases without transferring lifetime recovery history."""
+        from .dashboard_projection import STATE, expression, decode
+        row = self.db.execute(f"SELECT {expression(STATE, 'sqlite')} FROM engine_state WHERE id=1").fetchone()
+        return decode(row[0], STATE) if row else None
+
+    def load_dashboard_order(self, client_id: str, *, recovery_state=True) -> dict | None:
+        """Recover one older fill's exact order reason, including legacy state-only orders."""
+        if not isinstance(client_id, str) or not client_id or len(client_id) > 200:
+            raise ValueError('주문 식별자를 확인하세요.')
+        from .dashboard_projection import ORDER, expression, decode
+        if not recovery_state:
+            row = self.db.execute(f"SELECT {expression(ORDER, 'sqlite')} FROM orders WHERE record_id=?",
+                                  (client_id,)).fetchone()
+            return decode(row[0], ORDER) if row else None
+        # json_each accepts arbitrary object keys (including quotes/backslashes)
+        # and returns only the selected compact order to the dashboard process.
+        row = self.db.execute(f"SELECT {expression(ORDER, 'sqlite')} FROM "
+            "(SELECT value AS payload FROM engine_state,JSON_EACH(engine_state.payload,'$.broker.orders') "
+            "WHERE engine_state.id=1 AND key=?)", (client_id,)).fetchone()
+        return decode(row[0], ORDER) if row else None
 
     def set_control(self, name: str, value) -> None:
         from ..research.journal import CONTROLS, capture_control
