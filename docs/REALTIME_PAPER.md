@@ -76,6 +76,42 @@ python -m sessionquant news-status --config config/sessionquant.strategy-lab-web
 - `namespace_totals`: 해당 장부 전체 누계입니다. 오늘만의 결과가 아닙니다.
 - `order_writes: 0`, `llm_generation_calls: 0`: 이 상태 조회 명령이 주문·유료 생성을 하지 않았다는 의미입니다.
 
+## CSV 대신 약 5분간 연속 진단
+
+서로 다른 시각에 내려받은 표만으로 지연 원인을 비교하기 어려울 때 사용한다. `scripts/check_market_freshness.py`는 엔진 상태·집중 목록·호가 시각·분봉 누락·RVOL·후보 차단 사유·처리 시간을 한 번의 읽기 전용 SQL 조회로 함께 기록한다. 각 자료가 만들어진 원래 시각도 보존한다. 한 번에 조회했다고 모든 자료가 동시에 갱신된 것은 아니다.
+
+최신 진단 파일이 있는 **운영 VM의 별도 SSH 또는 tmux 터미널**에서 실행한다. 이 파일은 표준입력으로 실행되므로 앱 이미지 재빌드나 엔진 재시작이 필요 없다. 기본적으로 컨테이너의 `SQ_SESSION_CONFIG`를 따라 현재 실행 중인 웹소켓·REST 프로필의 장부를 읽으며, 별도 장부를 조사할 때만 `--config`로 설정을 지정한다.
+
+```bash
+umask 077
+SQ_DIAG=$(mktemp "$HOME/sessionquant-diagnostic.XXXXXX.jsonl")
+sudo -n docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml exec -T app \
+  python - --samples 31 --interval 10 \
+  < /opt/sessionquant/scripts/check_market_freshness.py > "$SQ_DIAG"
+SQ_DIAG_EXIT=$?
+printf '진단 파일: %s\n종료 코드: %s\n' "$SQ_DIAG" "$SQ_DIAG_EXIT"
+```
+
+약 10초마다 31회 읽고 종료한다. 느린 DB 조회가 있으면 더 오래 걸릴 수 있다. 파일은 한 줄에 하나의 JSON을 담은 JSONL 형식이며 나중에 전달해도 수집 당시 시각을 확인할 수 있다. `--samples`는 1~61, `--interval`은 5~60초로 제한한다. 옵션 없이 실행하면 기존처럼 JSON 하나만 출력한다.
+
+- `read_started_at`·`read_finished_at`·`db_read_seconds`: 진단 조회 자체에 걸린 시간이다. 엔진 처리 시간과 구분한다.
+- `evaluated_at`·`evaluation_age_seconds`: 해당 종목을 실제로 평가했던 시각과 경과 시간이다. `strategy_rvol_saved`와 `rvol_at_last_evaluation`은 저장 당시 참고값이며 현재 매수 허용값이 아니다.
+- `strategy_volume`·`minute_volume`: 전략의 확정 5분봉 기준 RVOL과 감시목록의 매분 RVOL이다. 각각의 `cutoff_at`과 누락 개수를 비교한다.
+- `quote_age_on_receipt_seconds`·`seconds_since_quote_received`: 오래된 시세가 도착했는지, 수신 후 갱신이 늦었는지 구분한다.
+- `performance`: 엔진이 마지막으로 저장한 회차의 단계별 시간이다. 같은 회차가 여러 번 기록될 수 있으며 중첩 단계의 시간을 합산하지 않는다.
+
+조회 실패도 `FAILED` 표본으로 남기고 다음 회차에 새 연결로 다시 읽는다. 마지막 `summary`에 성공·실패·중단 횟수를 기록한다. 종료 코드 0은 수집 완료, 1은 일부 조회 실패, 130은 사용자의 중단이다. 수집 완료가 매매 조건 통과를 뜻하지 않는다. DB 쓰기·주문·Toss 인증/조회·LLM 호출은 없으며, 계좌·인증정보·뉴스 본문·원문 SQL·오류 본문도 출력하지 않는다. 이 진단 기능은 대시보드를 외부에 공개하거나 상시 원격 접속을 제공하지 않는다.
+
+## 장 마감 백업에서 매수 차단 이유 확인
+
+`scripts/review_paper_backup.py`는 Cloud Shell 등에서 백업을 네트워크 없는 임시 MySQL에 복원해 요약한다. 운영 VM이나 프로그램은 시작하지 않는다. `--since`·`--until`은 전체 조사 기간이며, 선택적으로 `--entry-since`·`--entry-until`을 함께 지정하면 해당 진입 시간대의 후보 평가만 별도 집계한다. 끝 시각은 포함하지 않는다. 시간대는 사용자가 선택한 조사 범위이며 실제 서버의 거래소 달력·진입 설정을 자동 판정한 값이 아니다.
+
+`entry_review.selected_entry_window`에서 종목별 입력 차단(`decision_blockers`), 전략 조건 대기(`strategy_wait`), 후보 비교 차단(`selection_blockers`), 위험·자금 배분 거절(`allocation_reasons`)을 구분한다. RVOL은 계산된 값과 전략에 전달된 값, 과거 거래일 확보 수, 당일 중간·끝 누락 수와 기준 시각을 함께 남긴다. 모두 저장 당시 관측이며 새로 계산하거나 신선도를 연장하지 않는다. 경고는 공급원별로도 집계하며 원문 오류 메시지를 내보내지 않는다.
+
+집계는 같은 종목의 반복 평가를 포함하고 차단 이유는 서로 겹친다. `signal_present`는 후보 평가에 남은 기술적 신호이며 신호 테이블·주문·체결 건수와 다르다. 신호 테이블 기록 전에 후보 선정에서 차단될 수 있다. 원본에 상세 평가가 없는 구버전 기록은 `batches_missing_decision_details`로 표시한다. 이 경우 빈 집계를 거래 조건 통과로 해석하지 않는다. 종목별 표본은 첫 2개와 마지막 4개로 제한한다.
+
+백업 조회는 JSON 전체를 새 객체로 합치지 않고 필드별 HEX 열로 전달한다. `report_status: COMPLETE`는 조회한 행의 해석 완료이며, 매매 준비 완료를 뜻하지 않는다. 일부 행을 해석하지 못하면 `PARTIAL` 결과 파일을 저장하고 종료 코드 2를 반환한다. `transport`에는 표별 성공·실패 건수와 최대 20개의 실패 위치(표·행·필드·JSON 위치)를 남기며 원문 내용은 포함하지 않는다. 부분 결과의 0건을 실제 활동 없음으로 해석하지 않는다. 재시도할 때 남아 있는 백업 파일을 재사용할 수 있다.
+
 ## 뉴스와 LLM은 어떻게 확인하나요?
 
 검증된 종목 뉴스 분석은 후보 우선순위의 가점에 사용하고, AI 브리핑은 저장된 판단을 설명합니다. 뉴스가 없거나 LLM이 실패했다고 가격 전략을 무조건 중단하지 않습니다. 확인된 악재·위험 차단은 별도이며 LLM이 주문 버튼을 대신 누르지 않습니다. 상세 역할은 [매매 과정](TRADING_PROCESS.md)에 정리했습니다.
