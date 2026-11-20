@@ -1,8 +1,25 @@
 """Retain old observations for diagnosis while all expired entry gates stay closed."""
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sessionquant.dashboard.market_quality_panel import quality_observation_fields, coverage_display
+
+
+def render_preopen_quality_fixture():
+    from sessionquant.dashboard.market_quality_panel import render_quality
+    render_quality({},details=False)
+
+
+def test_preopen_labels_apply_only_to_regular_session_bars(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import sessionquant.market.bars as bars
+    now=datetime.now(timezone.utc)
+    monkeypatch.setattr(bars,'session_bounds',lambda at:(now+timedelta(hours=1),now+timedelta(hours=8)))
+    app=AppTest.from_function(render_preopen_quality_fixture).run()
+    assert not app.exception
+    metrics={m.label:m.value for m in app.metric}
+    assert all(metrics[k]=='개장 대기' for k in ('1분봉 연속성','5분봉 확보','15분봉 확보'))
+    assert metrics['최신 호가']=='미평가' and metrics['실계좌 확인']=='미평가'
 from sessionquant.market.reporting import current_report
 from test_market_data_quality import NOW
 

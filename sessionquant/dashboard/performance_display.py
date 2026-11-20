@@ -1,6 +1,8 @@
 """Display-only precision for saved performance; never rewrite financial records."""
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, localcontext
+from datetime import date, datetime
 import re
+from zoneinfo import ZoneInfo
 
 _NUMERIC = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
@@ -32,36 +34,77 @@ def performance_rows(rows):
     return [display(row) for row in rows]
 
 
-def asset_curve_points(rows, now):
-    from ..models import utc
+def _money(value, *, signed=False):
+    cut = two_decimals(value)
+    if cut == '—':
+        return cut
+    number = Decimal(cut)
+    prefix = '-' if number < 0 else '+' if signed and number > 0 else ''
+    return prefix + f'${abs(number):,.2f}'
+
+
+def daily_performance_points(rows, now):
+    """One latest saved point per US ledger date, not a sampled intraday curve."""
     from .session_app import decimal_value
-    values = []
+    ny, seoul = ZoneInfo('America/New_York'), ZoneInfo('Asia/Seoul')
+    latest = {}
     for row in rows:
         try:
-            at = utc(row.get('timestamp') or row.get('observed_at'))
-            value = decimal_value((row.get('account') or row).get('equity'))
-            if at <= now and value is not None:
-                values.append((at, value))
+            day = date.fromisoformat(str(row.get('id')))
+            stamp = row.get('timestamp')
+            at = stamp if isinstance(stamp, datetime) else datetime.fromisoformat(str(stamp).replace('Z', '+00:00'))
+            if at.tzinfo is None or at > now or at.astimezone(ny).date() != day:
+                continue
+            if day not in latest or at > latest[day][0]:
+                latest[day] = (at, row)
         except (ValueError,TypeError,AttributeError):
             continue
-    peak = Decimal(0)
     points = []
-    for at, value in sorted(values, key=lambda row:row[0]):
-        peak = max(peak, value)
-        decline = (value/peak-1)*100 if peak > 0 else None
-        points.append({'시각':at, '장부 평가자산':float(value),
-            '평가자산 표시':two_decimals(value)+' USD',
-            '장부 낙폭':float(decline) if decline is not None else None,
-            '낙폭 표시':two_decimals(decline)+'%' if decline is not None else '—'})
+    for day, (at, row) in sorted(latest.items()):
+        equity, base = decimal_value(row.get('equity')), decimal_value(row.get('day_start_equity'))
+        change = None
+        if equity is not None and base is not None and base > 0:
+            try:
+                change = (equity-base)/base*100
+            except ArithmeticError:
+                pass
+        cut = two_decimals(change)
+        shown = Decimal(cut) if cut != '—' else None
+        points.append({'거래일':day.isoformat(),
+            '총자산':float(equity) if two_decimals(equity) != '—' else None,
+            '총자산 표시':_money(equity),
+            '일간 수익률':float(change) if shown is not None else None,
+            '수익률 표시':('+' if shown > 0 else '')+cut+'%' if shown is not None else '—',
+            '하루 시작 자산':_money(base),
+            '누적 실현손익':_money(row.get('realized_pnl'), signed=True),
+            '신규 매수 중지':'예' if row.get('halted') is True else '아니요' if row.get('halted') is False else '—',
+            '마지막 기록':at.astimezone(seoul).strftime('%Y-%m-%d %H:%M:%S')})
     return points
 
 
-def asset_chart_spec(field):
-    money = field == '장부 평가자산'
-    return {'mark':{'type':'line','color':'#7ec8ff'},
+def daily_performance_rows(points):
+    return [{'거래일 (미국)':p['거래일'], '총자산 ($)':p['총자산 표시'],
+             '일간 수익률 (%)':p['수익률 표시'], '누적 실현손익 ($)':p['누적 실현손익'],
+             '하루 시작 자산 ($)':p['하루 시작 자산'], '신규 매수 중지':p['신규 매수 중지'],
+             '마지막 기록 (KST)':p['마지막 기록']} for p in reversed(points)]
+
+
+def daily_chart_spec(field):
+    money = field == '총자산'
+    digits = "format((datum.value < 0 ? ceil(datum.value * 100) : floor(datum.value * 100)) / 100, '.2f')"
+    spec = {'height':220, 'title':'일별 총자산 ($)' if money else '일간 수익률 (%)',
+        'mark':{'type':'line','point':True,'color':'#7ec8ff','invalid':'break-paths-show-domains'} if money else {'type':'bar','size':24},
         'encoding':{
-            'x':{'field':'시각','type':'temporal','title':'시각'},
-            'y':{'field':field,'type':'quantitative','title':field+(' (USD)' if money else ' (%)'),
-                 'axis':{'labelExpr':"format((datum.value < 0 ? ceil(datum.value * 100) : floor(datum.value * 100)) / 100, '.2f')"}},
-            'tooltip':[{'field':'시각','type':'temporal','format':'%m.%d %H:%M'},
-                       {'field':'평가자산 표시' if money else '낙폭 표시','type':'nominal','title':field}]}}
+            'x':{'field':'거래일','type':'ordinal','sort':'ascending','title':'미국 거래일',
+                 'axis':{'labelAngle':-30,'labelOverlap':True}},
+            'y':{'field':field,'type':'quantitative','title':field+(' ($)' if money else ' (%)'),
+                 'scale':{'zero':not money},
+                 'axis':{'labelExpr':"'$' + "+digits if money else digits+" + '%'"}},
+            'tooltip':[{'field':'거래일','type':'ordinal','title':'미국 거래일'},
+                       {'field':'총자산 표시' if money else '수익률 표시','type':'nominal','title':field},
+                       {'field':'마지막 기록','type':'nominal','title':'마지막 기록 (KST)'}]}}
+    if not money:
+        spec['encoding']['color'] = {'condition':[
+            {'test':"datum['일간 수익률'] > 0",'value':'#f87171'},
+            {'test':"datum['일간 수익률'] < 0",'value':'#60a5fa'}], 'value':'#94a3b8'}
+    return spec

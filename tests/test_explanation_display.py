@@ -105,3 +105,23 @@ def test_detailed_fallback_labels_the_saved_content_source_time_and_provenance(s
     assert any('이전에 저장한 시장 설명' in row.value for row in app.markdown)
     synthetic_warnings=[row.value for row in app.info if '합성 자료에 대한 설명' in row.value]
     assert bool(synthetic_warnings)==saved_synthetic
+
+
+def test_preopen_briefing_separates_current_wait_from_an_old_limit_record():
+    from streamlit.testing.v1 import AppTest
+    view={'status':'PREOPEN','as_of':'2026-11-20T09:00:00Z','opens_at':'2026-11-20T14:30:00Z',
+          'previous_attempt':{'status':'BUDGET_BLOCKED','as_of':'2026-11-19T20:00:00Z'}}
+    app=AppTest.from_string('from sessionquant.dashboard.explanation_panel import render_explanation_summary\n'
+                            f'render_explanation_summary({view!r})').run()
+    assert not app.exception
+    card=next(e.value for e in app.markdown if '<h3>AI 브리핑</h3>' in e.value)
+    assert '개장 대기' in card and '11.20 23:30:00 KST' in card
+    assert '한도' not in card
+    previous=next(c.value for c in app.caption if c.value.startswith('이전 분석 시도'))
+    assert '11.20 05:00:00 KST' in previous and '현재 한도 상태를 다시 확인한 결과는 아닙니다' in previous
+
+
+def test_regular_session_limit_is_still_visible_as_a_limit():
+    from sessionquant.dashboard.explanation_panel import explanation_status
+    text=explanation_status({'status':'BUDGET_BLOCKED','limit_reason':'MONTHLY_COST_CAP'})
+    assert '월 AI 금액 한도' in text and '개장 대기' not in text

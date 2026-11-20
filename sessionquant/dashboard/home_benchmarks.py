@@ -74,6 +74,13 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
             'points':points, 'trend_status':'최근 1시간 · 1분봉 종가' if trend_fresh else '이전 분봉 기록' if points else '분봉 수집 중'})
         if stream and stream.get('enabled'):
             _stream_card(cards[-1],stream,now)
+        if bounds and now < bounds[0]:
+            opened = bounds[0].astimezone(KST).strftime('%m.%d %H:%M KST')
+            card = cards[-1]
+            card['empty_message'] = '개장 대기\n'+opened+'부터 차트를 준비해요.'
+            card['trend_status'] = '장전에는 정규장 차트를 그리지 않아요.'
+            if card.get('chart_kind') == 'trade' and card['price_status'] == '새 체결 대기':
+                card['price_status'] = '개장 대기'
     return cards
 
 
@@ -111,9 +118,11 @@ def _stream_card(card,stream,now):
         trend_status='수신한 체결가 · 1초 표본 · 최대 1시간' if points else '실시간 체결가 수신 대기')
 
 
-def _chart(points, reference, symbol, *, segments=None, trade=False):
+def _chart(points, reference, symbol, *, segments=None, trade=False, empty_message=None):
     from ..market_reference.trade_feed import GAP_SECONDS
     if not points:
+        if empty_message:
+            return '<div class="sq-benchmark-empty">'+escape(empty_message).replace('\n','<br>')+'</div>'
         return '<div class="sq-benchmark-empty">'+('실시간 체결가를 기다려요.' if trade else '분봉을 받으면 흐름이 표시돼요.')+'</div>'
     if reference is None:
         return '<div class="sq-benchmark-empty">전일 종가 확인 후<br>등락 차트를 표시해요.</div>'
@@ -193,7 +202,7 @@ def benchmark_cards_html(cards):
             '</div><div class="sq-benchmark-name">'+e('name')+'</div></div><span class="sq-focus-badge'+badge+'">'+e('price_status')+
             '</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div>'+
             '<div class="sq-benchmark-change" style="color:'+color+'">'+e('change')+'<small>전일 종가 대비 · 참고</small></div>'+
-            _chart(card['points'],card.get('reference'),card['symbol'],segments=card.get('segments'),trade=card.get('chart_kind')=='trade')+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
+            _chart(card['points'],card.get('reference'),card['symbol'],segments=card.get('segments'),trade=card.get('chart_kind')=='trade',empty_message=card.get('empty_message'))+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
             '<div class="sq-focus-time">'+e('time_label')+'</div></article>')
     # Separate raw HTML blocks so Markdown does not absorb the cards into CSS.
     return CARD_STYLE+'\n\n'+style+'\n\n<div class="sq-benchmark-grid">'+''.join(elements)+'</div>'
