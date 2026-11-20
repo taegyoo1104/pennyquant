@@ -63,7 +63,9 @@ def test_shutdown_deadline_covers_backup_and_container_stop_budgets():
     cleanup_kill, cleanup = map(int, re.findall(r"timeout --kill-after=(\d+) (\d+)", stop)[1])
     outer = [int(n) for n in re.findall(r"TimeoutStartSec=(\d+)", start)]
     outer.append(int(re.search(r"TimeoutStartSec=(\d+)", (DEPLOY / "sessionquant-cost-guard.service").read_text())[1]))
-    assert backup > 480
+    assert backup == 2700 and backup > 1928  # measured successful production backup
+    assert cleanup == 600 and all(limit == 4200 for limit in outer)
+    assert "retention_after_update.sh" in stop
     assert len(outer) == 3 and all(limit > app_stop + backup + kill_after + cleanup + cleanup_kill + db_stop + 60 for limit in outer)
 
 
@@ -98,7 +100,7 @@ wait
     else:
         body = 'printf "UPLOADED new complete.tar.gz\\n" > "$BACKUP_STATUS"\n'
     executable(deploy / "backup.sh", body)
-    executable(deploy / "retention.sh", 'echo retention >> "$CALLS"\n')
+    executable(deploy / "retention_after_update.sh", 'echo retention >> "$CALLS"\n')
     script = tmp_path / "stop.sh"
     script.write_text(
         (DEPLOY / "stop.sh")
@@ -107,7 +109,7 @@ wait
         .replace("/run/sessionquant-stop.lock", str(tmp_path / "stop.lock"))
         .replace("/etc/sessionquant", str(etc))
         .replace("/usr/bin/systemctl", str(bindir / "systemctl"))
-        .replace("timeout --kill-after=30 1800", "timeout --kill-after=1 1")
+        .replace("timeout --kill-after=30 2700", "timeout --kill-after=1 1")
     )
     result = subprocess.run(
         ["bash", str(script)],
@@ -154,7 +156,7 @@ def test_shutdown_distinguishes_absent_db_from_failed_status_query(tmp_path, que
     executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
     executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
     executable(deploy / "backup.sh", 'echo unexpected-backup >> "$CALLS"\n')
-    executable(deploy / "retention.sh", 'echo unexpected-retention >> "$CALLS"\n')
+    executable(deploy / "retention_after_update.sh", 'echo unexpected-retention >> "$CALLS"\n')
     script = tmp_path / "stop.sh"
     script.write_text((DEPLOY / "stop.sh").read_text()
                       .replace("/opt/sessionquant", str(root))

@@ -1,0 +1,217 @@
+"""Host-only installer tests; all paths and systemd calls use disposable doubles."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+fcntl = pytest.importorskip("fcntl")
+
+from test_gcp_deployment import DEPLOY
+
+spec = importlib.util.spec_from_file_location("shutdown_budget", DEPLOY / "apply_shutdown_budget.py")
+patch = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(patch)
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment scripts")
+
+
+def old_body(name):
+    body = (DEPLOY / name).read_text()
+    if name in {"start.sh", "sessionquant-cost-guard.service"}:
+        body = body.replace("TimeoutStartSec=4200", "TimeoutStartSec=2400")
+    elif name == "stop.sh":
+        body = body.replace(
+            "    # Reserve time inside the 70-minute service for app stop, a 45-minute\n"
+            "    # backup, bounded cleanup, DB stop and disk flush. Never report timeout\n"
+            "    # as a successful upload.\n",
+            "    # Match the enclosing 40-minute systemd limit. A large logical dump may\n"
+            "    # legitimately take more than the former eight-minute budget.\n")
+        body = body.replace("2700", "1800").replace(
+            "        # At most five passes within 600+15 seconds; each pass retains its\n"
+            "        # own 90-second/row budget and verified-backup checks.\n",
+            "        # At most 120+15 seconds, inside the enclosing 40-minute service budget.\n")
+        body = body.replace("--kill-after=15 600", "--kill-after=15 120").replace("retention_after_update.sh", "retention.sh")
+    elif name == "retention_after_update.sh":
+        body = body.replace("Catch up after a successful backup", "Catch up after this update's backup")
+        body = body.replace("이번 작업 직전", "업데이트 직전").replace("백업 후 자료 정리:", "업데이트 후 자료 정리:")
+    assert patch.digest(body.encode()) == patch.PAYLOADS[name][0]
+    return body.encode()
+
+
+class Systemd:
+    def __init__(self):
+        self.calls = []
+        self.reloads = 0
+        self.remaining = 3600_000_000
+        self.monotonic = 1000_000_000_000
+        self.busy = False
+        self.bad_timeout = False
+        self.changed_deadline = False
+
+    def __call__(self, args):
+        self.calls.append(args)
+        if args == ["systemctl", "daemon-reload"]:
+            self.reloads += 1
+            return ""
+        if args[:2] == ["systemctl", "show"]:
+            unit, prop = args[2], args[3]
+            if prop == "--property=ExecStart":
+                return "{ path=/opt/sessionquant/deploy/gcp/stop.sh ; argv[]=/opt/sessionquant/deploy/gcp/stop.sh ; }"
+            if prop == "--property=Unit":
+                return unit.replace(".timer", ".service")
+            if prop == "--property=ActiveState":
+                return "active" if unit.endswith(".timer") or self.busy else "inactive"
+        if args[:2] == ["busctl", "get-property"]:
+            if args[-1] == "TimeoutStartUSec":
+                return "t 2400000000" if self.bad_timeout else "t 4200000000"
+            if args[-1] == "NextElapseUSecMonotonic":
+                return "t " + str(self.monotonic // 1000 + self.remaining +
+                                  (1000 if self.changed_deadline and self.reloads else 0))
+        raise AssertionError("unexpected command: " + repr(args))
+
+
+@pytest.fixture
+def installed(tmp_path):
+    (tmp_path / "run").mkdir()
+    payloads = {name: (DEPLOY / name).read_bytes() for name in patch.PAYLOADS}
+    paths = {patch.REPO + name: old_body(name) for name in patch.PAYLOADS}
+    paths.update({patch.REPO + name: (DEPLOY / name).read_bytes() for name in patch.DEPENDENCIES})
+    paths["etc/systemd/system/sessionquant-cost-guard.service"] = old_body("sessionquant-cost-guard.service")
+    for relative, body in paths.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        path.chmod(0o755 if path.suffix == ".sh" else 0o644)
+    return tmp_path, payloads, paths, Systemd()
+
+
+def apply(installed):
+    root, payloads, _, systemd = installed
+    return patch.apply(payloads, root=root, run_command=systemd, monotonic=lambda: systemd.monotonic)
+
+
+def test_payload_hashes_match_reviewed_repository_files():
+    patch.validate_payloads({name: (DEPLOY / name).read_bytes() for name in patch.PAYLOADS})
+    for name, expected in patch.DEPENDENCIES.items():
+        assert patch.digest((DEPLOY / name).read_bytes()) == expected
+
+
+def test_live_install_preserves_timers_app_and_recovery_copy_and_is_repeatable(installed):
+    root, payloads, before, systemd = installed
+    backup = apply(installed)
+    assert json.loads((backup / "manifest.json").read_text())["state"] == "APPLIED"
+    assert backup.stat().st_mode & 0o777 == 0o700
+    for relative, body in before.items():
+        if (backup / relative).exists():
+            assert (backup / relative).read_bytes() == body
+    for name, body in payloads.items():
+        path = root / patch.REPO / name
+        assert path.read_bytes() == body
+        assert path.stat().st_mode & 0o777 == (0o755 if path.suffix == ".sh" else 0o644)
+    assert (root / patch.DROPIN).read_bytes() == patch.DROPIN_BODY
+    assert patch.DROPIN.startswith("run/")  # today's override expires with the VM boot
+    assert (root / "etc/systemd/system/sessionquant-cost-guard.service").read_bytes() == payloads["sessionquant-cost-guard.service"]
+    second = apply(installed)
+    assert second != backup
+    # Only reads + daemon reload; no start/restart, Docker, DB or timer rewrites.
+    assert all(call[:2] in (["systemctl", "show"], ["systemctl", "daemon-reload"],
+                           ["busctl", "get-property"]) for call in systemd.calls)
+    assert not list(root.rglob("*.timer"))
+    assert not (root / "var/lib/sessionquant/mysql").exists()
+
+
+@pytest.mark.parametrize("case", ["custom", "dependency", "symlink", "parent_symlink", "override", "payload"])
+def test_rejects_unrecognized_files_before_any_host_write(installed, case):
+    root, payloads, _, systemd = installed
+    target = root / patch.REPO / "stop.sh"
+    if case == "custom":
+        target.write_bytes(b"custom edits must be preserved")
+    elif case == "dependency":
+        (root / patch.REPO / "retention.sh").write_bytes(b"unknown retention version")
+    elif case == "symlink":
+        target.unlink()
+        target.symlink_to(root / patch.REPO / "start.sh")
+    elif case == "parent_symlink":
+        directory = root / "etc/systemd/system"
+        directory.rename(directory.with_name("real-system"))
+        directory.symlink_to(directory.with_name("real-system"), target_is_directory=True)
+    elif case == "override":
+        target = root / patch.DROPIN
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"custom systemd override")
+    else:
+        payloads["stop.sh"] += b"# not reviewed\n"
+    with pytest.raises(ValueError):
+        apply(installed)
+    assert systemd.reloads == 0
+    assert not (root / patch.BACKUP_ROOT).exists()
+
+
+@pytest.mark.parametrize("case", ["busy", "near_deadline", "infinite", "locked", "maintenance"])
+def test_refuses_active_maintenance_or_imminent_shutdown(installed, case):
+    root, _, before, systemd = installed
+    stream = None
+    if case == "busy":
+        systemd.busy = True
+    elif case == "near_deadline":
+        systemd.remaining = 600_000_000
+    elif case == "infinite":
+        systemd.remaining = (1 << 64) - 1 - systemd.monotonic // 1000
+    elif case == "maintenance":
+        marker = root / "etc/sessionquant/maintenance"
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+    else:
+        stream = (root / "run/sessionquant-backup.lock").open("a")
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        with pytest.raises(ValueError):
+            apply(installed)
+    finally:
+        if stream:
+            stream.close()
+    for relative, body in before.items():
+        assert (root / relative).read_bytes() == body
+    assert systemd.reloads == 0
+
+
+@pytest.mark.parametrize("failure", ["timeout_override", "timer_changed", "write_error"])
+def test_failed_apply_rolls_back_host_files(installed, monkeypatch, failure):
+    root, _, before, systemd = installed
+    if failure == "timeout_override":
+        systemd.bad_timeout = True
+    elif failure == "timer_changed":
+        systemd.changed_deadline = True
+    else:
+        original_write = patch.atomic_write
+        def fail_once(path, *args):
+            if path == root / patch.DROPIN:
+                raise OSError("injected write failure")
+            original_write(path, *args)
+        monkeypatch.setattr(patch, "atomic_write", fail_once)
+    with pytest.raises((ValueError, OSError)):
+        apply(installed)
+    for relative, body in before.items():
+        assert (root / relative).read_bytes() == body
+    assert not (root / patch.DROPIN).exists()
+    report, = (root / patch.BACKUP_ROOT).glob("*/manifest.json")
+    assert json.loads(report.read_text())["state"] == "ROLLED_BACK"
+
+
+def test_download_rejects_bad_revision_and_tampered_payload(monkeypatch):
+    with pytest.raises(ValueError, match="커밋"):
+        patch.download("main")
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, limit):
+            assert limit == 65537
+            return b"unverified shell code"
+    def urlopen(url, timeout):
+        assert url.startswith("https://raw.githubusercontent.com/taegyoo1104/pennyquant/" + "a" * 40 + "/deploy/gcp/")
+        assert timeout == 20
+        return Response()
+    monkeypatch.setattr(patch, "urlopen", urlopen)
+    with pytest.raises(ValueError, match="검증 실패"):
+        patch.download("a" * 40)
