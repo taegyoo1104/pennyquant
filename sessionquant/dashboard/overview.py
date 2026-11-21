@@ -291,7 +291,8 @@ def filter_trades(data):
         orders=data.tables['orders'], state=data.state)
     symbol=st.text_input('종목 필터',key='trade_symbol').strip().upper()
     strategy=st.text_input('전략 필터',key='trade_strategy').strip()
-    days=st.selectbox('기간',[1,7,30,365,0],format_func=lambda d:f'최근 {d}일' if d else '조회 범위 전체',key='trade_days')
+    days=st.selectbox('기간',[0,1,7,30,365],format_func=lambda d:f'최근 {d}일' if d else '전체 기간',key='trade_period_v2')
+    source_counts = {kind: len(data.tables[kind]) for kind in ('orders', 'executions')}
     now=datetime.now(timezone.utc)
     def matches(r):
         if symbol and r.get('symbol')!=symbol:return False
@@ -304,7 +305,8 @@ def filter_trades(data):
     for kind in ('orders','executions'):
         data.tables[kind]=[r for r in data.tables[kind] if matches(r)]
     st.download_button('체결 CSV 내보내기',pd.DataFrame(data.tables['executions']).to_csv(index=False).encode('utf-8-sig'),file_name='sessionquant-executions.csv',mime='text/csv')
-    st.caption('상세도 최근 최대 2,000건 조회 범위입니다. 장기간 전체 기록은 record-export로 내보내세요.')
+    st.caption('현재 장부의 최근 최대 2,000건에서 조회합니다. 화면은 필터에 맞는 최신 75건을 15건씩 최대 5페이지로 표시하며, 체결 CSV는 페이지 제한 없이 내보냅니다.')
+    return source_counts
 
 
 def render_research_report():

@@ -198,7 +198,7 @@ def test_fast_home_refresh_does_not_read_news_or_full_history(database):
     assert data.connected and not data.error
     assert 'dashboard_state' in database.calls and 'state' not in database.calls
     assert [call for call in database.calls if isinstance(call, tuple)] == [
-        ('executions', 1), ('quote_snapshots', 300)]
+        ('executions', 75), ('quote_snapshots', 300)]
     assert 'news_provider_schedule_v1' not in database.calls
     assert 'data_retention_v1' not in database.calls
 
