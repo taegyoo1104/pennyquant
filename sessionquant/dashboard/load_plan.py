@@ -8,6 +8,7 @@ CONTROLS = {
     'watchlist_state': ('watchlist_dashboard_v1', '감시 목록'),
     'market_quality': ('market_data_quality_v1', '시세 품질'),
     'market_performance': ('market_performance_v1', '처리 시간'),
+    'candle_incidents': ('candle_delay_incidents_v1', '분봉 지연 기록'),
     'watchlist_rvol': ('watchlist_rvol_v1', '거래량 비교'),
     'history_backfill': ('watchlist_history_backfill_v1', '분봉 준비'),
     'portfolio_selection': ('portfolio_selection_v1', '매수 후보 선정'),
@@ -71,7 +72,7 @@ MARKET_SECTIONS = {
     '감시·집중 종목': (('watchlist_state',), {'candidates': 300}),
     '매수 판단': (('portfolio_selection',), {}),
     '시장 참고': (('market_reference', 'benchmark_stream'), {'market_regimes': 1, 'quote_snapshots': 300, 'economic_events': 200}),
-    '처리 속도': (('market_performance', 'market_quality'), {}),
+    '처리 속도': (('market_performance', 'market_quality', 'candle_incidents'), {}),
     '분석 이력': ((), {'candidates': 300}),
 }
 

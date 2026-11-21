@@ -74,6 +74,8 @@ class TossSessionSource:
         self._metadata_at = {}
         self._slow_cycles = []
         self._seen: dict[str, set[tuple]] = {}
+        from .candle_incidents import CandleIncidents
+        self._candle_incidents = CandleIncidents(watchlist.repo) if watchlist is not None and quote_feed is not None else None
 
     async def _legacy_poll(self, symbols: list[str], now: datetime | None = None, *,
                    priority_symbols: tuple[str, ...] | list[str] = ()) -> MarketBatch:
@@ -138,6 +140,8 @@ class TossSessionSource:
         self.watchlist.repo.set_control('market_performance_v1',{
             'scope':'collector_task','backend':self.watchlist.repo.backend,
             'latest':latest,'slowest_this_process':self._slow_cycles})
+        if self._candle_incidents is not None:
+            self._candle_incidents.observe(self.watchlist.state, latest, utc(self.clock()), priority=priority_symbols)
         return batch
 
     def restore_seen(self, bars):
@@ -184,6 +188,7 @@ class TossSessionSource:
                 skipped(source,symbol,optional,reason)
                 return None
             before, began = budget.used, monotonic()
+            request_started_at = utc(self.clock()).isoformat()
             status = 'UNKNOWN'
             try:
                 budget.reserved = reserved
@@ -211,6 +216,7 @@ class TossSessionSource:
                 budget.reserved = 0
                 measurements.append({'source':source,'symbol':symbol,'priority':not optional,'status':status,
                     'read_attempts':budget.used-before,'duration_seconds':round(monotonic()-began,3),
+                    'started_at':request_started_at,
                     'observed_at':utc(self.clock()).isoformat()})
             return None
 
@@ -317,7 +323,12 @@ class TossSessionSource:
             # One success per minute boundary, not 60 seconds after receipt.
             # A late response in the previous minute must not defer the next bar.
             minute = utc(self.clock()).replace(second=0,microsecond=0)
-            return not last or utc(last).replace(second=0,microsecond=0) < minute
+            if not last or utc(last).replace(second=0,microsecond=0) < minute:
+                return True
+            refresh = state.get('candle_refresh_v1',{}).get(symbol,{})
+            return bool(self.quote_feed is not None and refresh.get('target_at') == minute.isoformat()
+                and refresh.get('status') == 'AWAITING_PUBLICATION' and refresh.get('attempts',0) < 3
+                and (utc(self.clock())-utc(refresh['attempted_at'])).total_seconds() >= 10)
 
         async def candles(symbol, *, optional=False, reserved=0, reserved_seconds=0):
             last = state.setdefault('last_bars_fetch',{})
@@ -330,10 +341,27 @@ class TossSessionSource:
             if budget.used > before:
                 manager.scheduler.mark(symbol,utc(self.clock()))
                 state.setdefault('last_candle_attempt',{})[symbol] = utc(self.clock()).isoformat()
+                if self.quote_feed is not None:
+                    target = stamp.replace(second=0,microsecond=0).isoformat()
+                    refresh = state.setdefault('candle_refresh_v1',{}).setdefault(symbol,{})
+                    attempts = refresh.get('attempts',0) if refresh.get('target_at') == target else 0
+                    refresh.update(target_at=target, attempts=attempts+1, attempted_at=utc(self.clock()).isoformat())
             if response is None:
                 return
             bars, cursor = response
             accept(symbol,bars)
+            if self.quote_feed is not None:
+                from .bars import available_minutes
+                known = utc(self.clock())
+                bounds = session_bounds(stamp)
+                target = stamp.replace(second=0,microsecond=0)
+                valid = available_minutes(bars,known,symbol)
+                latest = valid[-1].timestamp if valid else None
+                waiting = bool(bounds and bounds[0] < target <= bounds[1] and
+                               (latest is None or latest < target))
+                refresh.update(status='AWAITING_PUBLICATION' if waiting else 'RECEIVED' if latest else 'NO_CLOSED_BAR',
+                    latest_closed_at=latest.isoformat() if latest else None,
+                    received_at=known.isoformat())
             # HTTP or persistence may finish after the next minute starts.
             # Only the request's starting minute has been refreshed.
             last[symbol] = stamp.isoformat()
