@@ -211,6 +211,8 @@ def render_operations(data, view, path, *, panel=None):
             st.caption('매도 이유: '+explained['매도 이유'])
     else:
         st.caption('조회 범위에 모의 체결 기록이 없습니다.')
+    from .trade_cards import render_trade_history
+    render_trade_history(data)
     footer = st.columns(2)
     with footer[0]:
         link('매매 전체 보기','매매 내역')

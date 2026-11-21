@@ -81,7 +81,7 @@ def read_plan(page, *, news_section=None, panel=None):
             return ('context','market_reference','benchmark_stream'), {}
         if page == '대시보드' and panel == 'live':
             return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup', 'market_reference'), {
-                'executions': 1, 'quote_snapshots': 300}
+                'executions': 75, 'quote_snapshots': 300}
         if page == '대시보드' and panel == 'news':
             return ('context', 'engine_state', 'news_status', 'strategy_explanation'), {'news_ingestions': 300}
         if page == '시장·종목' and panel in MARKET_SECTIONS:

@@ -175,6 +175,15 @@ def load_database(path: str | Path, *, page=None, news_section=None, panel=None)
                         if order:
                             result.tables['orders'] = [order]
                     read('latest_order', order_reasons)
+                older_order_ids = list(dict.fromkeys(
+                    row['client_id'] for row in result.tables['executions']
+                    if str(row.get('side')).lower() == 'sell'
+                    and isinstance(row.get('client_id'), str) and row['client_id']
+                    and row['client_id'] != latest.get('client_id')
+                    and not row.get('reason')))
+                if older_order_ids:
+                    orders = read('history_orders', lambda: repository.get_records('orders', older_order_ids))
+                    result.tables['orders'].extend(orders.values())
             if include_fred:
                 result.fred_references = read('fred_references', lambda: repository.recent('fred_reference_observations', limit=30))
             if include_news:
@@ -480,7 +489,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         from sessionquant.dashboard.summary_panels import render_actual_account
         if view['environment']=='LIVE_LOCAL': render_actual_account(data.actual_account,data.account_status)
         from sessionquant.dashboard.overview import filter_trades
-        filter_trades(data)
+        trade_source_counts = filter_trades(data)
         st.subheader("전략 관리 포지션과 위험 예산")
         st.caption("상단의 토스 실제 계좌와 별도로 이 실행의 전략 장부를 표시합니다.")
         _table(view["positions"], "현재 전략 관리 포지션이 없습니다. 조건이 맞지 않으면 현금을 유지합니다.")
@@ -546,10 +555,12 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
         if view['environment'] == 'PAPER_LOCAL':
             full_session = view['session'] if isinstance(view['session'],dict) else {}
             st.caption('청산 상태는 잔여 수량과 미결 주문을 함께 확인합니다. 매수 취소 확인 대기: '+str(len(full_session.get('pending_buy_cancellations',[])))+'건 · 미확인 주문: '+str(len(full_session.get('unknown_orders',[])))+'건')
+        from sessionquant.dashboard.trade_pages import trade_page
+        order_page = trade_page(data.tables['orders'], kind='orders', source_count=trade_source_counts['orders'])
         _table([{"주문 ID": row.get("client_id", row.get("id", "")), "종목": row.get("symbol", ""), "방향": row.get("side", ""),
                  "상태": STATUS_NAMES.get(str(row.get("status", "")).lower(), row.get("status", "")), "금액": usd(row.get("amount")),
                  "수량": str(row.get("qty", "")), "체결 수량": str(row.get("filled_qty", "")), "사유": row.get("reason", ""),
-                 "생성 시각": timestamp(row.get("created_at"))} for row in data.tables["orders"]])
+                 "생성 시각": timestamp(row.get("created_at"))} for row in order_page], "선택한 조건에서 표시할 주문이 없습니다.")
         if view['environment'] == 'PAPER_LOCAL':
             st.caption('모의 체결 모델: '+str(data.context.get('paper_fill_model','기존 기록·미확인'))+' · 접수·지연·유동성은 가정이며 실제 증권사 체결을 보장하지 않습니다.')
             with st.expander('모의 체결 가정·미체결 근거'):
@@ -557,14 +568,15 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                     '예상 가격':usd(row.get('expected_price')),'누적 모의 체결가':usd(row.get('simulated_fill_price')),
                     '가정 지연(초)':row.get('assumed_latency'),'가격 차이(bps)':row.get('slippage_bps'),
                     '수수료 항목':row.get('fee_breakdown'),'미체결 사유':row.get('unfilled_reason'),
-                    '접수 시각':timestamp(row.get('accepted_at'))} for row in data.tables['orders']])
-        with st.expander("체결 기록"):
+                    '접수 시각':timestamp(row.get('accepted_at'))} for row in order_page], '현재 주문 페이지에 표시할 미체결 근거가 없습니다.')
+        with st.expander("체결 기록", expanded=True):
+            execution_page = trade_page(data.tables['executions'], kind='executions', source_count=trade_source_counts['executions'])
             st.caption('매도 이유는 해당 주문에 기록된 사유입니다. 과거 체결은 연결된 주문에서 확인하며, 근거가 없으면 기록 없음으로 표시합니다.')
             _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "매도 이유": row.get('매도 이유', '기록 없음') if str(row.get('side')).lower()=='sell' else '—', "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
                      '체결 모델':row.get('fill_model_version','실제 브로커' if row.get('execution_mode')=='live' else 'UNKNOWN'),
                      '예상 가격':usd(row.get('expected_price')),'가격 차이(bps)':row.get('slippage_bps'),
-                     "체결 ID": row.get("id", "")} for row in data.tables["executions"]])
+                     "체결 ID": row.get("id", "")} for row in execution_page], "선택한 조건에서 표시할 체결이 없습니다.")
         st.markdown("**운영 경고**")
         _table([{"시각": timestamp(row.get("timestamp", row.get("created_at"))), "수준": row.get("level", row.get("severity", "")),
                  "코드": row.get("code", row.get("type", "")), "설명": row.get("message", row.get("reason", ""))} for row in data.tables["alerts"]])
