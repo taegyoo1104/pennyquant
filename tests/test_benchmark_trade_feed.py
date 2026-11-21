@@ -42,7 +42,7 @@ async def until(predicate):
         while not predicate():await asyncio.sleep(.001)
 
 
-def test_one_second_coalescing_keeps_the_actual_last_event_not_local_clock():
+def test_one_minute_coalescing_keeps_the_actual_last_event_not_local_clock():
     feed=ready(now=NOW+timedelta(seconds=1))
     for ms in range(1000):
         feed.accept(trade(at=NOW+timedelta(milliseconds=ms),price=str(99+ms/10000)),feed.segment)
@@ -169,7 +169,7 @@ def test_restart_retains_history_without_freshness_and_rejects_old_generation():
     restored.accept(trade(at=NOW+timedelta(seconds=1)),feed.segment)
     assert not restored.latest
     restored.accept(trade(at=NOW+timedelta(seconds=1)),restored.segment)
-    assert len(restored.points['SPY'])==2 and restored.latest
+    assert len(restored.points['SPY'])==1 and restored.latest
     snapshot['updated_at']=(NOW+timedelta(seconds=1)).isoformat()
     assert not BenchmarkTradeFeed(None,restored=snapshot,clock=lambda:NOW).points['SPY']
 
@@ -180,7 +180,7 @@ def test_snapshot_is_bounded_and_overwrites_one_control_without_trade_or_tick_jo
         at=NOW+timedelta(seconds=second);feed.clock=lambda:at
         for symbol in SYMBOLS:feed.accept(trade(symbol,at=at),feed.segment)
     snapshot=feed.snapshot()
-    assert all(len(rows)==MAX_POINTS for rows in snapshot['points'].values())
+    assert all(len(rows)==62 <= MAX_POINTS for rows in snapshot['points'].values())
     assert len(json.dumps(snapshot).encode())<500_000
     with closing(Repository(tmp_path/'bounded.db',backend='sqlite')) as repo:
         repo.set_control(VIEW,snapshot);repo.set_control(VIEW,snapshot)
@@ -191,7 +191,8 @@ def test_snapshot_is_bounded_and_overwrites_one_control_without_trade_or_tick_jo
 
 def test_chart_joins_trade_samples_across_minutes_but_not_reconnects_or_long_gaps():
     feed=ready()
-    for seconds,price in ((-3,'99'),(-2,'101'),(-1,'102'),(0,'101')):
+    for seconds,price in ((-60,'99'),(0,'101')):
+        feed.clock=lambda:NOW+timedelta(seconds=seconds)
         feed.accept(trade(at=NOW+timedelta(seconds=seconds),price=price),feed.segment)
     html=benchmark_cards_html([card(feed)])
     assert html.count('<polyline')==2 and html.count('<circle')==2  # Latest-price dot and halo.
@@ -201,9 +202,9 @@ def test_chart_joins_trade_samples_across_minutes_but_not_reconnects_or_long_gap
     feed.accept(trade(at=NOW+timedelta(seconds=1),price='102'),feed.segment)
     html=benchmark_cards_html([card(feed,NOW+timedelta(seconds=1))])
     assert '<circle' in html and '빈칸' in html
-    feed.clock=lambda:NOW+timedelta(seconds=20)
-    feed.accept(trade(at=NOW+timedelta(seconds=20),price='101'),feed.segment)
-    assert benchmark_cards_html([card(feed,NOW+timedelta(seconds=20))]).count('<circle')==2
+    feed.clock=lambda:NOW+timedelta(minutes=2)
+    feed.accept(trade(at=NOW+timedelta(minutes=2),price='101'),feed.segment)
+    assert benchmark_cards_html([card(feed,NOW+timedelta(minutes=2))]).count('<circle')==3
 
 
 def test_price_and_publication_staleness_are_independent_and_no_return_without_close():
@@ -250,7 +251,7 @@ async def test_real_adapter_reconnects_only_trade_channels_and_old_replay_is_not
             disconnect.set()
             await until(lambda:len(clients)==2 and feed.counts['ignored']>0)
             assert not feed.latest and len(feed.points['SPY'])==1
-            now[0]+=timedelta(seconds=1);new_trade.set()
+            now[0]+=timedelta(minutes=1);new_trade.set()
             await until(lambda:bool(feed.latest))
             assert len(feed.points['SPY'])==2 and max(maximum)==1
             assert feed.points['SPY'][0][2]!=feed.points['SPY'][1][2]
@@ -351,3 +352,42 @@ def test_display_stream_requires_toss_websocket_and_cannot_replace_risk_referenc
                     {'market_reference':{**config.market_reference,'display_only':False}},
                     {'market_reference':{**config.market_reference,'symbols':['IEF']}}):
         with pytest.raises(ValueError):replace(config,**changes)
+
+
+def test_minute_chart_keeps_opening_price_beyond_an_hour_while_current_price_updates():
+    opened = NOW.replace(hour=14, minute=30)
+    feed = ready(now=opened)
+    feed.accept(trade(at=opened, price='98'), feed.segment)
+    for seconds, price in ((0, '100'), (20, '101'), (59, '102')):
+        at = NOW + timedelta(seconds=seconds)
+        feed.clock = lambda: at
+        feed.accept(trade(at=at, price=price), feed.segment)
+        shown = card(feed, at)
+        assert shown['price'] == f'${price}.00' and shown['price_fresh']
+        assert len(shown['points']) == 2
+        assert shown['points'][0][0] == opened
+        assert shown['points'][-1][0] == at
+    assert feed.snapshot()['sample_seconds'] == 60
+    assert feed.snapshot()['points'] == feed.snapshot()['session_points']
+
+
+def test_legacy_seconds_restore_as_minutes_without_inventing_missing_history():
+    legacy = {'updated_at': NOW.isoformat(), 'points': {'SPY': [
+        [int((NOW-timedelta(seconds=s)).timestamp()*1000), str(100-s), 1]
+        for s in (62, 61, 2, 1, 0)]}}
+    restored = ready(restored=legacy)
+    points = restored.snapshot()['points']['SPY']
+    assert len(points) == 3
+    assert [r[1] for r in points] == ['39', '99', '100']
+    assert not card(restored)['price_fresh']
+
+
+def test_missing_minute_breaks_line_even_if_actual_event_gap_under_ninety_seconds():
+    feed = ready()
+    for offset in (-61, 0, 60):
+        # 15:58:59, 16:00:00, 16:01:00: the missing 15:59 minute stays blank.
+        at = NOW + timedelta(seconds=offset)
+        feed.clock = lambda: at
+        feed.accept(trade(at=at), feed.segment)
+    html = benchmark_cards_html([card(feed, at)])
+    assert '빈칸' in html and html.count('<polyline') == 1

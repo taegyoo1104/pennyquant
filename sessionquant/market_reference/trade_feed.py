@@ -1,4 +1,4 @@
-"""Display-only ETF trades. One receiver, bounded one-second samples, no orders.
+"""Display-only ETF trades. One receiver, bounded one-minute samples, no orders.
 
 Toss AsyncAPI 1.2.3 trade:us is lossy. These are received price samples, not
 complete trades, volume, candles or strategy inputs. A second connection keeps
@@ -17,10 +17,11 @@ from ..market.bars import session_bounds
 
 VIEW = 'benchmark_trade_view_v1'
 SYMBOLS = ('SPY', 'QQQ', 'SOXX')
-MAX_POINTS = 3601
+MAX_POINTS = 391
 MAX_AGE = 30
 GAP_SECONDS = 15
-SESSION_POINTS = 391
+SESSION_POINTS = MAX_POINTS
+LEGACY_SECOND_POINTS = 3601
 
 
 def session_samples(rows, now):
@@ -29,7 +30,7 @@ def session_samples(rows, now):
     if not isinstance(rows, list):
         return result
     bounds = None
-    for row in rows[-MAX_POINTS:]:
+    for row in rows[-LEGACY_SECOND_POINTS:]:
         try:
             millis, price, segment = row
             if type(millis) is not int or type(segment) is not int or segment < 0:
@@ -74,20 +75,8 @@ def samples(rows, now):
     result = []
     if not bounds or not isinstance(rows, list):
         return result
-    for row in rows[-MAX_POINTS:]:
-        try:
-            millis, price, segment = row
-            if type(millis) is not int or type(segment) is not int or segment < 0:
-                continue
-            at = datetime.fromtimestamp(millis/1000, timezone.utc)
-            value = positive(price)
-            if (not bounds[0] <= at <= min(bounds[1],now) or at < now-timedelta(hours=1)
-                    or (result and millis <= result[-1][0])):
-                continue
-            result.append([millis,str(value),segment])
-        except (ValueError, TypeError, OverflowError, OSError, InvalidOperation):
-            continue
-    return result
+    return [row for row in session_samples(rows, now)
+            if bounds[0] <= datetime.fromtimestamp(row[0]/1000, timezone.utc) <= min(bounds[1], now)]
 
 
 def price_sample(row, now):
@@ -126,13 +115,13 @@ class BenchmarkTradeFeed:
         except (KeyError, TypeError, ValueError):
             saved = {}
         saved_points = saved.get('points') if isinstance(saved.get('points'),dict) else {}
-        self.points = {s:deque(samples(saved_points.get(s,[]),now),maxlen=MAX_POINTS) for s in symbols}
         archived = saved.get('session_points') or saved_points
         self.session_points = {s:deque(session_samples(archived.get(s, []), now), maxlen=SESSION_POINTS) for s in symbols}
+        # One minute history serves both the live chart and the closed-session view.
+        self.points = self.session_points
         saved_prices = saved.get('price_samples') if isinstance(saved.get('price_samples'),dict) else {}
         self.price_samples = {s:row for s in symbols if (row := price_sample(saved_prices.get(s),now))}
-        self.segment = max([r[2] for rows in self.points.values() for r in rows]
-                           + [r[2] for rows in self.session_points.values() for r in rows]
+        self.segment = max([r[2] for rows in self.session_points.values() for r in rows]
                            + [r[2] for r in self.price_samples.values()],default=0)+1
         self.latest = {}; self.state = 'STARTING'; self.acknowledged = False
         self.retry_seconds = 0.; self.last_error = None
@@ -180,12 +169,6 @@ class BenchmarkTradeFeed:
                     archive[-1] = row
                 else:
                     archive.append(row)
-                if rows and rows[-1][0]//1000 == millis//1000 and rows[-1][2] == self.segment:
-                    rows[-1] = row
-                else:
-                    rows.append(row)
-            while rows and rows[0][0] < int((now-timedelta(hours=1)).timestamp()*1000):
-                rows.popleft()
             # Same-time trades can legitimately have different prices. Do not
             # pretend that a repeated event timestamp is a new market instant.
             receipt = prior['received_at'] if prior and prior['at'] == millis else received.isoformat()
@@ -245,7 +228,7 @@ class BenchmarkTradeFeed:
         return {'enabled':True,'purpose':'DISPLAY_ONLY','transport':'trade:us','updated_at':now.isoformat(),
                 'active_symbols':list(self.symbols),'state':self.state,'acknowledged':self.acknowledged,
                 'retry_seconds':self.retry_seconds,'last_error_type':self.last_error,'counts':dict(self.counts),
-                'sample_seconds':1,'gap_seconds':GAP_SECONDS,
+                'sample_seconds':60,'gap_policy':'missing_minute_or_reconnect',
                 'latest':{s:dict(r) for s,r in self.latest.items()},
                 'price_samples':{s:row for s,r in self.price_samples.items() if (row := price_sample(r,now))},
                 'session_points':{s:session_samples(list(rows),now) for s,rows in self.session_points.items()},
