@@ -99,15 +99,32 @@ def test_offhours_guard_owns_same_lease_as_engine_and_reads_only(monkeypatch):
 
 
 @pytest.mark.parametrize('wrong_device', [False, True])
-def test_offline_boot_preparation_only_disables_units_on_expected_detached_disk(tmp_path, wrong_device):
+@pytest.mark.parametrize('identity', ['hostname', 'missing_hostname', 'wrong_hostname', 'hostname_symlink',
+                                      'missing_config', 'wrong_service', 'recovery_mask', 'maintenance'])
+def test_offline_boot_preparation_only_disables_units_on_expected_detached_disk(tmp_path, wrong_device, identity):
     root = tmp_path/'disk'
     (root/'etc/sessionquant').mkdir(parents=True)
     (root/'etc/systemd/system').mkdir(parents=True)
     (root/'opt/sessionquant/deploy/gcp').mkdir(parents=True)
     (root/'opt/sessionquant/deploy/gcp/compose.yaml').touch()
-    (root/'etc/hostname').write_text('sessionquant-paper\n')
+    if identity != 'missing_hostname':
+        (root/'etc/hostname').write_text('sessionquant-paper.us-central1-a.c.sessionquant.internal\n')
     for unit in ('sessionquant.service', 'sessionquant-cost-guard.timer'):
         (root/'etc/systemd/system'/unit).write_text('[Unit]\nDescription=fixture\n')
+    service = root/'etc/systemd/system/sessionquant.service'
+    service.write_text('[Service]\nExecStart=/opt/sessionquant/deploy/gcp/start.sh\n')
+    for config in ('app.env', 'db.env'):
+        (root/'etc/sessionquant'/config).write_text('SECRET=preserved\n')
+    if identity == 'wrong_hostname': (root/'etc/hostname').write_text('another-vm\n')
+    if identity == 'hostname_symlink':
+        (root/'etc/hostname').unlink()
+        (root/'etc/hostname').symlink_to('/does-not-exist')
+    if identity == 'missing_config': (root/'etc/sessionquant/db.env').unlink()
+    if identity == 'wrong_service': service.write_text('[Service]\nExecStart=/bin/true\n')
+    if identity == 'recovery_mask':
+        service.unlink()
+        service.symlink_to('/dev/null')
+    if identity == 'maintenance': (root/'etc/sessionquant/maintenance').touch()
     data = root/'db'; data.write_bytes(b'preserve')
     bindir = tmp_path/'bin'; bindir.mkdir(); calls = tmp_path/'calls'
     executable(bindir/'mountpoint', 'exit 0\n')
@@ -128,9 +145,12 @@ if [[ "$*" == *is-enabled* ]]; then echo disabled; exit 1; fi
     result = subprocess.run(['bash', str(script), str(root)], capture_output=True, text=True, timeout=10,
                             env={**os.environ, 'PATH': str(bindir)+':'+os.environ['PATH'],
                                  'CALLS': str(calls), 'WRONG': str(wrong_device)})
-    assert (result.returncode == 0) is (not wrong_device)
+    allowed = not wrong_device and identity in {'hostname', 'missing_hostname'}
+    assert (result.returncode == 0) is allowed, result.stderr
     assert data.read_bytes() == b'preserve'
-    if wrong_device: assert not calls.exists()
+    assert (root/'etc/sessionquant/app.env').read_text() == 'SECRET=preserved\n'
+    if identity == 'missing_hostname': assert not (root/'etc/hostname').exists()
+    if not allowed: assert not calls.exists()
     else:
         output = calls.read_text()
         assert 'disable sessionquant.service sessionquant-cost-guard.timer' in output
