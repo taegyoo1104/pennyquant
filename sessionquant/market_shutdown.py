@@ -1,4 +1,4 @@
-"""거래소 달력에 따른 서버 종료 시각. 외부 API·DB·주문을 사용하지 않는다."""
+"""거래소 달력에 따른 프로그램 종료 시각. 외부 API·DB·주문을 사용하지 않는다."""
 from __future__ import annotations
 
 import argparse
@@ -23,6 +23,13 @@ def shutdown_delay(now: datetime, grace_minutes: int = 5) -> int:
         return 0
     end = cal.session_close(str(day)).to_pydatetime() + timedelta(minutes=grace_minutes)
     return max(0, math.ceil((end - now).total_seconds()))
+
+
+def startup_delay(now: datetime) -> int:
+    """A cold start after the close is inspection, including the five-minute grace."""
+    from .market.bars import session_bounds
+    bounds = session_bounds(now)
+    return shutdown_delay(now) if bounds and utc(now) < bounds[1] else 0
 
 
 async def with_graceful_sigterm(operation):
@@ -59,8 +66,10 @@ async def with_graceful_sigterm(operation):
 def main():
     parser = argparse.ArgumentParser(description='오늘 장 마감 후 자동 종료까지 남은 초')
     parser.add_argument('--grace-minutes', type=int, default=5)
+    parser.add_argument('--startup', action='store_true')
     args = parser.parse_args()
-    print(shutdown_delay(datetime.now(timezone.utc), args.grace_minutes))
+    now = datetime.now(timezone.utc)
+    print(startup_delay(now) if args.startup else shutdown_delay(now, args.grace_minutes))
 
 
 if __name__ == '__main__':

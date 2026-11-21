@@ -57,7 +57,7 @@ def executable(path,body):
 
 @pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
 @pytest.mark.parametrize('failed_backup',[False,True])
-def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp_path,failed_backup):
+def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,failed_backup):
     root=tmp_path/'repo';(root/'deploy/gcp').mkdir(parents=True)
     disk=root/'database-disk';disk.write_text('preserved')
     calls=tmp_path/'calls'
@@ -67,6 +67,7 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
     executable(bindir/'sync','echo sync >> "$CALLS"\n')
     executable(root/'deploy/gcp/backup.sh',f'echo backup >> "$CALLS"\nexit {int(failed_backup)}\n')
     executable(root/'deploy/gcp/retention_after_update.sh','echo retention >> "$CALLS"\n')
+    executable(root/'deploy/gcp/inspect.sh','echo inspection >> "$CALLS"\n')
     script=tmp_path/'stop.sh'
     # The disposable copy cannot execute host poweroff or access production paths.
     body=(DEPLOY/'stop.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
@@ -77,11 +78,13 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
         'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
     assert result.returncode==int(failed_backup) and disk.read_text()=='preserved'
     lines=calls.read_text().splitlines()
-    assert 'stop -t 180 app' in lines[0]
+    assert 'stop -t 180 app' in lines[1]
+    assert 'systemctl stop sessionquant-market-close.timer' in lines[0]
     assert lines.index('backup')<next(i for i,line in enumerate(lines) if 'down --timeout 120' in line)
     assert ('retention' in lines) is (not failed_backup)
     if not failed_backup: assert lines.index('backup') < lines.index('retention')
-    assert lines[-2:]==['sync','systemctl poweroff']
+    assert lines[-2:]==['sync','inspection']
+    assert not any('poweroff' in line for line in lines)
     assert not any(' -v' in line for line in lines)
     assert ('백업 실패' in result.stderr) is failed_backup
     if failed_backup: assert (tmp_path/'etc/backup-status').read_text().startswith('FAILED ')
@@ -91,6 +94,8 @@ def test_shutdown_orders_save_backup_stop_and_poweroff_without_deleting_disk(tmp
 @pytest.mark.parametrize('delay,error,started',[(7200,False,True),(0,False,False),(0,True,False)])
 def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     root=tmp_path/'repo';root.mkdir()
+    (root/'deploy/gcp').mkdir(parents=True)
+    executable(root/'deploy/gcp/inspect.sh','echo inspection >> "$CALLS"\n')
     calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
     executable(bindir/'docker',f'echo "docker $*" >> "$CALLS"\nif [[ "$1" == run ]]; then echo {delay}; exit {int(error)}; fi\n')
     executable(bindir/'systemctl','echo "systemctl $*" >> "$CALLS"\nif [[ "$1" == is-active ]]; then exit 3; fi\n')
@@ -104,11 +109,14 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     lines=calls.read_text().splitlines()
     timers=[i for i,line in enumerate(lines) if line.startswith('timer ')]
     apps=[i for i,line in enumerate(lines) if ' up -d --wait' in line]
-    assert len(timers)==1 and bool(apps) is started
-    if started:assert timers[0]<apps[0]
-    expected = 1_000_000_000 + (900 if error else (delay or 60)) * 1_000_000
-    assert f'--on-boot={expected}us' in lines[timers[0]]
-    assert '--on-active' not in lines[timers[0]]
+    assert len(timers)==(2 if started else 0) and bool(apps) is started
+    assert ('inspection' in lines) is (not started)
+    if started:
+        assert timers[-1]<apps[0]
+        for index,seconds in zip(timers,(delay,72000)):
+            assert f'--on-boot={1_000_000_000+seconds*1_000_000}us' in lines[index]
+            assert '--on-active' not in lines[index]
+    assert not any('poweroff' in line for line in lines)
     assert result.returncode==int(error)
 
 

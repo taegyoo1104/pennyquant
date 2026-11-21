@@ -17,8 +17,12 @@ spec.loader.exec_module(patch)
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment scripts")
 
 
+def reviewed_payload(name):
+    return Path(__file__).parent / "fixtures/shutdown_budget_20261120" / name
+
+
 def old_body(name):
-    body = (DEPLOY / name).read_text()
+    body = reviewed_payload(name).read_text()
     if name in {"start.sh", "sessionquant-cost-guard.service"}:
         body = body.replace("TimeoutStartSec=4200", "TimeoutStartSec=2400")
         if name == "start.sh":
@@ -124,7 +128,7 @@ class Systemd:
 @pytest.fixture
 def installed(tmp_path):
     (tmp_path / "run").mkdir()
-    payloads = {name: (DEPLOY / name).read_bytes() for name in patch.PAYLOADS}
+    payloads = {name: reviewed_payload(name).read_bytes() for name in patch.PAYLOADS}
     paths = {patch.REPO + name: old_body(name) for name in patch.PAYLOADS}
     paths.update({patch.REPO + name: (DEPLOY / name).read_bytes() for name in patch.DEPENDENCIES})
     paths["etc/systemd/system/sessionquant-cost-guard.service"] = old_body("sessionquant-cost-guard.service")
@@ -142,7 +146,7 @@ def apply(installed):
 
 
 def test_payload_hashes_match_reviewed_repository_files():
-    patch.validate_payloads({name: (DEPLOY / name).read_bytes() for name in patch.PAYLOADS})
+    patch.validate_payloads({name: reviewed_payload(name).read_bytes() for name in patch.PAYLOADS})
     for name, expected in patch.DEPENDENCIES.items():
         assert patch.digest((DEPLOY / name).read_bytes()) == expected
 

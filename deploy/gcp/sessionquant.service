@@ -2,7 +2,7 @@
 Description=SessionQuant Paper (manual VM start, manual trading start)
 Requires=docker.service
 After=docker.service network-online.target
-Wants=network-online.target sessionquant-cost-guard.timer
+Wants=network-online.target
 
 [Service]
 Type=oneshot

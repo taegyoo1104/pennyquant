@@ -1,0 +1,6 @@
+# Same database and namespace, with no trading engine or data collectors.
+services:
+  app:
+    command: ["python", "-m", "sessionquant.inspection_dashboard"]
+    environment:
+      SQ_DASHBOARD_READ_ONLY: "1"

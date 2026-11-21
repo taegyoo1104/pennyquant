@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 umask 077
 [[ $EUID == 0 && $(hostname -s) == sessionquant-paper ]] || { echo '운영 VM에서 sudo로 실행하세요.' >&2; exit 1; }
+[[ $# == 0 || ( $# == 1 && $1 == --offline ) ]] || exit 1
 cd /opt/sessionquant
 python3 deploy/gcp/storage_check.py --minimum-mib 2048
 compose=(docker compose -f deploy/gcp/compose.yaml)
@@ -11,6 +12,10 @@ read -r sq_binlog sq_packet sq_tables <<< "$sq_values"
 [[ "$sq_binlog" == 0 && "$sq_packet" =~ ^[0-9]+$ && "$sq_tables" =~ ^[0-9]+$ ]] || { echo 'DB 설정을 확인할 수 없습니다.' >&2; exit 1; }
 ((sq_packet >= 67108864 && sq_tables >= 43)) || { echo 'DB 전송 크기·테이블 준비를 확인하세요.' >&2; exit 1; }
 grep -q '^UPLOADED ' /etc/sessionquant/backup-status || { echo '완료된 클라우드 백업이 없습니다.' >&2; exit 1; }
+if [[ ${1:-} == --offline ]]; then
+    echo 'DB·저장 공간·백업 점검 통과. 점검 모드이므로 외부 시세·AI는 호출하지 않았습니다.'
+    exit 0
+fi
 sq_report=$(mktemp /var/tmp/sq-toss-check.XXXXXXXX)
 trap 'rm -f -- "$sq_report"' EXIT
 sq_toss_exit=0

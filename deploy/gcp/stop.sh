@@ -5,7 +5,8 @@ flock -n 9 || exit 0
 cd /opt/sessionquant || exit 1
 compose=(docker compose -f deploy/gcp/compose.yaml)
 result=0
-echo '장 마감: 프로그램 저장·종료 후 백업합니다. 잔량이 있으면 다음 실행에서 복구합니다.'
+systemctl stop sessionquant-market-close.timer sessionquant-run-limit.timer sessionquant-cost-guard.timer || true
+echo '장 마감: 프로그램 저장·종료 후 백업합니다. 잔량이 있으면 다음 실행에서 복구합니다. VM은 유지합니다.'
 "${compose[@]}" stop -t 180 app || echo '프로그램 종료 상태를 확인하세요.' >&2
 db_services=$("${compose[@]}" ps --status running --services db)
 db_status=$?
@@ -48,15 +49,15 @@ elif [[ "$db_services" == db ]]; then
             result=1
             (umask 077; printf 'FAILED %s exit_code=%s\n' "$(date -u +%FT%TZ)" "$retention_result" \
                 > /etc/sessionquant/retention-status) || true
-            echo '자료 정리가 끝나지 않았습니다. 성공한 백업은 유지하고 VM을 종료합니다.' >&2
+            echo '자료 정리가 끝나지 않았습니다. 성공한 백업을 유지하고 점검 화면에서 확인하세요.' >&2
         fi
     fi
 else
-    echo '실행 중인 DB가 없습니다. 기존 디스크를 보존하고 종료합니다.'
+    echo '실행 중인 DB가 없습니다. 기존 디스크를 보존합니다.'
 fi
 # Never remove volumes or the persistent boot disk.
-"${compose[@]}" down --timeout 120 || echo '컨테이너 종료 오류: OS 종료로 마무리합니다.' >&2
+"${compose[@]}" down --timeout 120 || { echo '컨테이너 종료 오류: 점검 화면을 시작하지 않습니다.' >&2; exit 1; }
 sync
-/usr/bin/systemctl poweroff || result=1
-# A shutdown request is not proof of a successful backup.
+bash deploy/gcp/inspect.sh || result=1
+# An available inspection dashboard is not proof of a successful backup.
 exit "$result"
