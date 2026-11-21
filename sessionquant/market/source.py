@@ -74,6 +74,8 @@ class TossSessionSource:
         self._metadata_at = {}
         self._slow_cycles = []
         self._seen: dict[str, set[tuple]] = {}
+        from .candle_incidents import CandleIncidents
+        self._candle_incidents = CandleIncidents(watchlist.repo) if watchlist is not None and quote_feed is not None else None
 
     async def _legacy_poll(self, symbols: list[str], now: datetime | None = None, *,
                    priority_symbols: tuple[str, ...] | list[str] = ()) -> MarketBatch:
@@ -138,6 +140,8 @@ class TossSessionSource:
         self.watchlist.repo.set_control('market_performance_v1',{
             'scope':'collector_task','backend':self.watchlist.repo.backend,
             'latest':latest,'slowest_this_process':self._slow_cycles})
+        if self._candle_incidents is not None:
+            self._candle_incidents.observe(self.watchlist.state, latest, utc(self.clock()), priority=priority_symbols)
         return batch
 
     def restore_seen(self, bars):
@@ -184,6 +188,7 @@ class TossSessionSource:
                 skipped(source,symbol,optional,reason)
                 return None
             before, began = budget.used, monotonic()
+            request_started_at = utc(self.clock()).isoformat()
             status = 'UNKNOWN'
             try:
                 budget.reserved = reserved
@@ -211,6 +216,7 @@ class TossSessionSource:
                 budget.reserved = 0
                 measurements.append({'source':source,'symbol':symbol,'priority':not optional,'status':status,
                     'read_attempts':budget.used-before,'duration_seconds':round(monotonic()-began,3),
+                    'started_at':request_started_at,
                     'observed_at':utc(self.clock()).isoformat()})
             return None
 

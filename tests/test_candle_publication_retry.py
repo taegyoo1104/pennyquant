@@ -77,6 +77,9 @@ async def test_missing_bar_retries_are_bounded_and_obey_provider_backoff(tmp_pat
             assert manager.state['last_cycle_calls'] <= 8
             current = source()  # Persisted schedule must survive source recreation.
         assert len(attempts) == (2 if throttle else 3)
+        incident = repo.get_control('candle_delay_incidents_v1', {})['events'][0]
+        assert incident['symbols'][0]['symbol'] == 'T001'
+        assert 'CANDLE_REQUEST_DELAY' in incident['reasons'] if throttle else 'CANDLE_LATE' in incident['reasons']
         clock.now = NOW+timedelta(minutes=6, seconds=1)
         await current.poll([], priority_symbols=['T001'])
         assert len(attempts) == (2 if throttle else 4)
