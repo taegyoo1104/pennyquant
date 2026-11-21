@@ -71,7 +71,7 @@ def test_intraday_retention_expires_replay_but_keeps_today_active_and_financial_
     assert repo.get_control('research_recording_v1')['run_id'] == 'active'
 
 
-def test_postclose_retention_archives_finished_day_and_keeps_first_recovery_backup(mysql_repositories, tmp_path):
+def test_postclose_retention_archives_finished_day_and_keeps_first_recovery_backup(mysql_repositories, tmp_path, monkeypatch):
     from sessionquant.database.retention import REPLAY_PRUNED
     now = datetime(2026, 11, 20, 21, 5, tzinfo=timezone.utc)
     repo = mysql_repositories(environment='PAPER_LOCAL')
@@ -81,11 +81,39 @@ def test_postclose_retention_archives_finished_day_and_keeps_first_recovery_back
     report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
     assert report['deleted'] == 1
     first = repo.get_control(REPLAY_PRUNED)
+    marker_writes = []
+    original = repo.set_control
+    def track(name, value):
+        if name == REPLAY_PRUNED:
+            marker_writes.append(value)
+        original(name, value)
+    monkeypatch.setattr(repo, 'set_control', track)
     seed(repo, 'research_events', 'later-import', now, days=1/24, kind='engine_batch', run_id='closed', data={})
     proof = tmp_path/'new-receipt'
     proof.write_text(f'UPLOADED {now.isoformat()} sessionquant-20261120T210500Z-second.tar.gz\n')
     assert prune_expired(repo, policy, now=now, apply=True, receipt=proof)['deleted'] == 1
     assert repo.get_control(REPLAY_PRUNED) == first
+    assert marker_writes == []
+    seed(repo, 'research_events', 'another-old-run-row', now, days=1/24, kind='engine_batch', run_id='closed', data={})
+    seed(repo, 'research_events', 'new-run-row', now, days=1/24, kind='engine_batch', run_id='new-run', data={})
+    assert prune_expired(repo, policy, now=now, apply=True, receipt=proof)['deleted'] == 2
+    assert len(marker_writes) == 1
+    marker = repo.get_control(REPLAY_PRUNED)
+    assert marker['runs']['closed'] == first['runs']['closed']
+    assert marker['runs']['new-run']['backup'] == 'sessionquant-20261120T210500Z-second.tar.gz'
+
+    # A new marker must still commit atomically with its data deletion, even
+    # when prior runs are already marked and need no further writes.
+    seed(repo, 'research_events', 'failed-new-run-row', now, days=1/24, kind='engine_batch', run_id='failed-run', data={})
+    def fail(name, value):
+        original(name, value)
+        if name == REPLAY_PRUNED:
+            raise RuntimeError('fixture after marker write')
+    monkeypatch.setattr(repo, 'set_control', fail)
+    with pytest.raises(RuntimeError, match='fixture after marker write'):
+        prune_expired(repo, policy, now=now, apply=True, receipt=proof)
+    assert [row['id'] for row in repo.all('research_events')] == ['failed-new-run-row']
+    assert repo.get_control(REPLAY_PRUNED) == marker
 
 
 def test_failed_replay_tombstone_rolls_back_data_deletion(mysql_repositories, tmp_path, monkeypatch):
@@ -430,8 +458,11 @@ def test_timeout_splits_small_reads_and_preserves_protected_records(mysql_reposi
     seed(repo, 'research_events', 'keep', now, kind='engine_batch', run_id='active', data={})
     repo.set_control('research_recording_v1', {'active': True, 'run_id': 'active'})
     execute = repo._execute
+    attempts = []
     def slow_large_batch(sql, params=(), **kwargs):
         if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+            if (phase == 'keys') == ('JSON_OBJECT' not in sql):
+                attempts.append(params[-1] if phase == 'keys' else tuple(params[1:]))
             if (phase == 'keys' and 'JSON_OBJECT' not in sql and params[-1] > 2
                     or phase == 'payload' and 'JSON_OBJECT' in sql and len(params)-1 > 2):
                 raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'private SQL'), 'SELECT')
@@ -443,3 +474,10 @@ def test_timeout_splits_small_reads_and_preserves_protected_records(mysql_reposi
     assert report['tables']['research_events']['read_splits'] > 0
     assert [row['id'] for row in repo.all('research_events')] == ['keep']
     assert not repo.get_control(CURSORS)['positions'].get('research_events')
+    if phase == 'keys':
+        # Once a smaller lookup works, later pages never repeat oversized reads.
+        assert [size for size in attempts if size > 2] == [25, 12, 6, 3]
+    else:
+        first_page_end = max(attempts[0])
+        later_pages = [ids for ids in attempts if min(ids) > first_page_end]
+        assert later_pages and all(len(ids) <= 2 for ids in later_pages)

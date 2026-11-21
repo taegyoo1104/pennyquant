@@ -54,3 +54,44 @@ def test_other_database_errors_are_not_retried():
     with pytest.raises(MySQLRepositoryError) as caught:
         _read_payload_page(repo, 'research_events', '1=1', [(42, None), (43, None)], {}, 90, lambda: 0)
     assert caught.value.code == 2013 and repo.calls == [[42, 43]]
+
+
+def test_timing_keeps_recovered_timeout_context_after_later_success(monkeypatch):
+    from sessionquant.database import retention
+    ticks = iter(i / 8 for i in range(10))
+    monkeypatch.setattr(retention, 'monotonic', lambda: next(ticks))
+    repo = Repo(size=2)
+    table = {}
+    policy_ticks = []
+
+    def policy_clock():
+        policy_ticks.append(0)
+        return 0
+
+    assert _read_payload_page(repo, 'research_events', '1=1',
+        [(i, None) for i in range(4)], table, 90, policy_clock) == list(range(4))
+    assert table['timings']['PAYLOAD'] == {
+        'calls': 3, 'seconds': .375, 'max_seconds': .125, 'timeouts': 1}
+    assert table['last_read_timeout'] == {
+        'phase': 'PAYLOAD', 'code': 3024, 'count': 4, 'first_seq': 0, 'last_seq': 3}
+    assert table['read_batch'] == {'count': 2, 'first_seq': 2, 'last_seq': 3}
+    assert len(policy_ticks) == 3  # Timing does not consume the cleanup budget clock.
+    _read_payload_page(repo, 'research_events', '1=1', [(42, None)], table, 90, policy_clock)
+    assert table['timings']['PAYLOAD']['calls'] == 4
+    assert table['timings']['PAYLOAD']['timeouts'] == 1
+    assert table['last_read_timeout']['first_seq'] == 0
+    assert 'private SQL' not in str(table)
+
+
+def test_non_timeout_error_is_measured_and_propagated(monkeypatch):
+    from sessionquant.database import retention
+    ticks = iter([1.0, 1.5])
+    monkeypatch.setattr(retention, 'monotonic', lambda: next(ticks))
+    table = {}
+    with pytest.raises(MySQLRepositoryError) as caught:
+        _read_payload_page(Repo(fatal=2013), 'research_events', '1=1',
+            [(42, None)], table, 90, lambda: 0)
+    assert caught.value.code == 2013
+    assert table['timings']['PAYLOAD'] == {
+        'calls': 1, 'seconds': .5, 'max_seconds': .5, 'timeouts': 0}
+    assert 'last_read_timeout' not in table

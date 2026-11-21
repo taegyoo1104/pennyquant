@@ -6,7 +6,7 @@ replay inputs after backup and marks affected runs as incomplete for export.
 """
 from __future__ import annotations
 
-from contextlib import closing, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 import json
@@ -93,12 +93,16 @@ def _pruned_runs(repo):
 
 def _mark_pruned_runs(repo, runs, report, cutoff):
     recorded = _pruned_runs(repo)
+    changed = False
     for run in runs:
         # Preserve the first pre-deletion backup, not a later partial backup.
-        recorded.setdefault(run, {"before": cutoff.isoformat(), "backup": report["backup"]})
+        if run not in recorded:
+            recorded[run] = {"before": cutoff.isoformat(), "backup": report["backup"]}
+            changed = True
     if len(recorded) > 10000:
         raise ValueError("재현 자료 정리 기록 한도에 도달했습니다. 자료를 보존합니다.")
-    repo.set_control(REPLAY_PRUNED, {"version": 1, "runs": recorded})
+    if changed:
+        repo.set_control(REPLAY_PRUNED, {"version": 1, "runs": recorded})
 
 
 def backup_name(receipt: str | Path | None, now: datetime) -> str:
@@ -148,6 +152,28 @@ def _projection(kind):
     return "JSON_OBJECT(" + ",".join(f"'{key}',JSON_EXTRACT(payload,'{path}')" for key, path in paths.items()) + ")"
 
 
+@contextmanager
+def _stage_timing(table, phase, *, batch=None):
+    """Bounded local diagnostics; never retain SQL, JSON bodies or identities."""
+    metrics = table.setdefault("timings", {}).setdefault(
+        phase, {"calls": 0, "seconds": 0.0, "max_seconds": 0.0, "timeouts": 0})
+    started = monotonic()  # Separate from the injectable policy/budget clock.
+    try:
+        yield
+    except Exception as exc:
+        if getattr(exc, "code", None) == 3024:
+            metrics["timeouts"] += 1
+            table["last_read_timeout"] = {"phase": phase, "code": 3024,
+                **{key: value for key, value in (batch or {}).items()
+                   if key in {"count", "first_seq", "last_seq", "after_seq"}}}
+        raise
+    finally:
+        elapsed = max(0.0, monotonic() - started)
+        metrics["calls"] += 1
+        metrics["seconds"] = round(metrics["seconds"] + elapsed, 6)
+        metrics["max_seconds"] = round(max(metrics["max_seconds"], elapsed), 6)
+
+
 def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
     """Split timed-out reads, never skip a record or authorize partial deletion."""
     if clock() >= deadline:
@@ -156,17 +182,21 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
     table["read_batch"] = {"count": len(keys), "first_seq": keys[0][0], "last_seq": keys[-1][0]}
     placeholders = ",".join("%s" for _ in keys)
     try:
-        return repo._execute(
-            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
-            f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
-            f"WHERE namespace=%s AND seq IN ({placeholders})",
-            (repo.namespace, *(key[0] for key in keys)), fetch="all")
+        with _stage_timing(table, "PAYLOAD", batch=table["read_batch"]):
+            return repo._execute(
+                "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
+                f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
+                f"WHERE namespace=%s AND seq IN ({placeholders})",
+                (repo.namespace, *(key[0] for key in keys)), fetch="all")
     except Exception as exc:
         from .mysql_repository import MySQLRepositoryError
         if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or len(keys) == 1:
             raise
         table["read_splits"] = table.get("read_splits", 0) + 1
         half = len(keys) // 2
+        # Keep the smaller size for the rest of this pass. Repeating a known
+        # oversized read on every page otherwise spends the budget on timeouts.
+        table["payload_batch_size"] = min(table.get("payload_batch_size", 10), half)
         return (_read_payload_page(repo, kind, condition, keys[:half], table, deadline, clock)
                 + _read_payload_page(repo, kind, condition, keys[half:], table, deadline, clock))
 
@@ -208,16 +238,23 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
                "oldest_eligible_age_days": None, "observation_scanned": 0}
     report["observability"] = summary
 
-    def read(sql, params, limit):
-        nonlocal remaining
+    class ObservationBudgetExhausted(TimeoutError):
+        pass
+
+    stage, query_limit_ms = "NOT_STARTED", None
+
+    def read(phase, sql, params, limit):
+        nonlocal remaining, stage, query_limit_ms
+        stage = phase
         milliseconds = min(250, int((deadline - clock()) * 1000))
+        query_limit_ms = max(0, milliseconds)
         if milliseconds < 1 or limit < 1 or remaining < limit:
-            raise TimeoutError("관측 예산 소진")
+            raise ObservationBudgetExhausted("TIME_LIMIT" if milliseconds < 1 else "ROW_LIMIT")
         rows = repo._execute(f"SELECT /*+ MAX_EXECUTION_TIME({milliseconds}) */ {sql}", params, fetch="all")
         remaining -= len(rows)
         summary["observation_scanned"] += len(rows)
         if clock() >= deadline:
-            raise TimeoutError("관측 예산 소진")
+            raise ObservationBudgetExhausted("TIME_LIMIT")
         return rows
 
     rules = retention_rules(RetentionPolicy(**report["policy"]))
@@ -229,23 +266,26 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
         report["tables"][kind]["observation"] = observation
         quota = min(128, remaining // (len(rules) - index))
         if quota < 3 or clock() >= deadline:
+            observation.update(status="SKIPPED_BUDGET", budget_reason="ROW_LIMIT" if quota < 3 else "TIME_LIMIT")
             continue
+        stage, query_limit_ms = "NOT_STARTED", None
         baseline = _generation_baseline(previous, kind, now)
         cutoff = retention_cutoff(report["policy"], age, now)
         try:
             # An index endpoint is a baseline, never an insertion count. Sequence
             # gaps and other namespaces must not be counted as generated rows.
-            endpoint = read(f"seq FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
+            endpoint = read("HIGH_WATER", f"seq FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
                             "WHERE namespace=%s ORDER BY seq DESC LIMIT 1", (repo.namespace,), 1)
             high_water = max(endpoint[0][0] if endpoint else 0, removed_sequences[kind]["highest"],
                              baseline[0] if baseline else 0)
             generation = observation["generation"]
             generation.update(high_water_seq=high_water, measured_at=now.isoformat())
             backlog_limit = (quota - 1) // 2 if baseline else quota - 1
-            rows = read(f"seq,captured_at,created_at,updated_at,({_projection(kind)}),({condition}) "
+            rows = read("BACKLOG", f"seq,captured_at,created_at,updated_at,({_projection(kind)}),({condition}) "
                         f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
                         "WHERE namespace=%s AND captured_at<%s ORDER BY captured_at,seq LIMIT %s",
                         (repo.namespace, cutoff.replace(tzinfo=None), backlog_limit), backlog_limit)
+            stage = "BACKLOG_VALIDATION"
             eligible = [captured for _, captured, created, updated, data, allowed in rows
                         if allowed and max(created, updated) < cutoff.replace(tzinfo=None)
                         and _unused(kind, _decode(data), cutoff, protected)]
@@ -258,16 +298,24 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
                                    oldest_eligible_age_days=round((now - oldest).total_seconds() / 86400, 3))
             if baseline:
                 generation_limit = quota - 1 - backlog_limit
-                arrivals = read(f"seq,({condition}) FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
+                arrivals = read("GENERATION", f"seq,({condition}) FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
                                 "WHERE namespace=%s AND seq>%s AND seq<=%s ORDER BY seq LIMIT %s",
                                 (repo.namespace, baseline[0], high_water, generation_limit), generation_limit)
                 generation.update(rows_min=sum(bool(allowed) for _, allowed in arrivals) + removed_sequences[kind]["new_min"],
                                   exact=len(arrivals) < generation_limit and removed_sequences[kind]["exact"],
                                   interval_seconds=(now - baseline[1]).total_seconds())
+            observation["status"] = "COMPLETE"
         except Exception as exc:
             # A failed read is unknown observability, not a reason to broaden
             # deletion or discard already committed maintenance results.
-            observation["error"] = type(exc).__name__
+            exhausted = isinstance(exc, ObservationBudgetExhausted)
+            observation["status"] = "BUDGET_EXHAUSTED" if exhausted else "FAILED"
+            observation["error"] = "TimeoutError" if exhausted else type(exc).__name__
+            code = getattr(exc, "code", None)
+            observation["error_details"] = {"stage": stage, "code": code if type(code) is int else None,
+                                            "query_limit_ms": query_limit_ms}
+            if exhausted:
+                observation["budget_reason"] = str(exc)
             observation["generation"] = {"rows_min": None, "exact": False, "interval_seconds": None,
                                          "measured_at": None, "high_water_seq": None}
     observations = [table["observation"] for table in report["tables"].values()]
@@ -353,7 +401,8 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     after_sql = " AND (captured_at>%s OR (captured_at=%s AND seq>%s))"
                     stamp = utc(position[0]).replace(tzinfo=None)
                     params += [stamp, stamp, int(position[1])]
-                limit = min(policy.batch_size, policy.max_rows - report["scanned"])
+                limit = min(policy.batch_size, table.get("key_batch_size", policy.batch_size),
+                            policy.max_rows - report["scanned"])
                 try:
                     # Read an index-only page before touching large JSON bodies.
                     # LIMIT on a projection/filesort can otherwise read the whole
@@ -364,11 +413,13 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                         if clock() >= deadline:
                             raise TimeoutError("자료 조회 전체 시간 한도")
                         try:
-                            keys = repo._execute(
-                                "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at "
-                                f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
-                                f"WHERE namespace=%s AND captured_at<%s{after_sql} ORDER BY captured_at,seq LIMIT %s",
-                                (*params, limit), fetch="all")
+                            with _stage_timing(table, "KEYS", batch={"count": limit,
+                                               "after_seq": int(position[1]) if position else None}):
+                                keys = repo._execute(
+                                    "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at "
+                                    f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
+                                    f"WHERE namespace=%s AND captured_at<%s{after_sql} ORDER BY captured_at,seq LIMIT %s",
+                                    (*params, limit), fetch="all")
                             break
                         except Exception as exc:
                             from .mysql_repository import MySQLRepositoryError
@@ -376,15 +427,18 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                                 raise
                             table["read_splits"] = table.get("read_splits", 0) + 1
                             limit = max(1, limit // 2)
+                            table["key_batch_size"] = limit
                     if clock() >= deadline:
                         pending.append((kind, age, condition))
                         break
                     rows = []
-                    for offset in range(0, len(keys), 10):
+                    offset = 0
+                    while offset < len(keys):
                         if clock() >= deadline:
                             break
-                        batch = keys[offset:offset + 10]
+                        batch = keys[offset:offset + table.get("payload_batch_size", 10)]
                         rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock))
+                        offset += len(batch)
                     rows.sort(key=lambda row: (row[1], row[0]))
                     if clock() < deadline and [(r[0], r[1]) for r in rows] != list(keys):
                         raise RuntimeError(f"자료 정리 조회 중 pq_{kind} 기록이 변경됐습니다. 재확인이 필요합니다.")
@@ -415,7 +469,8 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     placeholders = ",".join("%s" for _ in selected)
                     # The replay tombstone and deletion commit together. A
                     # partially retained run must never pass as a full replay.
-                    with repo.transaction():
+                    # Includes the deletion, replay marker and transaction commit.
+                    with _stage_timing(table, "DELETE"), repo.transaction():
                         removed = repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s AND seq IN ({placeholders}) "
                                                 f"AND captured_at<%s AND created_at<%s AND updated_at<%s AND ({condition})",
                                                 (repo.namespace, *selected, naive, naive, naive))
@@ -440,8 +495,9 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                 if apply:
                     # Delete first, then checkpoint: interruption may re-scan but
                     # cannot skip an undeleted batch. Every batch commits alone.
-                    repo.set_control(CURSORS, {"policy": identity, "positions": positions,
-                        "next_kind": pending[0][0] if pending else None})
+                    with _stage_timing(table, "CHECKPOINT"):
+                        repo.set_control(CURSORS, {"policy": identity, "positions": positions,
+                            "next_kind": pending[0][0] if pending else None})
             report["status"] = "PARTIAL" if pending else "COMPLETE"
             report["errors"] = [{"table": "pq_" + kind, **value["error"]}
                                 for kind, value in report["tables"].items() if "error" in value]

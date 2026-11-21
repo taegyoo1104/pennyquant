@@ -98,3 +98,18 @@ def test_pruned_recording_cannot_be_exported_as_complete(tmp_path):
         # A different run reaches the normal validation, not the pruning guard.
         with pytest.raises(ValueError, match='지정한 실행 시작 기록'):
             export_recording(repo, tmp_path/'export', run_id='today')
+
+
+@pytest.mark.parametrize('marker', [[], {'runs': []}, {'runs': 'unverified'},
+    {'runs': {str(i): {} for i in range(10001)}}])
+def test_unchanged_replay_marker_still_validates_structure_and_limit(marker):
+    from sessionquant.database.retention import _mark_pruned_runs
+    class Repo:
+        def get_control(self, *args):
+            return marker
+
+        def set_control(self, *args):
+            pytest.fail('Invalid replay marker must never be overwritten')
+
+    with pytest.raises(ValueError, match='재현 자료 정리 기록'):
+        _mark_pruned_runs(Repo(), {'0'}, {'backup': NAME}, NOW)
