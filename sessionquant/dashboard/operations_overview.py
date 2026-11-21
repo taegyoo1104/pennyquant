@@ -13,6 +13,10 @@ def _count(value):
 def home_focus(data, view, now):
     """An older watchlist must not outlive the engine's current heartbeat label."""
     from .home_cards import focus_cards
+    from ..market.close_display import closed_market
+    if closed_market(now):
+        from .closed_market import closed_focus_cards
+        return closed_focus_cards(data.close_display, data.watchlist_state, view['quotes'], now)
     engine = data.engine_state
     age = age_seconds(engine.get('heartbeat'), now)
     online = engine.get('mode') == 'paper' and engine.get('armed') and age is not None and age <= 60
@@ -176,21 +180,30 @@ def render_operations(data, view, path, *, panel=None):
     if panel == 'live':
         render_live_benchmarks(path,refresh=st.session_state.get('dashboard_auto_refresh',True))
     else:
-        render_benchmarks(data.market_reference,data.context,now=now,stream=data.benchmark_stream)
-    st.markdown('<div class="sq-section"><h2>집중 감시</h2><p>가격과 전략 단계를 한눈에</p></div>', unsafe_allow_html=True)
-    if (data.watchlist_state or {}).get('universe_source') == 'toss_us':
+        render_benchmarks(data.market_reference,data.context,now=now,stream=data.benchmark_stream,closing=data.close_display)
+    from ..market.close_display import closed_market, completed_session, day_key
+    closed = closed_market(now)
+    subtitle = '마지막 집중 종목의 마감 기록' if closed else '가격과 전략 단계를 한눈에'
+    st.markdown('<div class="sq-section"><h2>집중 감시</h2><p>'+subtitle+'</p></div>', unsafe_allow_html=True)
+    if not closed and (data.watchlist_state or {}).get('universe_source') == 'toss_us':
         roster = (data.watchlist_state or {}).get('snapshot') or {}
         if roster.get('selection_policy') == 'toss_us_daily_fixed_v1':
             st.caption('기본 후보 '+str(len(roster.get('items', [])))+'개 · 미국 거래일 '+str(roster.get('session_date'))+' 동안 유지')
         else:
             st.caption('오늘 감시할 미국 주식 후보를 준비하고 있어요.')
     schedule = (data.watchlist_state or {}).get('focus_schedule') or {}
-    if schedule.get('status') == 'PREOPEN' and schedule.get('next_at'):
+    if closed:
+        last_session = completed_session(now)
+        st.caption((day_key(last_session)+' 미국 거래일 · ' if last_session else '')+'마지막 집중 목록과 마감 기록입니다.')
+    elif schedule.get('status') == 'PREOPEN' and schedule.get('next_at'):
         st.caption('장전 관찰 목록 · 개장 시 다시 선정 · '+timestamp(schedule['next_at']))
     elif schedule.get('next_at'):
         st.caption('30분마다 목록 확인 · 다음 '+timestamp(schedule['next_at']))
-    st.markdown(focus_cards_html(focus), unsafe_allow_html=True)
-    if data.context.get('strategy') == 'pullback_simple':
+    if closed and not focus:
+        st.info('마지막 거래일에 저장된 집중 목록이 없습니다.')
+    else:
+        st.markdown(focus_cards_html(focus), unsafe_allow_html=True)
+    if not closed and data.context.get('strategy') == 'pullback_simple':
         st.caption('눌림목 전략 · 상승 → 잠시 조정 → 반등 확인 순서로 살펴봅니다. 조건을 충족해도 주문 제한에 따라 기다릴 수 있습니다.')
     st.markdown('<div class="sq-section"><h2>보유 종목</h2><p>모의 장부 기준</p></div>', unsafe_allow_html=True)
     if view['positions']:

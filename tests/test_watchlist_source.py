@@ -301,3 +301,29 @@ async def test_postclose_keeps_risk_quotes_without_background_reads(tmp_path):
         timing=repo.get_control('market_performance_v1')
         assert timing['latest']['elapsed_seconds']>=0 and len(timing['slowest_this_process'])==1
     finally:repo.close()
+
+
+async def test_closing_display_reads_run_after_risk_quotes_under_same_budget(tmp_path):
+    from sessionquant.market.bars import session_bounds
+    from sessionquant.market.close_display import VIEW
+    repo,_,_,_,manager=context(tmp_path)
+    try:
+        await manager.refresh(NOW)
+        now=session_bounds(NOW)[1]+timedelta(seconds=5)
+        class ClosingMarket(Market):
+            async def reference_candles(self,symbol,**kwargs):
+                assert kwargs == {'interval':'1d','count':5}
+                self.calls.append(('daily_close',symbol))
+                return {'candles':[]}
+        client=ClosingMarket(lambda:now)
+        source=TossSessionSource(client,clock=lambda:now,watchlist=manager,
+                                 reference_monitor=object(),max_api_calls=8)
+        batch=await source.poll([],priority_symbols=['T001','T002','T003','T004'])
+        assert {'T001','T002','T003','T004','SPY','QQQ'}=={q.symbol for q in batch.quotes}
+        symbols=['T001','T002','T003','T004','SPY','QQQ']
+        assert client.calls[:7]==[('stocks',symbols),*(('quote',s) for s in symbols)]
+        assert client.calls[7:]==[('daily_close','SPY')]
+        assert manager.state['last_cycle_calls']==8
+        assert repo.get_control(VIEW)['attempts']['SPY']['count']==1
+        assert 'QQQ' not in repo.get_control(VIEW)['attempts']
+    finally:repo.close()

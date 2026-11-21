@@ -210,12 +210,12 @@ def test_system_view_reads_saved_retention_report_only(database):
     assert database.calls.count('data_retention_v1') == 1
 
 
-def test_chart_refresh_reads_only_three_controls_and_observes_new_prices(database):
+def test_chart_refresh_reads_only_display_controls_and_observes_new_prices(database):
     database.failure='news_ingestions'
     database.controls['benchmark_trade_view_v1']={'enabled':True,'points':{'SPY':[[1,'99',1]]}}
     data=load_database('unused.db',page='대시보드',panel='benchmarks')
     assert data.connected and not data.error
-    assert database.calls==['sessionquant_context','market_reference_view_v1','benchmark_trade_view_v1']
+    assert database.calls==['sessionquant_context','market_reference_view_v1','benchmark_trade_view_v1','market_close_display_v1']
     assert data.benchmark_stream['points']['SPY'][0][1]=='99'
     database.controls['benchmark_trade_view_v1']={'enabled':True,'points':{'SPY':[[2,'101',1]]}}
     assert load_database('unused.db',page='대시보드',panel='benchmarks').benchmark_stream['points']['SPY'][0][1]=='101'

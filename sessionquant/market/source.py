@@ -54,6 +54,8 @@ class TossSessionSource:
         self.history_pages_per_cycle = history_pages_per_cycle
         self.on_priority_batch = on_priority_batch
         self.reference_monitor = reference_monitor
+        from .close_display import CloseDisplay
+        self.close_display = CloseDisplay(watchlist.repo) if watchlist is not None and reference_monitor is not None else None
         self.history_store = history_store
         self.warmup = warmup
         self.watchlist_candles_per_cycle = watchlist_candles_per_cycle
@@ -366,8 +368,15 @@ class TossSessionSource:
             await deliver()
             bounds = session_bounds(utc(self.clock()))
             if bounds and utc(self.clock()) >= bounds[1]:
-                # Keep risk quotes/exits alive, but do not start tomorrow's warmup
-                # or perform background history/ETF work during shutdown grace.
+                # Risk quotes/exits run first. Closing display calls share the
+                # existing optional deadline, retry/backoff and HTTP budget.
+                if self.close_display is not None:
+                    async def close_read(symbol):
+                        before = budget.used
+                        value = await call('display_close', self.client.reference_candles, symbol,
+                                           symbol=symbol, interval='1d', count=5, optional=True)
+                        return {'data':value, 'received_at':utc(self.clock()).isoformat()} if value is not None or budget.used > before else None
+                    await self.close_display.collect(close_read, utc(self.clock()))
                 batch.observed_at = utc(self.clock())
                 state['priority_phase_seconds'] = round(monotonic()-started,3)
                 return batch
@@ -577,6 +586,11 @@ class TossSessionSource:
                 candle_observations=getattr(self.client,'candle_observations',{}))
             with measure('watchlist_publish'):
                 manager.publish(utc(self.clock()),priority_symbols=priority_symbols)
+            if self.close_display is not None:
+                current = utc(self.clock())
+                captured = self.close_display.state.get('captured_at')
+                if not captured or (current - utc(captured)).total_seconds() >= 60:
+                    self.close_display.capture(manager.repo.get_control('watchlist_dashboard_v1', {}) or {}, current)
 
     async def aclose(self):
         if self.owns_client:

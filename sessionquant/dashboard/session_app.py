@@ -53,6 +53,7 @@ class DashboardData:
     history_backfill: dict = field(default_factory=dict)
     market_reference: dict = field(default_factory=dict)
     benchmark_stream: dict = field(default_factory=dict)
+    close_display: dict = field(default_factory=dict)
     fred_references: list = field(default_factory=list)
     news_status: dict = field(default_factory=dict)
     strategy_explanation: dict = field(default_factory=dict)

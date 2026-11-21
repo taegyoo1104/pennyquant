@@ -20,6 +20,36 @@ SYMBOLS = ('SPY', 'QQQ', 'SOXX')
 MAX_POINTS = 3601
 MAX_AGE = 30
 GAP_SECONDS = 15
+SESSION_POINTS = 391
+
+
+def session_samples(rows, now):
+    """One last trade per minute for the latest session, retained across weekends."""
+    result = []
+    if not isinstance(rows, list):
+        return result
+    bounds = None
+    for row in rows[-MAX_POINTS:]:
+        try:
+            millis, price, segment = row
+            if type(millis) is not int or type(segment) is not int or segment < 0:
+                continue
+            at = datetime.fromtimestamp(millis / 1000, timezone.utc)
+            found = session_bounds(at)
+            if not found or not found[0] <= at <= min(found[1], now):
+                continue
+            if bounds is None:
+                bounds = found
+            if bounds != found or (result and millis <= result[-1][0]):
+                continue
+            value = [millis, str(positive(price)), segment]
+            if result and result[-1][0]//60000 == millis//60000:
+                result[-1] = value
+            else:
+                result.append(value)
+        except (ValueError, TypeError, OverflowError, OSError, InvalidOperation):
+            continue
+    return result[-SESSION_POINTS:]
 
 
 def timestamp(value):
@@ -97,9 +127,12 @@ class BenchmarkTradeFeed:
             saved = {}
         saved_points = saved.get('points') if isinstance(saved.get('points'),dict) else {}
         self.points = {s:deque(samples(saved_points.get(s,[]),now),maxlen=MAX_POINTS) for s in symbols}
+        archived = saved.get('session_points') or saved_points
+        self.session_points = {s:deque(session_samples(archived.get(s, []), now), maxlen=SESSION_POINTS) for s in symbols}
         saved_prices = saved.get('price_samples') if isinstance(saved.get('price_samples'),dict) else {}
         self.price_samples = {s:row for s in symbols if (row := price_sample(saved_prices.get(s),now))}
         self.segment = max([r[2] for rows in self.points.values() for r in rows]
+                           + [r[2] for rows in self.session_points.values() for r in rows]
                            + [r[2] for r in self.price_samples.values()],default=0)+1
         self.latest = {}; self.state = 'STARTING'; self.acknowledged = False
         self.retry_seconds = 0.; self.last_error = None
@@ -140,6 +173,13 @@ class BenchmarkTradeFeed:
             row = [millis,str(price),self.segment]
             self.price_samples[symbol] = row
             if at >= bounds[0]:
+                archive = self.session_points[symbol]
+                if archive and session_bounds(datetime.fromtimestamp(archive[-1][0]/1000, timezone.utc)) != bounds:
+                    archive.clear()
+                if archive and archive[-1][0]//60000 == millis//60000:
+                    archive[-1] = row
+                else:
+                    archive.append(row)
                 if rows and rows[-1][0]//1000 == millis//1000 and rows[-1][2] == self.segment:
                     rows[-1] = row
                 else:
@@ -208,6 +248,7 @@ class BenchmarkTradeFeed:
                 'sample_seconds':1,'gap_seconds':GAP_SECONDS,
                 'latest':{s:dict(r) for s,r in self.latest.items()},
                 'price_samples':{s:row for s,r in self.price_samples.items() if (row := price_sample(r,now))},
+                'session_points':{s:session_samples(list(rows),now) for s,rows in self.session_points.items()},
                 'points':{s:samples(list(rows),now) for s,rows in self.points.items()}}
 
     def stop(self):
