@@ -154,7 +154,7 @@ def test_cleanup_status_keeps_backlog_warning_separate_from_completed_pass(tmp_p
     assert json.loads((data / "retention-last.json").read_text())["observability"] == observation
 
 
-def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):
+def test_failed_cleanup_opens_inspection_and_keeps_successful_backup(tmp_path):
     root = tmp_path / "repo"
     deploy = root / "deploy/gcp"
     deploy.mkdir(parents=True)
@@ -166,7 +166,8 @@ def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     executable(bindir / "docker", 'echo "docker $*" >> "$CALLS"\nif [[ "$*" == *"--services db"* ]]; then echo db; fi\n')
-    executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
+    executable(bindir / "systemctl", 'echo "systemctl $*" >> "$CALLS"\n')
+    executable(deploy / "inspect.sh", 'echo inspection >> "$CALLS"\n')
     executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
     executable(deploy / "backup.sh", 'echo "UPLOADED new complete.tar.gz" > "$BACKUP_STATUS"\n')
     executable(deploy / "retention_after_update.sh", 'echo retention >> "$CALLS"\nexit 124\n')
@@ -178,7 +179,7 @@ def test_failed_cleanup_still_stops_vm_and_keeps_successful_backup(tmp_path):
                             "CALLS": str(calls), "BACKUP_STATUS": str(status)}, capture_output=True, text=True, timeout=10)
     assert result.returncode == 1 and status.read_text().startswith("UPLOADED new")
     assert "exit_code=124" in (etc / "retention-status").read_text()
-    assert calls.read_text().splitlines()[-2:] == ["sync", "poweroff"]
+    assert calls.read_text().splitlines()[-2:] == ["sync", "inspection"]
     assert "down --timeout 120" in calls.read_text()
 
 

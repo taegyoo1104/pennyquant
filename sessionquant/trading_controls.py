@@ -27,6 +27,8 @@ def begin_session(repo,*,mode,account_seq=None,now=None,armed=True):
 
 
 def enqueue(repo,action,*,run_id,account_seq=None,symbol=None,now=None,command_id=None):
+    from .dashboard_mode import require_writable_dashboard
+    require_writable_dashboard()
     if action not in ACTIONS: raise ValueError('지원하지 않는 거래 제어 요청입니다.')
     if action=='sell_symbol': symbol_valid(symbol)
     now=utc(now or datetime.now(timezone.utc))
@@ -77,6 +79,8 @@ def heartbeat(repo,state,*,now,flat=False):
 
 def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
     """동일 제어 행을 잠가 복수 화면의 요청을 직렬화하고 현재 실행을 재검증한다."""
+    from .dashboard_mode import require_writable_dashboard
+    require_writable_dashboard()
     from hashlib import sha256
     now=utc(now or datetime.now(timezone.utc))
     result=[]
@@ -113,6 +117,14 @@ def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
 def render_controls(repo,*,positions,now=None,environment=None,readonly=False,compact=False,ledger_state=None):
     """실행별 확인 상태를 보존하고 최종 버튼 클릭에서만 기존 큐를 사용한다."""
     import streamlit as st
+    from .dashboard_mode import inspection_mode, inspection_start_message
+    if inspection_mode():
+        st.markdown('**자동매매 꺼짐 · 기록 조회 중**')
+        st.caption(inspection_start_message(now))
+        if st.button('매매 시작', key='trading-start'):
+            st.info(inspection_start_message(now))
+        st.button('일괄 매매 종료·청산', disabled=True, key='trading-stop')
+        return
     now=utc(now or datetime.now(timezone.utc));state=repo.get_control(KEY,{})
     if not compact:st.subheader('실행 상태')
     if not state:

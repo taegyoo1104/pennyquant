@@ -325,6 +325,9 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
     if not styled:
         style()
+    from sessionquant.dashboard_mode import inspection_mode
+    if inspection_mode():
+        st.info('휴장·폐장 후 점검 화면입니다. 시세·뉴스·AI는 새로 수집하지 않으며, 표시된 값은 저장된 시점의 기록입니다.')
     page=selected_page or st.radio('화면',PAGES,horizontal=True,key='dashboard_page',label_visibility='collapsed')
     if page == '시스템·설정':
         # Build identity is local to this process/image, available even if DB reads fail.

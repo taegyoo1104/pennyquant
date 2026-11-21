@@ -1,0 +1,7 @@
+[Unit]
+Description=SessionQuant maximum runtime backup and shutdown
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sessionquant/deploy/gcp/stop.sh
+TimeoutStartSec=4200

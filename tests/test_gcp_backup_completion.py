@@ -66,7 +66,7 @@ def test_shutdown_deadline_covers_backup_and_container_stop_budgets():
     assert backup == 2700 and backup > 1928  # measured successful production backup
     assert cleanup == 600 and all(limit == 4200 for limit in outer)
     assert "retention_after_update.sh" in stop
-    assert len(outer) == 3 and all(limit > app_stop + backup + kill_after + cleanup + cleanup_kill + db_stop + 60 for limit in outer)
+    assert len(outer) == 3 and all(limit > app_stop + backup + kill_after + cleanup + cleanup_kill + db_stop + 480 + 60 for limit in outer)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="GCE Linux shell scripts")
@@ -87,7 +87,8 @@ def test_shutdown_retains_failed_stage_and_never_reports_timeout_as_success(tmp_
     executable(
         bindir / "docker", 'echo "docker $*" >> "$CALLS"\nif [[ "$*" == *"--services db"* ]]; then echo db; fi\n'
     )
-    executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
+    executable(bindir / "systemctl", 'echo "systemctl $*" >> "$CALLS"\n')
+    executable(deploy / "inspect.sh", 'echo inspection >> "$CALLS"\n')
     executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
     if mode == "timeout":
         body = """printf 'RUNNING new phase=DUMP\n' > "$BACKUP_STATUS"
@@ -125,7 +126,7 @@ wait
     )
     assert result.returncode == int(mode != "success")
     assert data.read_bytes() == b"keep actual DB"
-    assert calls.read_text().splitlines()[-2:] == ["sync", "poweroff"]
+    assert calls.read_text().splitlines()[-2:] == ["sync", "inspection"]
     if mode == "timeout":
         assert "제한 시간" in result.stderr
         assert "phase=DUMP" in status.read_text() and "UPLOADED" not in status.read_text()
@@ -153,7 +154,8 @@ def test_shutdown_distinguishes_absent_db_from_failed_status_query(tmp_path, que
     bindir.mkdir()
     executable(bindir / "docker", 'echo "docker $*" >> "$CALLS"\n'
                f'if [[ "$*" == *"--services db"* ]]; then exit {query_exit}; fi\n')
-    executable(bindir / "systemctl", 'echo poweroff >> "$CALLS"\n')
+    executable(bindir / "systemctl", 'echo "systemctl $*" >> "$CALLS"\n')
+    executable(deploy / "inspect.sh", 'echo inspection >> "$CALLS"\n')
     executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
     executable(deploy / "backup.sh", 'echo unexpected-backup >> "$CALLS"\n')
     executable(deploy / "retention_after_update.sh", 'echo unexpected-retention >> "$CALLS"\n')
@@ -170,7 +172,7 @@ def test_shutdown_distinguishes_absent_db_from_failed_status_query(tmp_path, que
     assert result.returncode == int(query_exit != 0)
     assert disk.read_bytes() == b"preserve actual DB"
     lines = calls.read_text().splitlines()
-    assert lines[-2:] == ["sync", "poweroff"]
+    assert lines[-2:] == ["sync", "inspection"]
     assert any("down --timeout 120" in line for line in lines)
     assert not any("unexpected-" in line for line in lines)
     if query_exit:

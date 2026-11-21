@@ -76,7 +76,7 @@ sudo bash /opt/sessionquant/deploy/gcp/activate_websocket.sh
 - 기존 앱을 멈춘 뒤 **기존 설정과 장부 그대로** 종료·보유·미체결을 확인합니다. 대상 웹소켓 장부도 읽어 호환 상태와 미처리 제어 요청을 확인합니다.
 - 새 Cloud Storage 백업이 `UPLOADED`로 완료됐는지 확인합니다.
 - 원본 환경 파일을 비공개로 보관하고 아래 두 설정을 함께 적용합니다.
-- 같은 서비스를 시작하고 장 마감·저장 공간·비용 방지 타이머를 확인합니다.
+- 같은 서비스를 시작하고 장 마감·이번 실행 최대 20시간·저장 공간 타이머를 확인합니다.
 
 ```dotenv
 SQ_SESSION_CONFIG=config/sessionquant.strategy-lab-websocket.example.yaml
