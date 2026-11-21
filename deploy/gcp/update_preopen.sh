@@ -2,7 +2,7 @@
 # Download at the reviewed commit; off-hours inspection must be explicit.
 set -Eeuo pipefail
 umask 077
-[[ $EUID == 0 && ${1:-} =~ ^[0-9a-f]{40}$ && $# -le 2 && (${2:-} == '' || ${2:-} == --paused-paper || ${2:-} == --resume-retention || ${2:-} == --off-hours) ]] || { echo 'sudo bash update_preopen.sh 검토한커밋SHA [--paused-paper|--resume-retention|--off-hours]' >&2; exit 1; }
+[[ $EUID == 0 && ${1:-} =~ ^[0-9a-f]{40}$ && $# -le 2 && (${2:-} == '' || ${2:-} == --paused-paper || ${2:-} == --resume-retention || ${2:-} == --off-hours || ${2:-} == --resume-off-hours) ]] || { echo 'sudo bash update_preopen.sh 검토한커밋SHA [--paused-paper|--resume-retention|--off-hours|--resume-off-hours]' >&2; exit 1; }
 [[ $(cat /sys/class/dmi/id/product_name 2>/dev/null) == 'Google Compute Engine' && $(hostname -s) == sessionquant-paper ]] || { echo 'sessionquant-paper VM에서 실행하세요.' >&2; exit 1; }
 cd /opt/sessionquant
 exec 9>/run/sessionquant-update.lock
@@ -13,6 +13,9 @@ for unit in sessionquant-market-close.service sessionquant-cost-guard.service se
 done
 sq_target=$1
 sq_mode=${2:-}
+sq_resume=false
+if [[ "$sq_mode" == --resume-retention || "$sq_mode" == --resume-off-hours ]]; then sq_resume=true; fi
+if [[ "$sq_mode" == --resume-off-hours ]]; then sq_mode=--off-hours; fi
 sq_resume_head=$(git rev-parse HEAD)
 sq_resume_receipt=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
 git fetch origin refs/heads/main:refs/remotes/origin/main < /dev/null
@@ -57,7 +60,7 @@ print("장전 시간 확인 완료")
 fi
 }
 check_resume() {
-    [[ "$sq_mode" == --resume-retention ]] || return 0
+    [[ "$sq_resume" == true ]] || return 0
     [[ $(git rev-parse HEAD) == "$sq_resume_head" && $(cat /etc/sessionquant/backup-status) == "$sq_resume_receipt" ]] || {
         echo '재개 준비 중 코드 또는 백업 기록이 변경됐습니다.' >&2; return 1;
     }
@@ -99,7 +102,7 @@ if [[ "$sq_mode" == --paused-paper || "$sq_mode" == --off-hours ]]; then check_w
 sq_logging=$("${compose[@]}" exec -T db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -B -e "SELECT @@GLOBAL.log_bin"' < /dev/null)
 [[ "$sq_logging" == 0 ]] || { echo 'DB 변경 기록이 켜져 있습니다. 기존 저장 공간 수정을 먼저 적용하세요.' >&2; exit 1; }
 sq_previous_backup=$(cat /etc/sessionquant/backup-status 2>/dev/null || echo MISSING)
-if [[ "$sq_mode" == --resume-retention ]]; then
+if [[ "$sq_resume" == true ]]; then
     check_resume
     # Same interrupted deployment: validate the existing fresh upload and
     # unchanged OFFLINE heartbeat rather than fabricating a new receipt.

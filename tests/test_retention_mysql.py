@@ -373,7 +373,7 @@ def test_read_timeout_is_partial_and_never_deletes_an_unfinished_page(mysql_repo
     def timeout(sql, params=(), **kwargs):
         if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
             queries.append(sql)
-            if (phase == 'keys' and 'JSON_OBJECT' not in sql) or (phase == 'payload' and len(queries) == 3):
+            if (phase == 'keys' and 'JSON_OBJECT' not in sql) or (phase == 'payload' and len(queries) >= 3):
                 raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'private SQL'), 'SELECT')
         return execute(sql, params, **kwargs)
     monkeypatch.setattr(repo, '_execute', timeout)
@@ -381,7 +381,7 @@ def test_read_timeout_is_partial_and_never_deletes_an_unfinished_page(mysql_repo
     report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
     assert report['status'] == 'PARTIAL' and report['deleted'] == 0
     assert report['observability']['stop_reason'] == 'QUERY_TIMEOUT'
-    assert report['errors'] == [{'table': 'pq_research_events', 'code': 3024, 'phase': 'READ', 'message': '자료 조회 시간 초과'}]
+    assert report['errors'] == [{'table': 'pq_research_events', 'code': 3024, 'phase': phase.upper(), 'message': '자료 조회 시간 초과'}]
     assert not report['tables']['research_events']['complete']
     assert len(repo.all('research_events')) == 25
     assert not repo.get_control(CURSORS, {}).get('positions', {}).get('research_events')
@@ -417,3 +417,29 @@ def test_large_replay_reads_covering_keys_then_bounded_primary_key_payloads(mysq
     report = prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
     assert report['deleted'] == 23 and report['status'] == 'COMPLETE'
     assert plans and payload_sizes == [10, 10, 3]
+
+
+@pytest.mark.parametrize('phase', ['keys', 'payload'])
+def test_timeout_splits_small_reads_and_preserves_protected_records(mysql_repositories, tmp_path, monkeypatch, phase):
+    import pymysql
+    from sessionquant.database.mysql_repository import MySQLRepositoryError
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    for index in range(25):
+        seed(repo, 'research_events', str(index), now, kind='engine_batch', run_id='past', data={})
+    seed(repo, 'research_events', 'keep', now, kind='engine_batch', run_id='active', data={})
+    repo.set_control('research_recording_v1', {'active': True, 'run_id': 'active'})
+    execute = repo._execute
+    def slow_large_batch(sql, params=(), **kwargs):
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+            if (phase == 'keys' and 'JSON_OBJECT' not in sql and params[-1] > 2
+                    or phase == 'payload' and 'JSON_OBJECT' in sql and len(params)-1 > 2):
+                raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'private SQL'), 'SELECT')
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', slow_large_batch)
+    report = prune_expired(repo, replace(POLICY, batch_size=25, intraday_auxiliary=True), now=now,
+                           apply=True, receipt=receipt(tmp_path, now))
+    assert report['status'] == 'COMPLETE' and not report['errors'] and report['deleted'] == 25
+    assert report['tables']['research_events']['read_splits'] > 0
+    assert [row['id'] for row in repo.all('research_events')] == ['keep']
+    assert not repo.get_control(CURSORS)['positions'].get('research_events')

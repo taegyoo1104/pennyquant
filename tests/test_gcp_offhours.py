@@ -157,11 +157,15 @@ if [[ "$*" == *is-enabled* ]]; then echo disabled; exit 1; fi
         assert ' start ' not in output and 'poweroff' not in output
 
 
-@pytest.mark.parametrize('failure', ['', 'engine', 'guard', 'backup', 'retention'])
-def test_offhours_update_backs_up_before_install_and_never_starts_engine(tmp_path, failure):
+@pytest.mark.parametrize('resume', [False, True])
+@pytest.mark.parametrize('failure', ['', 'engine', 'guard', 'backup', 'retention', 'resume_guard', 'receipt_changed'])
+def test_offhours_update_backs_up_before_install_and_never_starts_engine(tmp_path, failure, resume):
+    if (resume and failure == 'backup') or (not resume and failure in {'resume_guard', 'receipt_changed'}):
+        pytest.skip('not applicable to this update mode')
     root = tmp_path/'repo'; (root/'deploy/gcp').mkdir(parents=True)
     stage = tmp_path/'archive'; deploy = stage/'deploy/gcp'; deploy.mkdir(parents=True)
     etc = tmp_path/'etc'; etc.mkdir(); (etc/'backup-status').write_text('UPLOADED previous')
+    (etc/'retention-status').write_text('FAILED fixture')
     bindir = tmp_path/'bin'; bindir.mkdir(); calls = tmp_path/'calls'
     (deploy/'prepare_update.py').write_text('''import os,sys,shutil
 from pathlib import Path
@@ -170,6 +174,7 @@ if '--backup' in sys.argv: shutil.copytree(Path(__file__).parents[2],sys.argv[sy
 ''')
     (deploy/'storage_check.py').write_text('pass\n')
     (deploy/'update_guard.py').write_text('# the actual guard has separate DB/lease tests\n')
+    (deploy/'resume_retention_guard.py').write_text('# receipt age and offline heartbeat tested separately\n')
     (deploy/'sessionquant.service').write_text('[Unit]\nDescription=test\n')
     (deploy/'sessionquant-storage-guard.timer').write_text('[Unit]\nDescription=test timer\n')
     (etc/'systemd/system').mkdir(parents=True)
@@ -189,6 +194,10 @@ elif [[ "$1" == archive ]]; then tar -cf - -C "$ARCHIVE" .; fi
 if [[ "$*" == *"--services app"* && "$FAILURE" == engine ]]; then echo app; fi
 if [[ "$1" == inspect ]]; then echo '["sh","-c","exec python -m sessionquant run"]'; fi
 if [[ "$*" == *" python - --off-hours"* ]]; then cat >/dev/null; [[ "$FAILURE" != guard ]] || exit 7; fi
+if [[ "$*" == *" python - 0000000000000000000000000000000000000001 "* ]]; then
+    cat >/dev/null; echo resume-check >> "$CALLS"; [[ "$FAILURE" != resume_guard ]] || exit 7
+fi
+if [[ "$1" == build && "$FAILURE" == receipt_changed ]]; then echo 'UPLOADED changed' > "$RECEIPT"; fi
 if [[ "$*" == *"SELECT @@GLOBAL.log_bin"* ]]; then echo 0; fi
 ''')
     executable(bindir/'systemctl', '''echo "systemctl $*" >> "$CALLS"
@@ -207,7 +216,7 @@ if [[ "$1" == is-enabled ]]; then echo disabled; fi
     body = body.replace('/var/tmp/sessionquant-update.', str(tmp_path/'work.'))
     body = body.replace('/var/lib/sessionquant', str(tmp_path/'data'))
     script.write_text(body)
-    result = subprocess.run(['bash', str(script), 'a'*40, '--off-hours'], capture_output=True,
+    result = subprocess.run(['bash', str(script), 'a'*40, '--resume-off-hours' if resume else '--off-hours'], capture_output=True,
                             text=True, timeout=15, env={**os.environ,
                             'PATH': str(bindir)+':'+os.environ['PATH'], 'CALLS': str(calls),
                             'ARCHIVE': str(stage), 'RECEIPT': str(etc/'backup-status'), 'FAILURE': failure})
@@ -216,12 +225,17 @@ if [[ "$1" == is-enabled ]]; then echo disabled; fi
     assert 'systemctl start sessionquant.service' not in lines
     assert not any('check-toss' in line or 'poweroff' in line for line in lines)
     if not failure:
-        assert lines.index('backup') < lines.index('install-code') < lines.index('retention')
+        assert lines.index('install-code') < lines.index('retention')
+        if resume:
+            assert 'backup' not in lines and lines.count('resume-check') == 3
+        else:
+            assert lines.index('backup') < lines.index('install-code')
         assert lines.index('retention') < lines.index('preopen --offline') < lines.index('inspection')
     else:
         assert 'inspection' not in lines
         if failure == 'retention':
-            assert lines.index('backup') < lines.index('install-code') < lines.index('retention')
+            assert lines.index('install-code') < lines.index('retention')
+            assert ('backup' in lines) is (not resume)
         else:
             assert 'install-code' not in lines and 'retention' not in lines
             assert ('backup' in lines) is (failure == 'backup')
