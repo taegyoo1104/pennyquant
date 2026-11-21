@@ -11,7 +11,7 @@ def stream_price_observation(stream, symbol, now):
     try:
         known = timestamp(stream['updated_at'])
         if known <= now:
-            points = samples((stream.get('points') or {}).get(symbol,[]),now)
+            points = samples((stream.get('session_points') or stream.get('points') or {}).get(symbol,[]),now)
             current = price_sample((stream.get('price_samples') or {}).get(symbol),now)
             latest = (stream.get('latest') or {}).get(symbol)
             connected = (stream.get('state') == 'CONNECTED' and stream.get('acknowledged') is True
