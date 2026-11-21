@@ -22,7 +22,7 @@ def _previous_day(now):
     return None
 
 
-def benchmark_cards(view, now=None, *, symbols=None, stream=None):
+def benchmark_cards(view, now=None, *, symbols=None, stream=None, closing=None):
     now = utc(now or datetime.now(timezone.utc))
     bounds = session_bounds(now)
     previous_day = _previous_day(now)
@@ -34,6 +34,10 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
         if symbol not in selected:
             continue
         item = ((view or {}).get('items') or {}).get(symbol) or {}
+        from ..market.close_display import closed_market
+        if closed_market(now):
+            cards.append(_closed_card(item, symbol, name, stream, closing, now))
+            continue
         latest = observed_price(item, symbol, now)
         price = _positive(latest['price']) if latest else None
         fresh = bool(price and 0 <= (now-latest['event_at']).total_seconds() <= latest['max_age'])
@@ -86,6 +90,52 @@ def benchmark_cards(view, now=None, *, symbols=None, stream=None):
     return cards
 
 
+def _closed_card(item, symbol, name, stream, closing, now):
+    from ..market.close_display import completed_session, day_key
+    from ..market_reference.trade_feed import session_samples, timestamp
+    from .closed_market import closing_record
+    bounds = completed_session(now)
+    points, segments = [], []
+    try:
+        known = timestamp(stream['updated_at'])
+        if known <= now:
+            raw = (stream.get('session_points') or stream.get('points') or {}).get(symbol, [])
+            for millis, value, segment in session_samples(raw, known):
+                at = datetime.fromtimestamp(millis/1000, timezone.utc)
+                if bounds and bounds[0] <= at <= bounds[1]:
+                    points.append((at, Decimal(value)))
+                    segments.append(segment)
+    except (KeyError, ValueError, TypeError, AttributeError):
+        pass
+    final = closing_record(closing, symbol, now)
+    price = final['price'] if final else points[-1][1] if points else None
+    at = final['at'] if final else points[-1][0] if points else None
+    if price is None:
+        old = observed_price(item, symbol, now)
+        if old and bounds and bounds[0] <= old['event_at'] <= bounds[1]:
+            price, at = _positive(old['price']), old['event_at']
+    reference = final['reference'] if final else None
+    if reference is None and bounds:
+        try:
+            previous = completed_session(bounds[0])
+            if previous and utc(item['previous_close_at']).astimezone(NY).date().isoformat() == day_key(previous):
+                reference = _positive(item['previous_close'])
+        except (KeyError, ValueError, TypeError, AttributeError):
+            pass
+    change = (price/reference-1)*100 if price and reference else None
+    day = day_key(bounds) if bounds else '거래일 미확인'
+    return {'symbol':symbol, 'name':name, 'price':f'${price:,.2f}' if price else '—',
+        'price_kind':'정규장 종가' if final else '마지막 장중 가격 · 종가 미확인',
+        'price_status':'장 마감', 'price_fresh':False,
+        'change':f'{change:+.2f}%' if change is not None else '전일 대비 미확인',
+        'tone':'up' if change is not None and change>0 else 'down' if change is not None and change<0 else 'flat',
+        'reference':reference, 'reference_label':'전 거래일 종가 대비' if final else '마지막 장중 가격 기준 · 참고',
+        'time_label':day+' 미국 거래일 · 마감 기록',
+        'points':points, 'segments':segments, 'chart_kind':'session_trade',
+        'trend_status':'마지막 거래일 · 수신한 구간의 1분 간격 체결가' if points else '저장된 당일 차트 없음',
+        'empty_message':'해당 거래일에 저장한 차트가 없습니다.'}
+
+
 def _stream_card(card,stream,now):
     symbol=card['symbol']
     observation=stream_price_observation(stream,symbol,now)
@@ -103,14 +153,17 @@ def _stream_card(card,stream,now):
         trend_status='수신한 체결가 · 1초 표본 · 최대 1시간' if points else '실시간 체결가 수신 대기')
 
 
-def _chart(points, reference, symbol, *, segments=None, trade=False, empty_message=None):
+def _chart(points, reference, symbol, *, segments=None, trade=False, empty_message=None, session_chart=False):
     from ..market_reference.trade_feed import GAP_SECONDS
     if not points:
         if empty_message:
             return '<div class="sq-benchmark-empty">'+escape(empty_message).replace('\n','<br>')+'</div>'
         return '<div class="sq-benchmark-empty">'+('실시간 체결가를 기다려요.' if trade else '분봉을 받으면 흐름이 표시돼요.')+'</div>'
-    if reference is None:
+    price_only = reference is None and session_chart
+    if reference is None and not price_only:
         return '<div class="sq-benchmark-empty">전일 종가 확인 후<br>등락 차트를 표시해요.</div>'
+    if price_only:
+        reference = points[0][1]
     first, last = points[0][0], points[-1][0]
     # Show movement within the received window, even after a large opening gap.
     # Yesterday's close determines color, but must not flatten the price range.
@@ -125,16 +178,18 @@ def _chart(points, reference, symbol, *, segments=None, trade=False, empty_messa
                       '전일 종가 ↓ · 표시 구간 아래' if reference<lower else '점선 · 전일 종가')
     baseline = (f'<path class="sq-benchmark-reference-line" d="M8 {baseline_y:.2f}H292" '
                 'stroke="#8192a7" stroke-width="1" stroke-dasharray="4 4"/>') if lower<=reference<=upper else ''
+    if price_only:
+        baseline, reference_note = '', '전일 종가 미확인 · 저장된 가격 흐름'
     seconds = max(60, (last-first).total_seconds())
     parts, part, previous = [], [], None
     for index,(at, value) in enumerate(points):
         x = 8+284*(at-first).total_seconds()/seconds
-        delta = (value/reference-1)*100
+        delta = (value/reference-1)*100 if not price_only else Decimal(0)
         y = ordinate(value)
         gap = False
         if previous is not None:
             elapsed = (at-previous).total_seconds()
-            gap = (elapsed > GAP_SECONDS or segments[index] != segments[index-1]) if trade else elapsed != 60
+            gap = (elapsed > (90 if session_chart else GAP_SECONDS) or segments[index] != segments[index-1]) if trade else elapsed != 60
         if gap:
             parts.append(part); part = []
         part.append((x,y,delta)); previous = at
@@ -198,20 +253,23 @@ def benchmark_cards_html(cards):
             '</div><div class="sq-benchmark-name">'+e('name')+'</div></div><span class="sq-focus-badge'+badge+'">'+e('price_status')+
             '</span></div><div class="sq-focus-price">'+e('price')+'</div><div class="sq-focus-kind">'+e('price_kind')+' · USD</div>'+
             '<div class="sq-benchmark-change" style="color:'+color+'">'+e('change')+'<small>'+e('reference_label')+'</small></div>'+
-            _chart(card['points'],card.get('reference'),card['symbol'],segments=card.get('segments'),trade=card.get('chart_kind')=='trade',empty_message=card.get('empty_message'))+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
+            _chart(card['points'],card.get('reference'),card['symbol'],segments=card.get('segments'),trade=card.get('chart_kind') in {'trade','session_trade'},empty_message=card.get('empty_message'),session_chart=card.get('chart_kind')=='session_trade')+'<div class="sq-benchmark-trend">'+e('trend_status')+'</div>'+
             '<div class="sq-focus-time">'+e('time_label')+'</div></article>')
     # Separate raw HTML blocks so Markdown does not absorb the cards into CSS.
     return CARD_STYLE+'\n\n'+style+'\n\n<div class="sq-benchmark-grid">'+''.join(elements)+'</div>'
 
 
-def render_benchmarks(view, context, *, now=None, stream=None):
+def render_benchmarks(view, context, *, now=None, stream=None, closing=None):
     import streamlit as st
     symbols = context.get('market_reference_symbols')
     if symbols is not None and not set(BENCHMARKS).intersection(symbols):
         return
     st.markdown('<div class="sq-section"><h2>시장 흐름</h2><p>참고용 · 매수 조건과 별개</p></div>',unsafe_allow_html=True)
-    st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols,stream=stream)),unsafe_allow_html=True)
-    if stream and stream.get('enabled'):
+    st.markdown(benchmark_cards_html(benchmark_cards(view,now,symbols=symbols,stream=stream,closing=closing)),unsafe_allow_html=True)
+    from ..market.close_display import closed_market
+    if closed_market(now or datetime.now(timezone.utc)):
+        st.caption('폐장·휴장에는 마지막 거래일 기록을 표시합니다. 종가는 장 마감 후 확인한 일봉 기준이며, 미확인 시 마지막 장중 가격으로 구분합니다. 차트는 실제 수신한 구간만 남기며 빈 구간을 채우지 않습니다.')
+    elif stream and stream.get('enabled'):
         st.caption('장전에도 수신한 체결가를 표시합니다. 차트는 정규장 체결가만 1초 단위로 모아 그립니다. 연결 끊김·15초 넘는 수신 공백은 선으로 잇지 않습니다.')
     st.caption('현재 연결한 토스 API에서 해당 미국 지수를 직접 제공하지 않아 ETF로 시장 흐름을 보여드려요. '
         'SPY는 S&P 500, QQQ는 나스닥 100, SOXX는 미국 반도체 업종을 살펴보는 용도입니다. '
@@ -227,5 +285,5 @@ def render_live_benchmarks(path, *, refresh=True):
         data=load_database(path,page='대시보드',panel='benchmarks')
         if data.error:
             st.caption('시장 흐름 연결을 확인하고 있어요. 다음 갱신 때 다시 확인합니다.')
-        render_benchmarks(data.market_reference,data.context,stream=data.benchmark_stream)
+        render_benchmarks(data.market_reference,data.context,stream=data.benchmark_stream,closing=data.close_display)
     chart()

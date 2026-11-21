@@ -12,6 +12,7 @@ CONTROLS = {
     'history_backfill': ('watchlist_history_backfill_v1', '분봉 준비'),
     'portfolio_selection': ('portfolio_selection_v1', '매수 후보 선정'),
     'market_reference': ('market_reference_view_v1', '시장 참고 지표'),
+    'close_display': ('market_close_display_v1', '마감 가격과 집중 기록'),
     'benchmark_stream': ('benchmark_trade_view_v1', '시장 흐름 실시간 차트'),
     'news_status': ('session_news_status', '뉴스 수집 상태'),
     'warmup': ('startup_data_warmup_v1', '자료 준비'),
@@ -20,7 +21,7 @@ CONTROLS = {
 }
 
 PAGE_CONTROLS = {
-    '대시보드': ('actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation', 'market_reference', 'benchmark_stream'),
+    '대시보드': ('close_display', 'actual_account', 'account_status', 'watchlist_state', 'warmup', 'news_status', 'strategy_explanation', 'market_reference', 'benchmark_stream'),
     '시장·종목': ('watchlist_state', 'market_quality', 'market_performance', 'watchlist_rvol',
                  'history_backfill', 'portfolio_selection', 'market_reference', 'benchmark_stream'),
     '전략·백테스트': (),
@@ -78,9 +79,9 @@ MARKET_SECTIONS = {
 def read_plan(page, *, news_section=None, panel=None):
     if panel is not None:
         if page == '대시보드' and panel == 'benchmarks':
-            return ('context','market_reference','benchmark_stream'), {}
+            return ('context','market_reference','benchmark_stream','close_display'), {}
         if page == '대시보드' and panel == 'live':
-            return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup', 'market_reference'), {
+            return ('context', 'engine_state', 'actual_account', 'account_status', 'watchlist_state', 'warmup', 'market_reference', 'close_display'), {
                 'executions': 75, 'quote_snapshots': 300}
         if page == '대시보드' and panel == 'news':
             return ('context', 'engine_state', 'news_status', 'strategy_explanation'), {'news_ingestions': 300}
