@@ -148,6 +148,29 @@ def _projection(kind):
     return "JSON_OBJECT(" + ",".join(f"'{key}',JSON_EXTRACT(payload,'{path}')" for key, path in paths.items()) + ")"
 
 
+def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
+    """Split timed-out reads, never skip a record or authorize partial deletion."""
+    if clock() >= deadline:
+        raise TimeoutError("자료 조회 전체 시간 한도")
+    table["read_phase"] = "PAYLOAD"
+    table["read_batch"] = {"count": len(keys), "first_seq": keys[0][0], "last_seq": keys[-1][0]}
+    placeholders = ",".join("%s" for _ in keys)
+    try:
+        return repo._execute(
+            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
+            f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
+            f"WHERE namespace=%s AND seq IN ({placeholders})",
+            (repo.namespace, *(key[0] for key in keys)), fetch="all")
+    except Exception as exc:
+        from .mysql_repository import MySQLRepositoryError
+        if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or len(keys) == 1:
+            raise
+        table["read_splits"] = table.get("read_splits", 0) + 1
+        half = len(keys) // 2
+        return (_read_payload_page(repo, kind, condition, keys[:half], table, deadline, clock)
+                + _read_payload_page(repo, kind, condition, keys[half:], table, deadline, clock))
+
+
 def _unused(kind, metadata, cutoff, protected):
     if kind == "research_events" and protected.get("intraday_auxiliary"):
         run = metadata.get("journal_run_id")
@@ -335,11 +358,24 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     # Read an index-only page before touching large JSON bodies.
                     # LIMIT on a projection/filesort can otherwise read the whole
                     # replay table even though the client receives only 200 rows.
-                    keys = repo._execute(
-                        "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at "
-                        f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
-                        f"WHERE namespace=%s AND captured_at<%s{after_sql} ORDER BY captured_at,seq LIMIT %s",
-                        (*params, limit), fetch="all")
+                    table["read_phase"] = "KEYS"
+                    table.pop("read_batch", None)
+                    while True:
+                        if clock() >= deadline:
+                            raise TimeoutError("자료 조회 전체 시간 한도")
+                        try:
+                            keys = repo._execute(
+                                "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at "
+                                f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
+                                f"WHERE namespace=%s AND captured_at<%s{after_sql} ORDER BY captured_at,seq LIMIT %s",
+                                (*params, limit), fetch="all")
+                            break
+                        except Exception as exc:
+                            from .mysql_repository import MySQLRepositoryError
+                            if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or limit == 1:
+                                raise
+                            table["read_splits"] = table.get("read_splits", 0) + 1
+                            limit = max(1, limit // 2)
                     if clock() >= deadline:
                         pending.append((kind, age, condition))
                         break
@@ -348,22 +384,20 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                         if clock() >= deadline:
                             break
                         batch = keys[offset:offset + 10]
-                        placeholders = ",".join("%s" for _ in batch)
-                        rows.extend(repo._execute(
-                            "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
-                            f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
-                            f"WHERE namespace=%s AND seq IN ({placeholders})",
-                            (repo.namespace, *(key[0] for key in batch)), fetch="all"))
+                        rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock))
                     rows.sort(key=lambda row: (row[1], row[0]))
                     if clock() < deadline and [(r[0], r[1]) for r in rows] != list(keys):
                         raise RuntimeError(f"자료 정리 조회 중 pq_{kind} 기록이 변경됐습니다. 재확인이 필요합니다.")
+                except TimeoutError:
+                    pending.append((kind, age, condition))
+                    break
                 except Exception as exc:
                     from .mysql_repository import MySQLRepositoryError
                     if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
                         raise
                     # Keep the last committed cursor; a timeout never means an
                     # empty table or authorizes deletion of a partial page.
-                    table["error"] = {"code": 3024, "phase": "READ", "message": "자료 조회 시간 초과"}
+                    table["error"] = {"code": 3024, "phase": table["read_phase"], "message": "자료 조회 시간 초과"}
                     pending.insert(0, (kind, age, condition))
                     break
                 # A slow SELECT must not authorize writes after the budget expired.
