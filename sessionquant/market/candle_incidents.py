@@ -16,7 +16,8 @@ MAX_BYTES = 256 * 1024
 
 
 def encoded(value):
-    return json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    # Match the repository's JSON spacing so the storage bound includes it.
+    return json.dumps(value, ensure_ascii=False, allow_nan=False).encode('utf-8')
 
 
 def stamp(value):

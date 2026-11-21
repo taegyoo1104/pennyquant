@@ -88,6 +88,8 @@ def test_archive_survives_restart_and_is_count_and_byte_bounded(monkeypatch):
         CandleIncidents(repo).observe({}, {}, NOW+timedelta(minutes=5*i))
     saved = repo.saved[CONTROL]
     assert 1 < len(saved['events']) <= 96 and len(encoded(saved)) <= MAX_BYTES
+    from sessionquant.database.serialization import dumps
+    assert len(dumps(saved).encode('utf-8')) <= MAX_BYTES
     assert all(len(encoded(e)) <= MAX_EVENT_BYTES for e in saved['events'])
     assert saved['events'][-1]['at'] == (NOW+timedelta(minutes=5*399)).isoformat()
     assert len(repo.writes) == 400 and {name for name,_ in repo.writes} == {CONTROL}
