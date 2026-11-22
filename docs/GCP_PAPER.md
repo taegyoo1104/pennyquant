@@ -4,12 +4,46 @@ GCP VM 한 대에서 앱과 MySQL을 실행합니다. **VM 시작, 프로그램 
 
 현재 권장 설정은 `strategy-lab-websocket`입니다. 저장소에 코드가 있어도 운영 서버에 자동으로 배포되지 않습니다. 기존 서버의 설정을 확인하고 필요할 때 [장전 업데이트](#장전-업데이트)와 [웹소켓 전환](WEBSOCKET_ROLLOUT.md#gcp에서-전환)을 적용합니다. 처음 서버를 만드는 경우는 아래 [최초 설치](#고급-최초-설치)부터 진행하세요.
 
+## Windows CMD에서 시작하기
+
+이미 서버를 설치한 운영자는 이 순서로 접속합니다. PC에 설치한 **Google Cloud CLI**이며, 브라우저의 Cloud Shell 사용 시간을 소모하지 않습니다.
+
+1. `Win + R` → `cmd` → Enter로 명령 프롬프트를 엽니다.
+2. 아래 명령으로 CLI 설치·로그인 계정을 확인합니다. `gcloud`를 찾지 못하면 시작 메뉴의 **Google Cloud SDK Shell**을 엽니다. 활성 계정이 없다면 `gcloud auth login`으로 로그인합니다.
+
+```cmd
+gcloud --version
+gcloud auth list
+```
+
+3. VM이 꺼져 있다면 시작하고 접속합니다. 이미 실행 중이라면 시작 명령은 생략합니다.
+
+```cmd
+gcloud compute instances start sessionquant-paper --project=sessionquant --zone=us-central1-a
+gcloud compute ssh sessionquant-paper --project=sessionquant --zone=us-central1-a --tunnel-through-iap
+```
+
+4. PuTTY 또는 SSH 터미널에서 **`@sessionquant-paper`**를 확인합니다. 업데이트할 때는 아래 명령으로 tmux에 들어갑니다. 이미 안에 있으면 다시 만들지 않습니다.
+
+```bash
+if [ -z "${TMUX:-}" ]; then
+  tmux new-session -A -s sq-update
+fi
+```
+
+5. 업데이트는 [장전 업데이트](#장전-업데이트), 휴장·폐장 뒤에는 [점검 업데이트](#휴장폐장-후에도-같은-대시보드-열기)를 사용합니다. 프로그램 시작과 매매 시작은 별도입니다.
+
+**화면만 볼 때:** Tailscale Serve를 이미 설정했다면 PC·휴대폰도 같은 tailnet에 연결하고 기존 HTTPS 주소를 엽니다. 주소는 VM에서 `sudo tailscale serve status`로 확인합니다. PC의 CMD·PuTTY를 계속 켜 둘 필요는 없지만 **VM과 대시보드, 접속 기기의 Tailscale 연결은 유지돼야 합니다.** Tailscale에 연결하지 않은 PC에서는 휴대폰과 같은 주소라도 열리지 않을 수 있습니다.
+
+아래 Cloud Shell 절차는 대체 접속 경로입니다. Tailscale을 사용하는 경우 대시보드용 SSH 포트 전달을 추가로 만들 필요가 없습니다.
+
 ## 명령을 어디에서 실행하나요?
 
 | 화면의 프롬프트 | 위치 | 할 일 |
 | --- | --- | --- |
 | `이름@cloudshell:~` | GCP Cloud Shell | VM 시작·상태 확인, SSH 접속, 브라우저용 터널 |
 | `이름@sessionquant-paper:~` | 운영 VM 내부 | 프로그램 상태·로그 확인, 업데이트, 종료 |
+| `C:\Users\이름>` | Windows CMD / Google Cloud SDK Shell | VM 시작·SSH 접속 |
 | 로컬 PC의 PowerShell | 본인 PC | 로컬 실행 또는 PC용 SSH 터널 |
 
 Cloud Shell과 운영 VM은 다른 컴퓨터입니다. `gcloud compute ssh ... -L ...`로 **Cloud Shell의 웹 미리보기**를 열 때는 `@cloudshell`에서 실행합니다. VM 안에서 자기 자신에게 같은 터널을 열지 않습니다. `tmux`는 터미널 작업을 유지하는 도구이며 프로그램의 실행 상태를 뜻하지 않습니다.

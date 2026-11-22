@@ -1,16 +1,13 @@
-# 과거 개발 기록
+# 이전 버전 문서
 
-**이 폴더의 문서는 작성 당시의 기록이며 현재 실행 지침이 아닙니다.** 제목에 `CURRENT`, `README`, `운영`, `완료`가 있어도 그 시점의 의미입니다. 옛 명령·설정·복구 절차를 그대로 실행하지 말고 [현재 프로젝트 소개](../../README.md)와 [현재 문서 안내](../README.md)에서 필요한 절차를 찾으세요.
+이전 설계·단계별 완료 보고·옛 README와 인수인계는 현재 사용법과 중복되고 설정이 달라, 작업 트리에서 정리했습니다. **내용은 Git 이력에 남아 있습니다.** 아래 링크는 정리 직전 커밋을 고정하므로 이후 main 변경의 영향을 받지 않습니다.
 
-| 보관 위치 | 담긴 내용 |
+| 과거 자료 | 보존된 원문 |
 | --- | --- |
-| [legacy](legacy) | 저가주 중심 PennyQuant 기획, 초기 전략·화면·실행 안내 |
-| [PROJECT_DIRECTION](PROJECT_DIRECTION.md), [PHASES](PHASES.md) | S&P 500 방향 전환 당시 요구사항과 단계 구분 |
-| [stages](stages) | 감시 목록·시장 데이터·모의 체결·전략·뉴스·LLM·후보 선정·대시보드의 당시 구현 기록 |
-| [REVIEW_00_08](REVIEW_00_08.md), [REVISION_00_04_AUDIT](REVISION_00_04_AUDIT.md) | 해당 시점의 검토 항목·수정 근거·검사 결과 |
-| [2026-11-20 프로젝트 점검](PROJECT_REVIEW_20261120.md) | 분봉 조회·호가 충돌·AI 설명·백업·자료 정리의 재현 오류와 후속 개선 항목 |
-| [이전 README](README_2026-11-15.md), [이전 HANDOFF](HANDOFF_2026-11-15.md) | 문서 정리 전의 상세 프로젝트 소개와 인수인계 |
+| 초기 PennyQuant 기획·전략·Windows 실행법 | [legacy 폴더](https://github.com/taegyoo1104/pennyquant/tree/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/legacy) |
+| 단계 01~08 설계·검증 보고 | [stages 폴더](https://github.com/taegyoo1104/pennyquant/tree/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/stages) |
+| 이전 README·인수인계·기획 변경·점검 보고 | [전체 과거 문서](https://github.com/taegyoo1104/pennyquant/tree/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive) |
 
-100개·50개 후보, 집중 20개·10개, 과거 거래량 조건, REST·웹소켓 등은 개발 중 바뀌었다. 변경 이유는 [프로젝트가 바뀌어 온 과정](../PROJECT_STORY.md), 현재 전략은 [전략 실험 안내](../STRATEGY_LAB.md), 다음 개발 작업은 [최신 HANDOFF](../../HANDOFF.md)를 따른다.
+과거 문서의 ‘현재’, ‘완료’, 테스트 수, 명령·설정은 **작성 당시**의 의미입니다. 지금 운영할 때는 [현재 문서 목록](../README.md)을 사용하세요.
 
-기존 본문은 당시 판단을 추적할 수 있도록 보존했다. 테스트 통과·승인 대기·장애 상태도 현재 상태를 보장하지 않으며, 별도 실거래 기능의 과거 문서가 현재 모의매매 실행에 대한 실주문 승인을 뜻하지 않는다.
+기획이 바뀐 이유와 직접 제안한 개선은 [프로젝트 이야기](../PROJECT_STORY.md), 현재 판단 기준은 [매매 과정](../TRADING_PROCESS.md), 개발 시 유지할 사항은 [HANDOFF](../../HANDOFF.md)에 정리합니다. 장애 복구와 기존 VM 이전 절차는 현재 docs에 별도로 남겨 두었습니다.
