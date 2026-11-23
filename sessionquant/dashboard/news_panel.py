@@ -83,6 +83,8 @@ def provider_rows(status):
 def render_news_diagnostics(data):
     import streamlit as st
     from .session_app import _table, timestamp
+    from .news_queue_panel import render_news_queue
+    render_news_queue(data.news_status)
     now = datetime.now(timezone.utc)
     report=data.news_flow
     if report:

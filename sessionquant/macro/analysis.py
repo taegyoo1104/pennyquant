@@ -48,6 +48,7 @@ class BudgetedAnalyzer:
         if generation_call_limit is not None and (type(generation_call_limit) is not int or generation_call_limit < 1):
             raise ValueError('진단 생성 호출 한도는 양의 정수여야 합니다.')
         self.generation_call_limit = generation_call_limit
+        self.regular_session_only = False
         self.generation_calls = 0
         self.repo, self.settings = repository, settings or LLMSettings()
         self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
@@ -76,6 +77,10 @@ class BudgetedAnalyzer:
             max_age_hours=self.max_age_hours) for stage in self._adapters}
 
     def _check_health(self):
+        if self.regular_session_only:
+            from ..news.analysis_queue import session_phase
+            if session_phase(self._clock()) != 'REGULAR':
+                raise BudgetBlocked('정규장 시작 후 AI 분석을 요청합니다.', code='MARKET_CLOSED')
         health=self.repo.get_control("llm_provider_health",{})
         if health.get("code") not in {None,"AVAILABLE","UNKNOWN"} and health.get("retry_after"):
             if utc(health["retry_after"])>utc(self._clock()):
