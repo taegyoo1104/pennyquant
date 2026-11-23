@@ -82,10 +82,11 @@ def render_selection(frame):
             if row.get('allocation_reason'):
                 codes.append(row['allocation_reason'])
             for reason in blocker_details(codes):
-                reasons.append({'종목': row.get('symbol'), '구분': reason['category'], '대기 이유': reason['label'],
-                                '사유 코드': reason['code']})
-        # Codes are validated by blocker_details. Preserve them for diagnosis rather
-        # than translating unknown identifiers back to a generic placeholder.
+                detail = {'종목': row.get('symbol'), '구분': reason['category'], '대기 이유': reason['label']}
+                # Internal identifiers belong only in explicitly enabled diagnostics.
+                if st.session_state.get('dashboard_raw_data', False):
+                    detail['사유 코드'] = reason['code']
+                reasons.append(detail)
         if reasons:
             st.dataframe(reasons, hide_index=True, width='stretch')
         else:

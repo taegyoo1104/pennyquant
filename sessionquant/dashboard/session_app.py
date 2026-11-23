@@ -455,7 +455,7 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                 from sessionquant.dashboard.market_quality_panel import render_quality_details
                 render_quality_details(data.market_quality, data.market_performance, show_benchmarks=show_benchmarks)
             if panel == '처리 속도' and available('candle_incidents'):
-                from .candle_incidents import render_incidents
+                from sessionquant.dashboard.candle_incidents import render_incidents
                 render_incidents(data.candle_incidents)
             from sessionquant.dashboard.market_quality_panel import render_watchlist_rvol
             if market_section('거래량 비교') and available('watchlist_rvol', 'history_backfill'):
