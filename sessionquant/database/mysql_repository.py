@@ -93,7 +93,7 @@ class MySQLRepository:
             raise
 
     @timed('db_query')
-    def _execute(self, sql: str, params=(), *, fetch: str | None = None):
+    def _execute(self, sql: str, params=(), *, fetch: str | None = None, optional_observation=False):
         with database_query(sql,self.kinds), self._mutex:
             try:
                 with self.db.cursor() as cursor:
@@ -106,7 +106,10 @@ class MySQLRepository:
             except self._driver_errors as exc:
                 failure = MySQLRepositoryError(exc, sql.lstrip().split(None,1)[0].upper() if sql.strip() else 'QUERY')
                 # 종료 중 후속 오류가 발생해도 최초 실패 번호를 확인할 수 있게 한다.
-                logging.getLogger(__name__).warning('%s', failure)
+                if optional_observation:
+                    logging.getLogger(__name__).warning('자료 정리 보조 통계 조회 실패 (삭제 작업과 별도): %s', failure)
+                else:
+                    logging.getLogger(__name__).warning('%s', failure)
                 raise failure from None
 
     def _create_tables(self):

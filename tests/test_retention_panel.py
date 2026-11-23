@@ -98,6 +98,21 @@ def test_future_naive_and_missing_run_times_do_not_look_recent():
         assert retention_summary(saved, NOW)['age'] in {'미확인', '시각 확인 필요'}
 
 
+@pytest.mark.parametrize('stage', ['GENERATION', 'GENERATION_KEYS', 'GENERATION_PAYLOAD'])
+def test_growth_timeout_preserves_clear_backlog_and_names_optional_failure(stage):
+    saved = report(backlog_status='CLEAR', eligible_backlog_min=0, stop_reason='PASS_COMPLETE')
+    saved['tables'] = {'research_events': {'deleted': 2, 'observation': {
+        'backlog_status': 'CLEAR', 'eligible_rows_min': 0, 'backlog_exact': True,
+        'status': 'FAILED', 'error_details': {'stage': stage, 'code': 3024},
+        'generation': {'rows_min': None, 'exact': False}}}}
+    summary = retention_summary(saved, NOW)
+    assert summary['pass_status'] == '검사 순회 완료' and summary['backlog'] == '0행'
+    assert summary['observation_issues'] == 1
+    row = summary['tables'][0]
+    assert row['신규 저장 관측'] == '미확인' and row['남은 정리 대상'] == '0행'
+    assert row['보조 통계 상태'] == '신규 저장 집계 시간 초과 · 정리 결과와 별도'
+
+
 def test_render_handles_saved_report_without_database_reads(monkeypatch):
     def unexpected(*args, **kwargs):
         raise AssertionError('retention presentation must not read a database')

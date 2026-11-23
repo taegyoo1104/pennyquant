@@ -65,6 +65,20 @@ def _days(value):
     return f'{number:.1f}일' if number is not None else '미확인'
 
 
+def observation_status(observation):
+    stage = _mapping(observation.get('error_details')).get('stage', '')
+    if observation.get('status') == 'FAILED':
+        target = ('신규 저장 집계' if stage in {'GENERATION', 'GENERATION_KEYS', 'GENERATION_PAYLOAD'}
+                  else '남은 대상 집계' if stage in {'BACKLOG', 'BACKLOG_VALIDATION'} else '보조 통계')
+        timed_out = _mapping(observation.get('error_details')).get('code') == 3024
+        return target + (' 시간 초과' if timed_out else ' 확인 실패') + ' · 정리 결과와 별도'
+    if observation.get('status') in {'BUDGET_EXHAUSTED', 'SKIPPED_BUDGET'}:
+        return '검사 한도로 통계 일부 미확인'
+    if observation.get('status') == 'COMPLETE':
+        return '작게 나눠 재조회 완료' if observation.get('generation_read_splits') else '확인 완료'
+    return '기록 없음'
+
+
 def retention_summary(report, now=None):
     """Keep pass completion, measured backlog and missing observations distinct."""
     report = _mapping(report)
@@ -103,12 +117,14 @@ def retention_summary(report, now=None):
         'oldest_eligible_age': _days(observed.get('oldest_eligible_age_days')),
         'stop_reason': {'ROW_LIMIT': '검사 행 수 한도 도달', 'TIME_LIMIT': '검사 시간 한도 도달',
                         'QUERY_TIMEOUT': 'DB 조회 시간 초과 · 정리 미완료', 'PASS_COMPLETE': '이번 검사 순회 종료'}.get(observed.get('stop_reason'), '종료 사유 미기록'),
-        'tables': [],
+        'tables': [], 'observation_issues': 0,
     }
     for kind, raw in _mapping(report.get('tables')).items():
         table = _mapping(raw)
         observation = _mapping(table.get('observation'))
         generation = _mapping(observation.get('generation'))
+        if observation.get('status') in {'FAILED', 'BUDGET_EXHAUSTED', 'SKIPPED_BUDGET'}:
+            summary['observation_issues'] += 1
         interval = _number(generation.get('interval_seconds'))
         summary['tables'].append({
             '자료': KINDS.get(kind, '기타 보관 자료'),
@@ -118,6 +134,7 @@ def retention_summary(report, now=None):
             '신규 저장 관측': _rows(generation.get('rows_min'), exact=generation.get('exact') is True),
             '신규 관측 기간': _duration(interval) if interval else '기준 미확인',
             '신규 관측 시각': _timestamp(generation.get('measured_at')),
+            '보조 통계 상태': observation_status(observation),
         })
     return summary
 
@@ -136,6 +153,8 @@ def render_retention(st, report):
     st.write(f"{summary['pass_status']} · 검사 {summary['scanned']} · 삭제 {summary['deleted']}")
     st.caption(f"남은 정리 대상 {summary['backlog']} · 확인한 대상의 최대 나이 {summary['oldest_eligible_age']}")
     st.caption(f"{summary['stop_reason']} · 한 번의 검사 한도 {summary['limit']}")
+    if summary['observation_issues']:
+        st.caption(f"보조 통계 {summary['observation_issues']}개 자료에서 일부 미확인 · 자료 정리 결과와 구분합니다. 아래 상태를 확인하세요.")
     if summary['tables']:
         st.dataframe(summary['tables'], hide_index=True, width='stretch')
     st.caption('순회 완료는 남은 정리 대상이 없다는 뜻이 아닙니다. 최소 수량은 확인한 하한이며, 미확인은 0이 아닙니다. '
