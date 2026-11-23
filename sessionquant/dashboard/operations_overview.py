@@ -137,8 +137,8 @@ def render_operations(data, view, path, *, panel=None):
         render_home_news(data)
         return
     now = datetime.now(timezone.utc)
-    st.markdown('<div class="sq-hero"><div><div class="sq-eyebrow">SESSIONQUANT</div>'
-        '<h1>나의 전략, 오늘의 흐름</h1><p>'+escape(market_hours_label(now))+'</p></div>'
+    st.markdown('<div class="sq-hero"><div><h1>SESSIONQUANT</h1>'
+        '<p>'+escape(market_hours_label(now))+'</p></div>'
         '<span class="sq-pill">모의매매</span></div>', unsafe_allow_html=True)
     if data.connected:
         try:
