@@ -81,6 +81,7 @@ class NewsService:
         self._events: dict[str, NewsEvent] = {}
         self._documents: dict[str, NewsEvent] = {}
         self.analyses: dict[str, NewsAnalysis] = {}
+        self.analysis_queue = None
 
     @property
     def events(self) -> list[NewsEvent]:
@@ -99,14 +100,19 @@ class NewsService:
         from .intake import company_reason,archive
         analyzed_at = max(now, utc(self.clock()))
         reason=company_reason(event,symbol,kind,primary,analyzed_at,getattr(self.analyzer,'max_age_hours',24))
+        receipt = None
         if self.repo:
             from ..models import jsonable
-            archive(self.repo,jsonable(event),provider=kind,reason=reason,ticker=symbol)
+            receipt = archive(self.repo,jsonable(event),provider=kind,reason=reason,ticker=symbol)
         if reason:
             precheck=self.analyzer.record_skip(event,reason,ticker=symbol,source_kind=kind) if hasattr(self.analyzer,'record_skip') else None
             result = NewsAnalysis(symbol, event, source_kind=kind, analyzed_at=analyzed_at,
                 error=reason, reason='뉴스의 출처·종목·시각·본문 확인이 필요합니다.',
                 input_digest=event_digest(event, symbol),precheck_id=precheck)
+        elif self.analysis_queue is not None:
+            self.analysis_queue.enqueue(receipt, kind='company', ticker=symbol,
+                                        primary=primary, now=analyzed_at)
+            return None
         else:
             result = await self.analyzer.analyze(event, symbol, source_kind=kind, primary_verified=primary,
                                                  now=analyzed_at)

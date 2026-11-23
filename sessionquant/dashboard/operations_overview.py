@@ -44,7 +44,7 @@ def operation_cards(data, view, now=None):
     warmup = data.warmup
     status, current = current_status(data.watchlist_state, now)
     phase = warmup.get('status')
-    selection = {'label':'종목', 'value':'확인 대기', 'detail':'감시 목록과 분봉을 확인합니다.', 'warning':False,
+    selection = {'label':'종목', 'value':'자료 준비 대기', 'detail':'감시 목록·분봉 준비 결과가 아직 없습니다.', 'warning':False,
                  'help':'분봉 준비는 매수 허가가 아닙니다. 전략·위험 조건도 통과해야 합니다.'}
     if not online:
         selection.update(value='저장 기록' if warmup else '기록 없음', detail='프로그램 연결 후 다시 확인합니다.')
@@ -240,6 +240,8 @@ def render_home_news(data):
     import streamlit as st
     from .explanation_panel import render_explanation_summary
     from .overview import link
+    from .news_queue_panel import render_news_queue
+    render_news_queue(data.news_status)
     render_explanation_summary(data.strategy_explanation)
     with st.expander('뉴스·AI 수집 현황'):
         render_operation_cards(data, {'quotes': {}}, news_only=True)

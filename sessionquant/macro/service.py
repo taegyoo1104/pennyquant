@@ -23,7 +23,8 @@ class NewsPipeline:
                  macro_refresh_seconds: float = 900, company_refresh_seconds=180, calendar_refresh_seconds=3600,
                  company_max_age_hours=24,macro_max_age_hours=72,calendar_client=None,calendar_enabled=False,
                  enrichment_policies=None,weekend_slowdown=False,enrichment_min_chars=300,enrichment_min_sentences=3,clock=None,
-                 audit_settings=None,macro_context_llm=None,environment='PAPER_LOCAL'):
+                 audit_settings=None,macro_context_llm=None,environment='PAPER_LOCAL',
+                 regular_session_analysis=False):
         import math
         if (isinstance(macro_refresh_seconds,bool) or not isinstance(macro_refresh_seconds,(int,float))
                 or not math.isfinite(macro_refresh_seconds) or not 300 <= macro_refresh_seconds <= 86400):
@@ -50,6 +51,13 @@ class NewsPipeline:
         if hasattr(self.analyzer,'max_age_hours'):self.analyzer.max_age_hours=company_max_age_hours
         self.company = company_service or NewsService(companies or {}, analyzer=self.analyzer,
             include_alpaca=include_alpaca, clock=self.clock,repository=repository)
+        self.analysis_queue = None
+        if regular_session_analysis:
+            self.analyzer.regular_session_only = True
+            from ..news.analysis_queue import NewsAnalysisQueue
+            self.analysis_queue = NewsAnalysisQueue(repository, clock=self.clock, version=self.analysis_version,
+                company_max_age=company_max_age_hours, macro_max_age=macro_max_age_hours)
+            self.company.analysis_queue = self.analysis_queue
         self.official = official_client or OfficialNewsClient(repository=repository)
         self.gdelt = gdelt_client or GDELTClient(repository=repository)
         self.fred = fred_client or FREDClient()
@@ -129,9 +137,41 @@ class NewsPipeline:
         results = await self.company.refresh(symbols, utc(now or self.clock()))
         for event in self.company.events:self.repo.record('news_events',event)
         for result in results:
+            if result is None:
+                continue  # collected and queued; no analysis has taken place yet
             row=result.to_dict();row.update(id=row['analysis_id'],category='company')
             self.repo.record('news_analysis',row);self._analyses[row['id']]=row
         return results
+
+    async def _analyze_queued(self, article, item, now):
+        from ..news.analysis_queue import session_phase
+        from ..news.intake import macro_reason
+        if item['kind'] == 'company':
+            result = await self.analyzer.analyze(article, item['ticker'], source_kind=item['provider'],
+                primary_verified=item['primary'], now=now)
+            row = result.to_dict()
+            row.update(id=row['analysis_id'], category='company')
+            self.repo.record('news_analysis', row)
+            self._analyses[row['id']] = row
+            return row.get('error', '')
+        if article.discovery_source == 'gdelt':
+            # Publisher body retention remains HASH_AND_METADATA_ONLY. Re-fetch
+            # permitted source text only when this queued item is selected.
+            _, article = await self.enricher.enrich(article)
+            if article is None:
+                return 'analysis_retry'
+        now = max(now, utc(self.clock()))
+        if session_phase(now) != 'REGULAR':
+            return 'analysis_retry'
+        reason = macro_reason(article, now, self.macro_max_age_hours)
+        if reason:
+            return reason
+        analysis = await self.analyzer.analyze_macro(article, now=now)
+        from datetime import timedelta
+        if now - article.published_at > timedelta(hours=24):
+            analysis = {**analysis, 'context_only': True}
+        self._store_macro(article, analysis)
+        return analysis.get('error', '')
 
     async def refresh(self, symbols, *, held_symbols=(),allowlist=(), now=None) -> dict:
         from ..news.intake import macro_reason,archive,statistics
@@ -203,13 +243,20 @@ class NewsPipeline:
                     'category':'macro','error':reason or 'duplicate_article','status':'UNKNOWN','force_liquidation':False,
                     'precheck_id':precheck,'llm_call_ids':[]}
                 self._store_macro(article,analysis);continue
-            candidates.append(article)
+            if self.analysis_queue:
+                self.analysis_queue.enqueue(receipt, kind='macro', now=max(now, utc(self.clock())),
+                                            fingerprint_raw=article.to_dict())
+            else:
+                candidates.append(article)
         # 시간창 검사가 공식성보다 앞선다. 최근 2시간을 우선하며 과거 24~72시간은 배경이다.
         candidates.sort(key=lambda a:((now-a.published_at).total_seconds()<=7200,a.published_at,a.official),reverse=True)
         for article in candidates[:40]:
             analysis=await self.analyzer.analyze_macro(article,now=max(now,utc(self.clock())))
             if now-article.published_at>timedelta(hours=24):analysis={**analysis,'context_only':True}
             self._store_macro(article,analysis)
+        if self.analysis_queue:
+            await self.analysis_queue.drain(self._analyze_queued, held=held_symbols, focused=symbols,
+                                            now=max(now, utc(self.clock())))
         if self.calendar and self.schedule.claim('calendar_cycle',calendar_interval,now):
             try:
                 values=await self.calendar.fetch()
@@ -237,12 +284,15 @@ class NewsPipeline:
             'force_liquidation':False,'llm_health':self.repo.get_control('llm_provider_health',{}),
             'schedule':self.schedule.state,'statistics':statistics(self.repo.recent('news_ingestions',limit=2000),now),
             'intervals':{'company':company_interval,'macro':macro_interval,'calendar':calendar_interval,'fred':86400}}
+        if self.analysis_queue:
+            self.status['analysis_queue'] = self.analysis_queue.snapshot()
         self.repo.set_control('session_news_status',self.status)
         from .context import build_context
         context_at=max(now,utc(self.clock()))
         snapshot=build_context(self.repo,context_at,analyses=self._analyses.values(),events=self.economic_events_at(context_at))
         self.repo.record('macro_context_snapshots',snapshot)
-        if self.context_analyzer.settings.enabled:
+        from ..news.analysis_queue import session_phase
+        if self.context_analyzer.settings.enabled and (not self.analysis_queue or session_phase(context_at) == 'REGULAR'):
             try:
                 await self.context_analyzer.analyze(snapshot,candidates,self._analyses.values(),
                     market_regime=self.repo.get_control('sessionquant_context',{}).get('market_regime'),now=context_at)

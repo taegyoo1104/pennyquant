@@ -175,7 +175,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                                     enrichment_min_chars=config.news_enrichment.get('min_chars',300),
                                     enrichment_min_sentences=config.news_enrichment.get('min_sentences',3),
                                     audit_settings=config.llm_debug_audit,macro_context_llm=config.macro_context_llm,
-                                    environment=config.environment)
+                                    environment=config.environment,regular_session_analysis=True)
             from .trading_controls import begin_session
             control_state=begin_session(repo,mode="paper")
             from .trading_controls import finish_session
@@ -265,7 +265,9 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     from .macro.analysis import BudgetedAnalyzer
                     from .macro.models import LLMSettings
                     explanation_owner=BudgetedAnalyzer(repo,LLMSettings.from_dict(config.llm))
-                explainer=StrategyExplainer(repo,news.analyzer if news else explanation_owner,config.strategy_explanation)
+                    explanation_owner.regular_session_only = True
+                explainer=StrategyExplainer(repo,news.analyzer if news else explanation_owner,
+                    {**config.strategy_explanation, 'regular_session_only': True})
             print("PAPER_LOCAL 실행 중입니다. 실제 주문은 비활성화되어 있습니다.", flush=True)
             next_account=0.
             cycles, next_market, next_news, next_tick, next_universe = 0, 0., 0., 0., time.monotonic() + 86400
