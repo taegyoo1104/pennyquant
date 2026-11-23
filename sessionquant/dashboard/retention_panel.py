@@ -62,7 +62,7 @@ def _age(value, now):
 
 def _days(value):
     number = _number(value)
-    return f'{number:.1f}일' if number is not None else '미확인'
+    return f'{number:.1f}일 전 기록' if number is not None else '미확인'
 
 
 def observation_status(observation):
@@ -114,7 +114,7 @@ def retention_summary(report, now=None):
         'limit': _rows(policy.get('max_rows')),
         'intraday_auxiliary': policy.get('intraday_auxiliary') is True,
         'backlog': _rows(observed.get('eligible_backlog_min'), exact=backlog == 'CLEAR'),
-        'oldest_eligible_age': _days(observed.get('oldest_eligible_age_days')),
+        'oldest_eligible_age': '해당 없음' if backlog == 'CLEAR' else _days(observed.get('oldest_eligible_age_days')),
         'stop_reason': {'ROW_LIMIT': '검사 행 수 한도 도달', 'TIME_LIMIT': '검사 시간 한도 도달',
                         'QUERY_TIMEOUT': 'DB 조회 시간 초과 · 정리 미완료', 'PASS_COMPLETE': '이번 검사 순회 종료'}.get(observed.get('stop_reason'), '종료 사유 미기록'),
         'tables': [], 'observation_issues': 0,
@@ -129,7 +129,7 @@ def retention_summary(report, now=None):
         summary['tables'].append({
             '자료': KINDS.get(kind, '기타 보관 자료'),
             '남은 정리 대상': _rows(observation.get('eligible_rows_min'), exact=observation.get('backlog_exact') is True),
-            '확인한 대상의 최대 나이': _days(observation.get('oldest_eligible_age_days')),
+            '가장 오래된 정리 대상': '해당 없음' if observation.get('backlog_status') == 'CLEAR' else _days(observation.get('oldest_eligible_age_days')),
             '이번 삭제': _rows(table.get('deleted')),
             '신규 저장 관측': _rows(generation.get('rows_min'), exact=generation.get('exact') is True),
             '신규 관측 기간': _duration(interval) if interval else '기준 미확인',
@@ -151,7 +151,7 @@ def render_retention(st, report):
                    '체결·손익·재시작 장부와 전략용 과거 분봉은 보존합니다. DB 파일 크기가 즉시 줄어드는 것은 아닙니다.')
     st.caption(f"마지막 정리 시작 {summary['last_started_at']} · {summary['age']}")
     st.write(f"{summary['pass_status']} · 검사 {summary['scanned']} · 삭제 {summary['deleted']}")
-    st.caption(f"남은 정리 대상 {summary['backlog']} · 확인한 대상의 최대 나이 {summary['oldest_eligible_age']}")
+    st.caption(f"남은 정리 대상 {summary['backlog']} · 가장 오래된 정리 대상 {summary['oldest_eligible_age']}")
     st.caption(f"{summary['stop_reason']} · 한 번의 검사 한도 {summary['limit']}")
     if summary['observation_issues']:
         st.caption(f"보조 통계 {summary['observation_issues']}개 자료에서 일부 미확인 · 자료 정리 결과와 구분합니다. 아래 상태를 확인하세요.")
