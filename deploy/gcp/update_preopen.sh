@@ -13,6 +13,7 @@ for unit in sessionquant-market-close.service sessionquant-cost-guard.service se
 done
 sq_target=$1
 sq_mode=${2:-}
+sq_reuse=false
 sq_resume=false
 if [[ "$sq_mode" == --resume-retention || "$sq_mode" == --resume-off-hours ]]; then sq_resume=true; fi
 if [[ "$sq_mode" == --resume-off-hours ]]; then sq_mode=--off-hours; fi
@@ -108,8 +109,13 @@ if [[ "$sq_resume" == true ]]; then
     # unchanged OFFLINE heartbeat rather than fabricating a new receipt.
     sq_previous_backup="RESUME $sq_resume_receipt"
     echo '성공한 최근 백업을 확인했습니다. 중단된 자료 정리 단계부터 재개합니다.'
+elif [[ -f /etc/sessionquant/nightly-checkpoint.json ]] &&
+    python3 "$sq_stage/deploy/gcp/nightly_checkpoint.py" verify; then
+    sq_reuse=true
+    echo '야간 정리·최종 백업 이후 변경 없음 확인: 전체 백업을 재사용합니다.'
 else
-    bash deploy/gcp/backup.sh < /dev/null
+    echo '재사용 가능한 야간 백업 없음: 이번에는 새 백업을 만듭니다.'
+    timeout --kill-after=30 5400 bash deploy/gcp/backup.sh < /dev/null
 fi
 install -d -m 700 /var/lib/sessionquant/update-backups
 sq_backup="/var/lib/sessionquant/update-backups/$(date -u +%Y%m%dT%H%M%SZ)-${sq_target:0:12}"
@@ -125,12 +131,24 @@ for path in deploy/gcp/sessionquant*.service deploy/gcp/sessionquant*.timer; do
 done
 systemctl daemon-reload
 "${compose[@]}" up -d --wait --wait-timeout 180 db < /dev/null
+# Invalidate proof before any migration/runtime writes. Verification happened
+# with the old namespace, files, database instance and sealed state unchanged.
+if [[ "$sq_reuse" == true ]]; then
+    python3 deploy/gcp/nightly_checkpoint.py verify
+fi
+if [[ -e /etc/sessionquant/nightly-seal.json ]]; then
+    python3 deploy/gcp/nightly_checkpoint.py writable
+fi
 # The app is stopped and its original ledger has been backed up. Preserve the
 # strict restart-settings guard; upgrade only the reviewed, flat Paper profile.
 "${compose[@]}" run --rm --no-deps -T app python -m sessionquant.portfolio.position_limit_upgrade < /dev/null
-# The new policy runs only after this update's successful backup, with the app
-# still stopped. Bounded passes may leave a backlog; no physical table rebuild.
-bash deploy/gcp/retention_after_update.sh "$sq_previous_backup" < /dev/null
+# Preserve explicit interrupted-retention recovery; ordinary deployment never
+# repeats cleanup. Storage checks still gate startup when space is inadequate.
+if [[ "$sq_resume" == true ]]; then
+    bash deploy/gcp/retention_after_update.sh "$sq_previous_backup" < /dev/null
+else
+    echo '낮 업데이트 자료 정리는 장 마감 작업으로 넘깁니다. 정리 정책 변경도 다음 마감에 적용합니다.'
+fi
 systemctl enable sessionquant.service
 systemctl disable --now sessionquant-cost-guard.timer
 if [[ "$sq_mode" == --off-hours ]]; then

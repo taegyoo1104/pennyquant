@@ -68,9 +68,10 @@ def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,fai
     executable(root/'deploy/gcp/backup.sh',f'echo backup >> "$CALLS"\nexit {int(failed_backup)}\n')
     executable(root/'deploy/gcp/retention_after_update.sh','echo retention >> "$CALLS"\n')
     executable(root/'deploy/gcp/inspect.sh','echo inspection >> "$CALLS"\n')
+    (root/'deploy/gcp'/'nightly_checkpoint.py').write_text('pass\n')
     script=tmp_path/'stop.sh'
     # The disposable copy cannot execute host poweroff or access production paths.
-    body=(DEPLOY/'stop.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
+    body=(DEPLOY/'stop.sh').read_text().replace('/opt/sessionquant',str(root)).replace('/run/sessionquant-update.lock',str(tmp_path/'update.lock')).replace(
         '/run/sessionquant-stop.lock',str(tmp_path/'stop.lock')).replace('/usr/bin/systemctl',str(bindir/'systemctl')).replace(
         '/etc/sessionquant',str(tmp_path/'etc'))
     script.write_text(body)
@@ -80,7 +81,8 @@ def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,fai
     lines=calls.read_text().splitlines()
     assert 'stop -t 180 app' in lines[1]
     assert 'systemctl stop sessionquant-market-close.timer' in lines[0]
-    assert lines.index('backup')<next(i for i,line in enumerate(lines) if 'down --timeout 120' in line)
+    assert lines.index('backup') < lines.index('inspection')
+    assert not any('down --timeout' in line for line in lines)
     assert ('retention' in lines) is (not failed_backup)
     if not failed_backup: assert lines.index('backup') < lines.index('retention')
     assert lines[-2:]==['sync','inspection']
@@ -96,6 +98,7 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     root=tmp_path/'repo';root.mkdir()
     (root/'deploy/gcp').mkdir(parents=True)
     executable(root/'deploy/gcp/inspect.sh','echo inspection >> "$CALLS"\n')
+    (root/'deploy/gcp'/'nightly_checkpoint.py').write_text('pass\n')
     calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
     executable(bindir/'docker',f'echo "docker $*" >> "$CALLS"\nif [[ "$1" == run ]]; then echo {delay}; exit {int(error)}; fi\n')
     executable(bindir/'systemctl','echo "systemctl $*" >> "$CALLS"\nif [[ "$1" == is-active ]]; then exit 3; fi\n')
@@ -317,7 +320,7 @@ def test_start_deadlines_cover_database_and_application_health_startup():
     app=compose['services']['app']['healthcheck'];db=compose['services']['db']['healthcheck']
     seconds=lambda value:int(str(value).removesuffix('s'))
     probe_budget=lambda cfg:(seconds(cfg['interval'])+seconds(cfg['timeout']))*cfg['retries']
-    wait=int(re.search(r'up -d --wait --wait-timeout (\d+)',(DEPLOY/'start.sh').read_text())[1])
+    wait=int(re.findall(r'up -d --wait --wait-timeout (\d+)',(DEPLOY/'start.sh').read_text())[-1])
     outer=int(re.search(r'TimeoutStartSec=(\d+)',(DEPLOY/'sessionquant.service').read_text())[1])
     assert seconds(app['start_period'])+probe_budget(app)<wait<outer
     assert seconds(db['interval'])*db['retries']+seconds(app['start_period'])+probe_budget(app)<wait
