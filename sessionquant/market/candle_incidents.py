@@ -101,7 +101,8 @@ class CandleIncidents:
                 or (item.get('status') == 'AWAITING_PUBLICATION' and (now-utc(target)).total_seconds() >= 30)):
                 delayed.add(symbol)
         failed = {r['symbol'] for r in reads if r.get('status') != 'ok'}
-        reasons = []
+        conflicts = {s for s in active if state.get('candle_conflicts_v1',{}).get(s,{}).get('count')}
+        reasons = ['CANDLE_CONFLICT'] if conflicts else []
         if delayed:
             reasons.append('CANDLE_LATE')
         if failed:
@@ -111,7 +112,8 @@ class CandleIncidents:
             reasons.append('SLOW_CYCLE')
         if not reasons:
             return None
-        targets = sorted(delayed | failed) or sorted(active)
+        targets = sorted(conflicts) + sorted((delayed | failed)-conflicts)
+        targets = targets or sorted(active)
         symbols = []
         for symbol in targets[:3]:
             item = refresh.get(symbol, {})
@@ -120,7 +122,9 @@ class CandleIncidents:
                 'latest_closed_at': stamp(item.get('latest_closed_at')), 'received_at': stamp(item.get('received_at')),
                 'attempts': number(item.get('attempts')), 'request_started_at': stamp(read.get('started_at')),
                 'request_finished_at': stamp(read.get('observed_at')), 'request_seconds': number(read.get('duration_seconds')),
-                'request_status': code(read.get('status'))})
+                'request_status': code(read.get('status')),
+                'conflicting_minutes': state.get('candle_conflicts_v1',{}).get(symbol,{}).get('count',0),
+                'conflict_at': [stamp(t) for t in state.get('candle_conflicts_v1',{}).get(symbol,{}).get('minutes',[])[:3]]})
         phases = {r.get('phase'): number(r.get('seconds')) for r in performance.get('phases', [])}
         return {'at': now.isoformat(), 'reasons': reasons, 'cycle_seconds': cycle,
             'calls': number(state.get('last_cycle_calls')), 'call_budget': number(state.get('cycle_call_budget')),

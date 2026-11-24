@@ -74,6 +74,7 @@ class TossSessionSource:
         self._metadata_at = {}
         self._slow_cycles = []
         self._seen: dict[str, set[tuple]] = {}
+        self._bar_evidence = {}
         from .candle_incidents import CandleIncidents
         self._candle_incidents = CandleIncidents(watchlist.repo) if watchlist is not None and quote_feed is not None else None
 
@@ -102,14 +103,7 @@ class TossSessionSource:
                 if bounds and bars and min(b.timestamp for b in bars) > bounds[0] and before:
                     previous, _ = await self.client.candles(symbol, count=200, before=utc(before))
                     bars = previous + bars
-                seen = self._seen.setdefault(symbol, set())
-                for bar in bars:
-                    identity = (bar.timestamp, bar.open, bar.high, bar.low, bar.close, bar.volume)
-                    if identity not in seen:
-                        seen.add(identity)
-                        batch.bars.append(bar)
-                if len(seen) > 1000:
-                    self._seen[symbol] = set(sorted(seen, key=lambda item: item[0])[-800:])
+                batch.bars.extend(self._new_bar_observations(symbol, bars))
             except Exception as exc:
                 batch.errors.append({"symbol": symbol, "source": "toss_candles", "error_type": type(exc).__name__,
                                      "message": "확정봉 수집에 실패했습니다"})
@@ -141,13 +135,55 @@ class TossSessionSource:
             'scope':'collector_task','backend':self.watchlist.repo.backend,
             'latest':latest,'slowest_this_process':self._slow_cycles})
         if self._candle_incidents is not None:
+            self._publish_conflicts(utc(self.clock()), priority_symbols)
             self._candle_incidents.observe(self.watchlist.state, latest, utc(self.clock()), priority=priority_symbols)
         return batch
 
     def restore_seen(self, bars):
-        """재시작해도 이미 보존한 분봉의 최초 수신 시각을 유지한다."""
+        """Restore original observations, including revision confirmation receipts."""
+        from .candle_revisions import grouped_minutes
         for symbol, values in bars.items():
-            self._seen[symbol] = {(b.timestamp, b.open, b.high, b.low, b.close, b.volume) for b in values[-20000:]}
+            self._bar_evidence[symbol] = grouped_minutes(values[-20000:])
+            self._seen[symbol] = {(b.timestamp,b.open,b.high,b.low,b.close,b.volume) for b in values[-20000:]}
+
+    def _new_bar_observations(self, symbol, bars):
+        from collections import defaultdict
+        from .candle_revisions import retain_observation, ordered_observations
+        groups = self._bar_evidence.setdefault(symbol, defaultdict(list))
+        accepted = []
+        for bar in ordered_observations(groups, bars):
+            rows = groups[(bar.symbol, bar.timestamp)]
+            if retain_observation(rows, bar):
+                rows.append(bar)
+                accepted.append(bar)
+        if accepted:
+            values = sorted((b for rows in groups.values() for b in rows),
+                            key=lambda b:(b.timestamp,b.received_at))[-20000:]
+            from .candle_revisions import grouped_minutes
+            self._bar_evidence[symbol] = grouped_minutes(values)
+            self._seen[symbol] = {(b.timestamp,b.open,b.high,b.low,b.close,b.volume) for b in values}
+        return accepted
+
+    def _conflict_minutes(self, symbol, now):
+        from .candle_revisions import conflict_details
+        bounds = session_bounds(now)
+        if not bounds:
+            return set()
+        groups = self._bar_evidence.get(symbol,{})
+        return set(conflict_details([b for (_, stamp), rows in groups.items()
+            if bounds[0] < stamp <= bounds[1] and len(rows)>1 for b in rows], now))
+
+    def _usable_seen_minutes(self, symbol, now):
+        return {row[0] for row in self._seen.get(symbol,set())} - self._conflict_minutes(symbol,now)
+
+    def _publish_conflicts(self, now, priority=()):
+        active = set(priority) | {r['ticker'] for r in self.watchlist.state.get('focus',[]) if r.get('ticker')}
+        details = {}
+        for symbol in active:
+            stamps = sorted(self._conflict_minutes(symbol,now))
+            if stamps:
+                details[symbol] = {'count':len(stamps),'minutes':[t.isoformat() for t in stamps[:3]]}
+        self.watchlist.state['candle_conflicts_v1'] = details
 
     async def _managed_poll(self, now=None, *, priority_symbols=()):
         from ..watchlist.budget import ReadCallBudget, ReadBudgetExceeded, retry_budget, provider_retry_until
@@ -307,14 +343,7 @@ class TossSessionSource:
                 state['history_persistence_seconds'] = round(
                     state.get('history_persistence_seconds',0)+elapsed,3)
                 updated_history.add(symbol)
-            seen = self._seen.setdefault(symbol,set())
-            for bar in bars:
-                identity = (bar.timestamp,bar.open,bar.high,bar.low,bar.close,bar.volume)
-                if identity not in seen:
-                    seen.add(identity)
-                    (batch.cached_bars if cached else batch.bars).append(bar)
-            if len(seen) > 20000:
-                self._seen[symbol] = set(sorted(seen,key=lambda x:x[0])[-20000:])
+            (batch.cached_bars if cached else batch.bars).extend(self._new_bar_observations(symbol, bars))
             if bars and not cached:
                 state.setdefault('last_detail_success',{})[symbol] = utc(self.clock()).isoformat()
 
@@ -373,11 +402,12 @@ class TossSessionSource:
             bounds = session_bounds(stamp)
             if bounds and bars and cursor:
                 oldest = min(b.timestamp for b in bars)
-                minutes = {row[0] for row in self._seen[symbol]}
+                conflicts = self._conflict_minutes(symbol,utc(self.clock()))
+                minutes = self._usable_seen_minutes(symbol,utc(self.clock()))
                 elapsed = max(0,int((min(stamp,bounds[1])-bounds[0]).total_seconds()//60))
                 gap = next((bounds[0]+timedelta(minutes=i) for i in range(1,elapsed+1)
                             if bounds[0]+timedelta(minutes=i) not in minutes),None)
-                if (gap and oldest > gap and progress.get('current_gap_at') != gap.isoformat()
+                if (gap and oldest > gap and (progress.get('current_gap_at') != gap.isoformat() or gap in conflicts)
                         and (not progress.get('cursor') or utc(progress['cursor']) < gap)):
                     progress.update(cursor=cursor,done=False,status='PAGING',current_gap_at=gap.isoformat())
 
@@ -436,7 +466,7 @@ class TossSessionSource:
                                       before=cursor,symbol=symbol,optional=True)
                 with measure('warmup'):
                     await self.warmup.advance(manager,warmup_read,accept,
-                        lambda symbol:{row[0] for row in self._seen.get(symbol,set())},priority=priority_symbols,
+                        lambda symbol:self._usable_seen_minutes(symbol,utc(self.clock())),priority=priority_symbols,
                         hydrate=lambda symbol,bars:accept(symbol,bars,cached=True))
                 await deliver()
                 if not self.warmup.control.get('data_ready'):

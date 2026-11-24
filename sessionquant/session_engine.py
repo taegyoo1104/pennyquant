@@ -349,6 +349,7 @@ class SessionEngine:
             if frame:
                 self._lab_rows=[{'symbol':r['symbol'],'evaluated_at':frame.get('evaluated_at'),
                     'progress':r.get('indicators',{}).get('strategy_progress',{}),
+                    'bar_conflicts':r.get('indicators',{}).get('data_quality',{}).get('bars',{}).get('conflicting_minutes',0),
                     'signal_present':bool(r.get('signal')),
                     'checks':r.get('indicators',{}).get('strategy_pattern',{}).get('checks',[]),
                     'llm_status':r.get('news_score_signal',{}).get('status','UNKNOWN'),

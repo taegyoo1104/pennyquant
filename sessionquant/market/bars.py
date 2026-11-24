@@ -43,26 +43,16 @@ def available_minutes(bars: list[Bar], now: datetime, symbol: str | None = None)
     if bounds is None:
         return []
     opened, closed = bounds
-    candidates: dict[datetime, Bar] = {}
-    conflicts = set()
+    from .candle_revisions import grouped_minutes, selected_version
     symbols = {b.symbol for b in bars} if symbol is None else {symbol}
     if len(symbols) != 1:
         return []
-    for bar in bars:
-        if bar.symbol not in symbols:
-            continue
-        timestamp, received = utc(bar.timestamp), utc(bar.received_at)
-        if not (opened < timestamp <= closed and timestamp <= received <= now):
-            continue
-        if timestamp.second or timestamp.microsecond:
-            continue
-        previous = candidates.get(timestamp)
-        if previous and (previous.open, previous.high, previous.low, previous.close, previous.volume) != (
-                bar.open, bar.high, bar.low, bar.close, bar.volume):
-            conflicts.add(timestamp)
-        elif previous is None or bar.received_at < previous.received_at:
-            candidates[timestamp] = bar
-    return [candidates[t] for t in sorted(candidates) if t not in conflicts]
+    valid = [b for b in bars if b.symbol in symbols and opened < b.timestamp <= closed
+             and b.timestamp <= b.received_at <= now
+             and not b.timestamp.second and not b.timestamp.microsecond]
+    selected = [selected_version(rows, now) for rows in grouped_minutes(valid).values()]
+    return sorted((b for b in selected if b is not None), key=lambda b: b.timestamp)
+
 
 
 def aggregate_bars(bars: list[Bar], minutes: int, now: datetime, *, symbol: str | None = None) -> list[Bar]:
