@@ -567,10 +567,14 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                  "수량": str(row.get("qty", "")), "체결 수량": str(row.get("filled_qty", "")), "사유": row.get("reason", ""),
                  "생성 시각": timestamp(row.get("created_at"))} for row in order_page], "선택한 조건에서 표시할 주문이 없습니다.")
         if view['environment'] == 'PAPER_LOCAL':
+            from sessionquant.dashboard.trade_reasons import fill_timing_label
             st.caption('모의 체결 모델: '+str(data.context.get('paper_fill_model','기존 기록·미확인'))+' · 접수·지연·유동성은 가정이며 실제 증권사 체결을 보장하지 않습니다.')
+            if data.context.get('submission_quote_buys'):
+                st.caption('신규 모의매수는 주문 시점의 최신 매도 호가에 비용을 반영해 바로 체결을 시도합니다. 수량 부족분은 새 호가를 기다립니다.')
             with st.expander('모의 체결 가정·미체결 근거'):
                 from sessionquant.dashboard.trade_reasons import order_cancellation_details, order_quote_wait_details
                 _table([{'주문 ID':row.get('client_id'), '체결 모델':row.get('fill_model_version','UNKNOWN'),
+                    '체결 방식':fill_timing_label(row),
                     '예상 가격':usd(row.get('expected_price')),'누적 모의 체결가':usd(row.get('simulated_fill_price')),
                     '가정 지연(초)':row.get('assumed_latency'),'가격 차이(bps)':row.get('slippage_bps'),
                     '수수료 항목':row.get('fee_breakdown'),'미체결 사유':row.get('unfilled_reason'),
@@ -578,11 +582,13 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                     **order_quote_wait_details(row)} for row in order_page], '현재 주문 페이지에 표시할 미체결 근거가 없습니다.')
                 st.caption('취소 사유와 마지막 호가 대기 원인을 구분합니다. 대기 시작 당시의 수신·엔진 호가 시각이며, 과거에 남지 않은 원인은 기록 없음으로 표시합니다.')
         with st.expander("체결 기록", expanded=True):
+            from sessionquant.dashboard.trade_reasons import fill_timing_label
             execution_page = trade_page(data.tables['executions'], kind='executions', source_count=trade_source_counts['executions'])
             st.caption('매도 이유는 해당 주문에 기록된 사유입니다. 과거 체결은 연결된 주문에서 확인하며, 근거가 없으면 기록 없음으로 표시합니다.')
             _table([{"종목": row.get("symbol", ""), "방향": row.get("side", ""), "매도 이유": row.get('매도 이유', '기록 없음') if str(row.get('side')).lower()=='sell' else '—', "수량": str(row.get("qty", "")),
                      "가격": usd(row.get("price")), "수수료": usd(row.get("fee")), "체결 시각": timestamp(row.get("timestamp")),
                      '체결 모델':row.get('fill_model_version','실제 브로커' if row.get('execution_mode')=='live' else 'UNKNOWN'),
+                     '체결 방식':fill_timing_label(row),
                      '예상 가격':usd(row.get('expected_price')),'가격 차이(bps)':row.get('slippage_bps'),
                      "체결 ID": row.get("id", "")} for row in execution_page], "선택한 조건에서 표시할 체결이 없습니다.")
         st.markdown("**운영 경고**")

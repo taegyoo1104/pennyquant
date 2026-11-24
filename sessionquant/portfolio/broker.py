@@ -169,6 +169,24 @@ class PaperBroker:
             order.lifecycle.append({'status':status,'event':event or status,'observed_at':aware(now).isoformat(),
                 'source':'paper_assumption','fill_model_version':order.fill_model_version})
 
+    def submit_buy_with_quote(self, intent, quote, now, *, paper_tradable=None, buy_fill_guard=None):
+        """Explicit paper assumption: attempt a new buy on its submission book once."""
+        if intent.side!='buy' or quote.symbol!=intent.symbol or self.settings.paper_fill_model!='market_v2':
+            raise ValueError('주문 시점 호가 체결은 같은 종목의 market_v2 모의 매수에만 적용합니다.')
+        if paper_tradable is not None and type(paper_tradable) is not bool:
+            raise ValueError('Paper 거래 허용 값은 불리언이어야 합니다.')
+        existed=intent.client_id in self.orders
+        order=self.submit_order(intent,now)
+        if existed or order.status=='rejected':return order
+        order._order_audit(create=True)['buy_fill_timing']='submission_quote'
+        order.assumed_latency=ZERO
+        order.accepted_at=order.submitted_at
+        self._transition(order,'accepted',order.submitted_at)
+        from .market_fills import process_market_quote
+        process_market_quote(self,quote,now,paper_tradable=paper_tradable,
+                             buy_fill_guard=buy_fill_guard,submission_order=order)
+        return order
+
     def cancel_order(self, client_id: str, now: datetime | None = None, *, reason='cancelled') -> FractionalOrder | None:
         order = self.orders.get(client_id)
         if order is None or order.status not in OPEN_STATUSES:

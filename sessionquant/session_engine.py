@@ -50,7 +50,8 @@ class SessionEngine:
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
                  candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None,
-                 benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None,quote_recovery_wait=False):
+                 benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None,quote_recovery_wait=False,
+                 submission_quote_buys=False):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
@@ -58,6 +59,11 @@ class SessionEngine:
         if type(quote_recovery_wait) is not bool:
             raise ValueError('호가 복구 대기 설정은 불리언이어야 합니다.')
         self.quote_recovery_wait=quote_recovery_wait
+        if type(submission_quote_buys) is not bool:
+            raise ValueError('주문 시점 호가 체결 설정은 불리언이어야 합니다.')
+        if submission_quote_buys and settings is not None and settings.paper_fill_model!='market_v2':
+            raise ValueError('주문 시점 호가 체결은 market_v2 모의 장부에서만 사용할 수 있습니다.')
+        self.submission_quote_buys=submission_quote_buys
         self.selection_frame=None
         self.selection_source_id=None
         self._batch_candidate_scope=[]
@@ -294,7 +300,11 @@ class SessionEngine:
             row['expected_price'] = serialize(order.expected_price)
             self._record_changed("orders", order.client_id, row)
         for fill in self.broker.fills:
-            self._record_changed("executions", fill.id, serialize(fill))
+            row=serialize(fill)
+            order=self.broker.orders.get(fill.client_id)
+            if order and order._order_audit().get('buy_fill_timing')=='submission_quote':
+                row['buy_fill_timing']='submission_quote' if fill.timestamp==order.submitted_at else 'next_quote'
+            self._record_changed("executions", fill.id, row)
         self.repo.replace_positions(self.broker.positions)
         for alert in self.broker.alerts:
             self._record_changed("alerts", alert["id"], alert)
@@ -319,6 +329,7 @@ class SessionEngine:
                    'candidate_selection':asdict(self.candidate_selector.settings),
                    "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
                    'quote_recovery_wait':self.quote_recovery_wait,
+                   'submission_quote_buys':self.submission_quote_buys,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         if self.strategy == 'pullback_simple':
             frame=self.selection_frame or {}
@@ -614,7 +625,12 @@ class SessionEngine:
                                 selected.update(portfolio_status='ALLOCATION_REJECTED',approved=False,
                                     allocation_reason=execution['reason'],order_intent_id=None,execution_check=execution)
                             continue
-                        self.broker.submit_order(allocation.intent)
+                        if self.submission_quote_buys:
+                            tradable=(decision.indicators.get('paper_eligibility') or {}).get('allowed',evidence.tradable is True)
+                            self.broker.submit_buy_with_quote(allocation.intent,quote,now,paper_tradable=tradable,
+                                buy_fill_guard=lambda order,book: self._buy_fill_blocker(order,book,now))
+                        else:
+                            self.broker.submit_order(allocation.intent)
                         # Keep audit persistence in this transaction, after the
                         # final execution check and in-memory submission.
                         self.repo.record("order_intents",intent_record)

@@ -1,20 +1,28 @@
 """공개 호가만 사용하는 소수점 시장가 근사. 실제 매칭·지연을 보장하지 않는다."""
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
+import json
 
 from .models import ZERO, QUANTITY_STEP, FractionalPosition, aware, decimal
 
 
 def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill_qty=None, paper_tradable=None,
-                         buy_fill_guard=None):
+                         buy_fill_guard=None, submission_order=None):
     now = aware(now or quote.received_at)
+    if submission_order is not None:
+        if (broker.orders.get(submission_order.client_id) is not submission_order
+                or submission_order.intent.side!='buy' or submission_order.intent.symbol!=quote.symbol
+                or submission_order.submitted_at!=now or submission_order.status!='accepted'
+                or submission_order.filled_qty or submission_order.cancel_requested_at is not None
+                or submission_order._order_audit().get('buy_fill_timing')!='submission_quote'):
+            raise ValueError('새 모의 매수 주문의 제출 시점에만 즉시 체결을 시도할 수 있습니다.')
     if broker.last_event_at and now < broker.last_event_at:
         return []
     broker.roll_session(now)
     broker.expire_orders(now)
 
     def unfilled(reason):
-        for order in broker.get_open_orders(quote.symbol):
+        for order in ([submission_order] if submission_order is not None else broker.get_open_orders(quote.symbol)):
             if order.status not in {'unknown','cancel_pending'}:
                 order.unfilled_reason = reason
         return []
@@ -25,9 +33,13 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
     schedule = SessionExitManager(broker).schedule(now)
     stamp = aware(quote.timestamp)
     previous = broker.quote_sequences.get(quote.symbol)
-    if previous and stamp <= aware(previous):
+    fingerprint=json.dumps([stamp.isoformat(),str(quote.bid),str(quote.ask),quote.bid_size,quote.ask_size])
+    same_submission_book=(submission_order is not None and previous and stamp==aware(previous)
+                          and broker.quote_watermarks.get(quote.symbol)==fingerprint)
+    if previous and stamp <= aware(previous) and not same_submission_book:
         return unfilled('duplicate_or_out_of_order_quote')
     broker.quote_sequences[quote.symbol] = stamp.isoformat()
+    broker.quote_watermarks[quote.symbol] = fingerprint
     bid,ask = decimal(quote.bid),decimal(quote.ask)
     if quote.symbol in broker.positions:
         broker.positions[quote.symbol].mark_price = bid
@@ -37,14 +49,20 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         return unfilled('outside_fractional_execution_window')
     participation = broker.settings.paper_depth_participation
     depths = {'buy':decimal(quote.ask_size)*participation,'sell':decimal(quote.bid_size)*participation}
+    if submission_order is not None:
+        # Reusing a still-fresh decision book never renews its displayed depth.
+        # Fills and their source clocks survive restart in the existing ledger.
+        used=sum((fill.qty for fill in broker.fills if fill.symbol==quote.symbol
+                  and fill.side=='buy' and fill.quote_timestamp==stamp),ZERO)
+        depths['buy']=max(ZERO,depths['buy']-used)
     liquidity = decimal(max_fill_qty,'max_fill_qty',nonnegative=True) if max_fill_qty is not None else None
     fills = []
-    for order in list(broker.get_open_orders(quote.symbol)):
+    for order in ([submission_order] if submission_order is not None else list(broker.get_open_orders(quote.symbol))):
         intent = order.intent
         if order.status == 'unknown':
             continue
         submitted = order.submitted_at or intent.created_at
-        if order.accepted_at is None or stamp <= submitted or stamp < order.accepted_at:
+        if submission_order is None and (order.accepted_at is None or stamp <= submitted or stamp < order.accepted_at):
             order.unfilled_reason = 'awaiting_post_acceptance_quote'
             continue
         if order.status not in {'accepted','partial','cancel_pending'}:

@@ -79,6 +79,7 @@ def start(repo, engine, *, source):
         'source_reference_filter':serialize(engine.macro_reference_risk.settings) if engine.macro_reference_risk else None,
         'execution_guard_version':1 if engine.execution_guard.enabled else None,
         'quote_recovery_wait':engine.quote_recovery_wait,
+        'submission_quote_buys':engine.submission_quote_buys,
         'recording_version': 1})
     for name in CONTROLS:
         value = repo.get_control(name)
@@ -109,6 +110,7 @@ def frame(engine, events, now, *, manual_halt):
         'execution_checks':engine.execution_guard.checks if engine.execution_guard.enabled else None,
         'execution_guard_version':1 if engine.execution_guard.enabled else None,
         'quote_recovery_wait':engine.quote_recovery_wait,
+        'submission_quote_buys':engine.submission_quote_buys,
         'execution_check_overflow':engine.execution_guard.overflow_count,
         **({'quote_wait_evidence':engine._batch_quote_wait_evidence} if engine._batch_quote_wait_evidence else {}),
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars',

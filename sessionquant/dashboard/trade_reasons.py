@@ -50,6 +50,15 @@ QUOTE_WAIT_REASONS = {
 }
 
 
+def fill_timing_label(row):
+    history=row.get('lifecycle') or []
+    audit=(history[0].get('order_audit') or {}) if history and isinstance(history[0],dict) else {}
+    timing=row.get('buy_fill_timing') or audit.get('buy_fill_timing')
+    if timing=='submission_quote':return '주문 시점 호가 기준 모의 체결'
+    if timing=='next_quote' or row.get('fill_model_version')=='market_v2':return '접수 후 새 호가 기준 모의 체결'
+    return '기록 없음'
+
+
 def order_quote_wait_details(row):
     from .app import timestamp
     history=row.get('lifecycle') or []
