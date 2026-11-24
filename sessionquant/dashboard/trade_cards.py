@@ -44,9 +44,10 @@ def trade_cards_html(rows):
 
 def render_trade_history(data):
     import streamlit as st
-    from .trade_pages import trade_page
-    st.markdown('<div class="sq-section"><h2>매매 기록</h2><p>모의 체결 · 최근 75건 · 체결 금액은 수수료 제외</p></div>', unsafe_allow_html=True)
+    from .trade_pages import MAX_PAGES, PAGE_SIZE, trade_page
     rows = execution_reasons(data.tables.get('executions', []), orders=data.tables.get('orders', []), state=data.state)
+    st.markdown(f'<div class="sq-section"><h2>매매 기록</h2><p>모의 체결 · 조회된 {len(rows):,}건 · 체결 금액은 수수료 제외</p></div>', unsafe_allow_html=True)
+    st.caption(f'최신순 · 페이지당 {PAGE_SIZE}건 · 최대 {MAX_PAGES}페이지({PAGE_SIZE * MAX_PAGES}건) 표시')
     page = trade_page(rows, kind='executions', source_count=len(rows), scope='home')
     if page:
         st.markdown(trade_cards_html(page), unsafe_allow_html=True)

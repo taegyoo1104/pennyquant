@@ -34,9 +34,36 @@ def focus_is_monitored(row, now):
         return False
 
 
+def market_cap_text(row):
+    """Display the supplied currency without converting or changing ranking inputs."""
+    from .session_app import decimal_value
+    currency = row.get('currency')
+    if currency == 'KRW':
+        value, unit = row.get('market_cap_value'), '원'
+    elif currency in {None, 'USD'}:
+        value, unit = row.get('market_cap_usd'), '달러'
+    else:
+        return '—'
+    amount = decimal_value(value)
+    if amount is None or amount < 0:
+        return '—'
+    whole = int(amount)
+    trillion, remainder = divmod(whole, 10**12)
+    hundred_million = remainder // 10**8
+    if trillion:
+        number = f'{trillion:,}조' + (f' {hundred_million:,}억' if hundred_million else '')
+    elif hundred_million:
+        number = f'{hundred_million:,}억'
+    elif whole >= 10**4:
+        number = f'{whole // 10**4:,}만'
+    else:
+        number = f'{whole:,}'
+    return f'{number} {unit}'
+
+
 def render_watchlist(state, candidates):
     import streamlit as st
-    from .session_app import timestamp, usd, _table
+    from .session_app import timestamp, _table
     state = state or {}
     now = datetime.now(timezone.utc)
     status, active = current_status(state, now)
@@ -111,7 +138,7 @@ def render_watchlist(state, candidates):
         blockers = list(row.get('entry_blockers',[]))
         if status != 'VALID': blockers.append('watchlist_'+status.lower())
         if row['ticker'] not in focus: blockers.append('focus_unknown_or_stale')
-        rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if full_ranking else None, '검증자료 내 순위':row.get('rank'), '시가총액':(row.get('market_cap_value')+' KRW') if row.get('currency')=='KRW' and row.get('market_cap_value') else usd(row.get('market_cap_usd')),
+        rows.append({'종목':row['ticker'], '시총 순위':row.get('rank') if full_ranking else None, '검증자료 내 순위':row.get('rank'), '시가총액':market_cap_text(row),
             '일일 분봉 준비':row.get('history_ready') if history and not history.get('preparing') else None,
             '운영 대상':bool(row.get('operating')) and status=='VALID' and active,
             '분봉 제외 사유':'; '.join(p['session']+': '+', '.join(p['reasons']) for p in (row.get('history_selection') or {}).get('problems',[]))
@@ -123,4 +150,5 @@ def render_watchlist(state, candidates):
             '최근 조회 시도':timestamp(row.get('last_detail_attempt_at')), '상세 자료 지연(초)':age,
             '신규 진입 차단':', '.join(dict.fromkeys(blockers)) if active else '현재 수집 상태 미확인'})
     _table(rows, '시가총액 공급 자료를 확인한 뒤 감시·집중 후보를 표시합니다.')
+    st.caption('시가총액은 조·억 단위로 표시하며 억 미만 금액은 생략합니다. 1억 미만은 만 단위로 표시합니다. 원화는 원, 달러는 달러로 구분하며 순위는 원본 금액으로 계산합니다.')
     st.caption('관찰 점수는 매수 승인이 아닙니다. 선택한 Paper 거래 조건과 RVOL·확정봉·시장·손실 제한을 별도로 통과해야 합니다. 보유·미체결·청산 예정 및 SPY·QQQ는 이 상한과 별도로 관리합니다.')
