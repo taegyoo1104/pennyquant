@@ -110,6 +110,7 @@ def frame(engine, events, now, *, manual_halt):
         'execution_guard_version':1 if engine.execution_guard.enabled else None,
         'quote_recovery_wait':engine.quote_recovery_wait,
         'execution_check_overflow':engine.execution_guard.overflow_count,
+        **({'quote_wait_evidence':engine._batch_quote_wait_evidence} if engine._batch_quote_wait_evidence else {}),
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars',
                          'strategy_bars','strategy_rvol','strategy_rvol_status','collection_warnings')}
                          for symbol,row in engine.market.quality_rows.items() if symbol in {item['symbol'] for item in engine._batch_decisions}],

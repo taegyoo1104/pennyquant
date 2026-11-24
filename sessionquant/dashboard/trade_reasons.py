@@ -35,6 +35,43 @@ ORDER_REASONS = {
     'liquidity_partial':'일부 체결 · 남은 수량 대기',
 }
 
+QUOTE_WAIT_REASONS = {
+    'feed_not_ready':'실시간 호가 연결·구독 확인 대기',
+    'quote_missing':'아직 사용할 수 있는 호가가 없음',
+    'quote_conflict':'같은 시각에 서로 다른 호가 수신',
+    'quote_time_invalid':'호가 발생·수신 시각 순서 확인 필요',
+    'quote_stale':'호가가 허용 시간보다 오래됨',
+    'engine_quote_missing':'매매 엔진에 호가 전달 대기',
+    'stream_behind_engine':'수신 호가가 엔진 호가보다 오래됨',
+    'post_conflict_not_delivered':'충돌 이후 새 호가의 엔진 반영 대기',
+    'generation_not_delivered':'재연결·구독 변경 후 호가 반영 대기',
+    'engine_quote_conflict':'수신 호가와 엔진 호가 내용 불일치',
+    'evidence_unavailable':'상세 원인 기록 실패',
+}
+
+
+def order_quote_wait_details(row):
+    from .app import timestamp
+    history=row.get('lifecycle') or []
+    audit=(history[0].get('order_audit') or {}) if history and isinstance(history[0],dict) else {}
+    wait=audit.get('quote_wait') or {}
+    evidence=wait.get('evidence') or {}
+    reason=evidence.get('reason')
+    label=QUOTE_WAIT_REASONS.get(reason, '사유 확인 필요' if reason else '기록 없음')
+    if reason=='feed_not_ready':
+        label={'DISCONNECTED':'실시간 호가 연결 끊김', 'BACKOFF':'연결 재시도 대기',
+               'CONNECTING':'실시간 호가 연결 중', 'CHANGING':'구독 종목 변경 중',
+               'STOPPING':'실시간 호가 수신 종료 중', 'STOPPED':'실시간 호가 수신 종료'}.get(
+                   evidence.get('connection_state'),label)
+    return {'호가 대기 원인':label,
+            '마지막 호가 대기 시작':timestamp(wait.get('started_at')),
+            '호가 사용 재개':timestamp(wait.get('recovered_at')),
+            '수신 호가 발생 시각':timestamp(evidence.get('quote_at')),
+            '호가 수신 시각':timestamp(evidence.get('quote_received_at')),
+            '엔진 호가 발생 시각':timestamp(evidence.get('engine_quote_at')),
+            '호가 경과(초)':evidence.get('quote_age_seconds'),
+            '허용 경과(초)':evidence.get('max_age_seconds')}
+
 
 def order_cancellation_details(row):
     from .labels import LABELS

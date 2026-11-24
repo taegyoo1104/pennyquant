@@ -139,6 +139,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                         raise ValueError('실행 중 호가 복구 대기 기록이 바뀌었습니다.')
                     engine.quote_recovery_wait=recovery_policy
                     engine.quote_entry_guard=(lambda symbol,now,values=allowed: values.get(symbol,False)) if allowed is not None else None
+                    evidence=data.get('quote_wait_evidence') or {}
+                    if not isinstance(evidence,dict):raise ValueError('호가 대기 근거 형식이 올바르지 않습니다.')
+                    engine.quote_entry_evidence=lambda symbol,values=evidence: values.get(symbol,{})
                     guard_version = data.get('execution_guard_version', guard_versions.get(row['run_id']))
                     if guard_version is not None and (type(guard_version) is not int or guard_version != 1):
                         raise ValueError('지원하지 않는 매수 실행 검사 기록 버전입니다.')

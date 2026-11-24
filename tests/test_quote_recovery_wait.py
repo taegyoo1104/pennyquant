@@ -17,6 +17,7 @@ def pending(value):
     now = NOW + timedelta(seconds=2)
     feed, clock, delivery = receiver(now)
     engine.quote_entry_guard = lambda s, t: delivery.entry_allowed(s, t, known_quotes=engine.market.quotes)
+    engine.quote_entry_evidence = delivery.entry_evidence
     offer(feed, replace(quote, timestamp=now, received_at=now))
     engine.apply_batch(delivery.events(['AAPL'], now), now)
     return engine, quote, feed, clock, delivery, engine.broker.get_open_orders()[0]
@@ -41,6 +42,9 @@ def test_transient_quote_failure_keeps_order_but_never_fills_until_valid_stream_
     assert order.cancel_requested_at is None
     reserved = engine.broker.reserved_cash
     interval = dict(order.quote_wait)
+    assert interval['evidence']['reason'] == {'disconnect':'feed_not_ready', 'stale':'quote_stale',
+        'conflict':'quote_conflict', 'engine_ahead':'stream_behind_engine'}[fault]
+    assert interval['evidence']['checked_at'] == clock.now.isoformat()
     engine.tick(clock.now + timedelta(milliseconds=500))
     assert order.quote_wait == interval and engine.broker.reserved_cash == reserved
     clock.now += timedelta(seconds=2)
@@ -179,6 +183,7 @@ def test_recovery_policy_is_recorded_and_replayed_without_duplicating_order(obse
     feed, clock, delivery = receiver(NOW)
     monkeypatch.setattr(journal, 'clock', lambda: clock.now)
     engine.quote_entry_guard = lambda s, t: delivery.entry_allowed(s, t, known_quotes=engine.market.quotes)
+    engine.quote_entry_evidence = delivery.entry_evidence
     journal.start(observed.repo, engine, source='SYNTHETIC_WEBSOCKET')
     observed.repo.record('universe_history', observed.universe.snapshots[0])
     clock.now += timedelta(seconds=1)
@@ -190,6 +195,11 @@ def test_recovery_policy_is_recorded_and_replayed_without_duplicating_order(obse
     clock.now += timedelta(seconds=10)
     engine.tick(clock.now)
     assert engine.broker.get_open_orders()
+    assert engine.broker.get_open_orders()[0].quote_wait['evidence']['reason']=='feed_not_ready'
+    assert engine._batch_quote_wait_evidence
+    clock.now += timedelta(milliseconds=500)
+    engine.tick(clock.now)
+    assert engine._batch_quote_wait_evidence == {}
     clock.now += timedelta(seconds=2)
     feed._acked = True
     offer(feed, replace(quote, timestamp=clock.now, received_at=clock.now))

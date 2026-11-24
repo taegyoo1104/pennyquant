@@ -243,6 +243,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     market.quote_feed=quote_feed
                     engine.quote_entry_guard=lambda symbol,stamp: quote_delivery.entry_allowed(
                         symbol,stamp,known_quotes=engine.market.quotes)
+                    engine.quote_entry_evidence=quote_delivery.entry_evidence
                     quote_task=asyncio.create_task(quote_feed.run())
                     if reference_config['websocket_chart']:
                         from .market_reference.trade_feed import BenchmarkTradeFeed, VIEW as BENCHMARK_VIEW

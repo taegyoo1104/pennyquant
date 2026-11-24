@@ -54,6 +54,7 @@ class SessionEngine:
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
+        self.quote_entry_evidence=None
         if type(quote_recovery_wait) is not bool:
             raise ValueError('호가 복구 대기 설정은 불리언이어야 합니다.')
         self.quote_recovery_wait=quote_recovery_wait
@@ -349,6 +350,20 @@ class SessionEngine:
             self._batch_quote_entry_allowed[symbol]=bool(self.quote_entry_guard(symbol,now))
         return self._batch_quote_entry_allowed[symbol]
 
+    def _quote_wait_evidence(self, symbol):
+        if self.quote_entry_evidence is None:return {}
+        try:
+            value=self.quote_entry_evidence(symbol)
+            keys=('reason','checked_at','connection_state','acknowledged','generation','entry_generation',
+                  'quote_at','quote_received_at','quote_age_seconds','max_age_seconds',
+                  'engine_quote_at','engine_quote_received_at','conflict_at')
+            return {key:value[key] for key in keys if key in value
+                    and (value[key] is None or type(value[key]) in (bool,int,float,str))
+                    and len(str(value[key]))<=96} if isinstance(value,dict) else {}
+        except Exception:
+            # Diagnostics must not interrupt order/risk processing.
+            return {'reason':'evidence_unavailable'}
+
     def _execution_eligibility_allowed(self, quote, now):
         from .market.scanner import eligibility_blockers
         return not eligibility_blockers(quote.symbol, self.market.eligibility.get(quote.symbol), now,
@@ -381,6 +396,7 @@ class SessionEngine:
         self._batch_candidate_scope=[]
         self.selection_frame=None
         self._batch_quote_entry_allowed = {}
+        self._batch_quote_wait_evidence = {}
         self.execution_guard.begin_batch()
         self._batch_scope_blockers = {} if self.watchlist_policy is not None or self.quote_entry_guard is not None else None
         try:
@@ -441,6 +457,10 @@ class SessionEngine:
                                     if not order.quote_wait or order.quote_wait.get('recovered_at'):
                                         # Keep one small latest wait interval per order, not per-tick history.
                                         order.quote_wait={'started_at':now.isoformat(),'recovered_at':None}
+                                        evidence=self._quote_wait_evidence(order.intent.symbol)
+                                        if evidence:
+                                            order.quote_wait['evidence']=evidence
+                                            self._batch_quote_wait_evidence[order.intent.symbol]=evidence
                             else:
                                 self.broker.cancel_order(order.client_id,now,reason='websocket_quote_unavailable')
                         elif order.quote_wait and not order.quote_wait.get('recovered_at'):
