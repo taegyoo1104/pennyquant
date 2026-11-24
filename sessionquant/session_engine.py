@@ -50,10 +50,13 @@ class SessionEngine:
                  synthetic: bool = False, use_news: bool = True, use_market_filter: bool = True, control_state: dict | None = None, watchlist_policy=None,
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
                  candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None,
-                 benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None):
+                 benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None,quote_recovery_wait=False):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
+        if type(quote_recovery_wait) is not bool:
+            raise ValueError('호가 복구 대기 설정은 불리언이어야 합니다.')
+        self.quote_recovery_wait=quote_recovery_wait
         self.selection_frame=None
         self.selection_source_id=None
         self._batch_candidate_scope=[]
@@ -314,6 +317,7 @@ class SessionEngine:
                    'macro_reference_risk':self.reference_risk_status,
                    'candidate_selection':asdict(self.candidate_selector.settings),
                    "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
+                   'quote_recovery_wait':self.quote_recovery_wait,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         if self.strategy == 'pullback_simple':
             frame=self.selection_frame or {}
@@ -351,6 +355,13 @@ class SessionEngine:
             max_eligibility_age_seconds=self.market.max_eligibility_age_seconds,
             require_evidence=self.market.strict_data,
             paper_assumptions=self.market.paper_data_policy == 'observed_paper_v1')
+
+    def _buy_fill_blocker(self, order, quote, now):
+        # Waiting preserves the existing order, never permission to fill from a
+        # disconnected, conflicting, stale or engine-unacknowledged quote.
+        if not self._quote_entry_allowed(quote.symbol, now):
+            return 'websocket_quote_unavailable'
+        return self.execution_guard.fill_blocker(order, quote, now)
 
     @timed('engine_batch')
     def apply_batch(self, events: list[dict], now: datetime, *, cursor: int | None = None, controls: dict | None = None):
@@ -419,13 +430,27 @@ class SessionEngine:
                 for order in self.broker.get_open_orders():
                     if order.intent.side == 'buy':
                         risk = self.risk_context(now,order.intent.symbol)
-                        if (risk.get('block_entries') or risk.get('blackout') or reference_blocked
-                                or not self._quote_entry_allowed(order.intent.symbol,now)):
-                            self.broker.cancel_order(order.client_id,now)
+                        if risk.get('block_entries') or risk.get('blackout'):
+                            self.broker.cancel_order(order.client_id,now,reason='news_risk_restriction')
+                        elif reference_blocked:
+                            self.broker.cancel_order(order.client_id,now,reason='macro_reference_risk_restriction')
+                        elif not self._quote_entry_allowed(order.intent.symbol,now):
+                            if self.quote_recovery_wait:
+                                if order.status in {'submitted','accepted','partial'}:
+                                    order.unfilled_reason='websocket_quote_unavailable'
+                                    if not order.quote_wait or order.quote_wait.get('recovered_at'):
+                                        # Keep one small latest wait interval per order, not per-tick history.
+                                        order.quote_wait={'started_at':now.isoformat(),'recovered_at':None}
+                            else:
+                                self.broker.cancel_order(order.client_id,now,reason='websocket_quote_unavailable')
+                        elif order.quote_wait and not order.quote_wait.get('recovered_at'):
+                            order.quote_wait['recovered_at']=now.isoformat()
+                            if order.unfilled_reason=='websocket_quote_unavailable':
+                                order.unfilled_reason='awaiting_post_acceptance_quote'
                 if manual_halt:
                     for order in self.broker.get_open_orders():
                         if order.intent.side == "buy":
-                            self.broker.cancel_order(order.client_id,now)
+                            self.broker.cancel_order(order.client_id,now,reason='operator_stop_or_data_not_ready')
                 session_status = self.exit_manager.tick(now, self.market.quotes)
                 quotes = [parse_event(raw).data for raw in events if raw["kind"] == "quote"]
                 for quote in quotes:
@@ -437,10 +462,10 @@ class SessionEngine:
                     if self.market.paper_data_policy == 'observed_paper_v1':
                         from .market.paper_policy import paper_eligibility
                         paper_tradable = (paper_eligibility(self.market.eligibility.get(quote.symbol),now)['allowed']
-                            and self._quote_entry_allowed(quote.symbol,now))
+                            and (self.quote_recovery_wait or self._quote_entry_allowed(quote.symbol,now)))
                     self.broker.process_quote(quote, now, paper_tradable=paper_tradable,
-                        buy_fill_guard=(lambda order, book: self.execution_guard.fill_blocker(order, book, now))
-                            if self.execution_guard.enabled else None)
+                        buy_fill_guard=(lambda order, book: self._buy_fill_blocker(order, book, now))
+                            if self.execution_guard.enabled or self.quote_entry_guard is not None else None)
                 for symbol in list(self.broker.positions):
                     quote = self.market.quotes.get(symbol)
                     risk = self.risk_context(now,symbol)

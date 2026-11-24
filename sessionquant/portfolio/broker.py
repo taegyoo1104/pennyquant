@@ -82,7 +82,7 @@ class PaperBroker:
             self.halted = False
             for order in self.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.cancel_order(order.client_id, now)
+                    self.cancel_order(order.client_id, now, reason='day_expired')
 
     def check_daily_loss(self, now: datetime) -> bool:
         self.roll_session(now)
@@ -90,7 +90,7 @@ class PaperBroker:
             self.halted = True
             for order in self.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.cancel_order(order.client_id, now)
+                    self.cancel_order(order.client_id, now, reason='daily_loss_limit')
             self._alert('daily_loss_limit', now, '일일 손실 한도에 도달하여 당일 신규 매수를 중단했습니다.')
         return self.halted
 
@@ -169,7 +169,7 @@ class PaperBroker:
             order.lifecycle.append({'status':status,'event':event or status,'observed_at':aware(now).isoformat(),
                 'source':'paper_assumption','fill_model_version':order.fill_model_version})
 
-    def cancel_order(self, client_id: str, now: datetime | None = None) -> FractionalOrder | None:
+    def cancel_order(self, client_id: str, now: datetime | None = None, *, reason='cancelled') -> FractionalOrder | None:
         order = self.orders.get(client_id)
         if order is None or order.status not in OPEN_STATUSES:
             return order
@@ -182,6 +182,8 @@ class PaperBroker:
             return order
         if order.cancel_effective_at is not None:
             return order
+        order.cancel_reason = reason
+        order.cancel_unfilled_reason = order.unfilled_reason
         order.cancel_requested_at = stamp
         delay = ZERO if self.settings.paper_fill_model == 'legacy_limit_v1' else self.settings.paper_cancel_latency_seconds
         order.cancel_effective_at = stamp+timedelta(microseconds=int(delay*1_000_000))
@@ -222,6 +224,8 @@ class PaperBroker:
                 ny = ZoneInfo('America/New_York')
                 if (now.astimezone(ny).date() > submitted.astimezone(ny).date()
                         or (schedule and now >= schedule.closes_at)):
+                    order.cancel_reason = 'day_expired'
+                    order.cancel_unfilled_reason = order.unfilled_reason
                     self._transition(order,'cancelled',now,event='day_expired')
                     order.unfilled_reason = 'day_expired'
                     continue
@@ -236,7 +240,7 @@ class PaperBroker:
                     order.unfilled_reason = 'cancelled'
                     continue
             if (now-submitted).total_seconds() >= self.settings.order_ttl_seconds:
-                self.cancel_order(order.client_id,now)
+                self.cancel_order(order.client_id,now,reason='assumed_order_timeout')
                 if order.status == 'cancelled':
                     order.unfilled_reason = 'assumed_order_timeout'
 

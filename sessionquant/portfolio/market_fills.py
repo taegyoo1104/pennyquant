@@ -53,7 +53,7 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         if side == 'buy':
             from ..session_window import permits_new_entry
             if not permits_new_entry(now,min_entry_to_exit_minutes=broker.settings.min_entry_to_exit_minutes):
-                broker.cancel_order(order.client_id,now)
+                broker.cancel_order(order.client_id,now,reason='outside_entry_window')
                 continue
             # 별도 Paper 정책은 호출자가 재검사한다. 원본 quote.tradable은 변경하지 않는다.
             if broker.halted or not (quote.tradable if paper_tradable is None else paper_tradable):
@@ -103,7 +103,7 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         else:
             position = broker.positions.get(intent.symbol)
             if position is None or qty > position.qty:
-                broker.cancel_order(order.client_id,now)
+                broker.cancel_order(order.client_id,now,reason='insufficient_sellable_quantity')
                 continue
             entry_fee = position.entry_fee*qty/position.qty
             pnl = notional-fee-position.avg_price*qty-entry_fee

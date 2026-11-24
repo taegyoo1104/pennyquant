@@ -69,6 +69,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
         raise ValueError('초기 포지션·주문이 없는 시점부터 기록한 묶음이 필요합니다.')
     first = starts[0]['data']
     guard_versions = {row['run_id']: row['data'].get('execution_guard_version') for row in starts}
+    recovery_policies = {row['run_id']: row['data'].get('quote_recovery_wait', False) for row in starts}
+    if any(type(value) is not bool for value in recovery_policies.values()):
+        raise ValueError('지원하지 않는 호가 복구 대기 기록입니다.')
     if any(version is not None and (type(version) is not int or version != 1) for version in guard_versions.values()):
         raise ValueError('지원하지 않는 매수 실행 검사 기록 버전입니다.')
     if len({row['data'].get('paper_data_policy','strict') for row in starts}) != 1:
@@ -91,6 +94,7 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
     if first.get('paper_data_policy','strict') != 'strict':
         binding=identity([binding,{'paper_data_policy':first['paper_data_policy']}])
     if candidate_options.enabled:binding=identity([binding,serialize(candidate_options)])
+    if any(recovery_policies.values()):binding=identity([binding,{'quote_recovery_wait':recovery_policies}])
     stack, repo = _open(db_path,'sqlite')
     with stack:
         if repo.namespace_has_data() and not resume:raise ValueError('재생 장부가 이미 있습니다. 새 DB 또는 --resume을 지정하세요.')
@@ -129,6 +133,11 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                     if not universe.members(stamp):raise ValueError('처리 당시 확인 가능한 유니버스 이력이 없습니다.')
                     news.contexts = data.get('news_contexts') or {}
                     allowed=data.get('quote_entry_allowed')
+                    recovery_policy=recovery_policies.get(row['run_id'],False)
+                    recorded_policy=data.get('quote_recovery_wait',recovery_policy)
+                    if type(recorded_policy) is not bool or recorded_policy != recovery_policy:
+                        raise ValueError('실행 중 호가 복구 대기 기록이 바뀌었습니다.')
+                    engine.quote_recovery_wait=recovery_policy
                     engine.quote_entry_guard=(lambda symbol,now,values=allowed: values.get(symbol,False)) if allowed is not None else None
                     guard_version = data.get('execution_guard_version', guard_versions.get(row['run_id']))
                     if guard_version is not None and (type(guard_version) is not int or guard_version != 1):

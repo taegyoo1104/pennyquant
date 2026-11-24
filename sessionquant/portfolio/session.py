@@ -79,7 +79,8 @@ class SessionExitManager:
         if not can_enter:
             for order in self.broker.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.broker.cancel_order(order.client_id,now)
+                    self.broker.cancel_order(order.client_id,now,
+                        reason='daily_loss_limit' if self.broker.halted else 'outside_entry_window')
             if schedule and now >= schedule.exit_start:
                 for order in self.broker.get_open_orders():
                     if order.intent.side == 'buy':

@@ -169,7 +169,7 @@ class PortfolioManager:
             raise ValueError('청산 의도와 현재 보유 포지션의 생성 시각이 다릅니다.')
         for order in self.broker.get_open_orders(symbol):
             if order.intent.side == 'buy':
-                self.broker.cancel_order(order.client_id,now)
+                self.broker.cancel_order(order.client_id,now,reason='position_exit_pending')
         self.broker.expire_orders(now)
         if any(o.intent.side == 'buy' for o in self.broker.get_open_orders(symbol)):
             self.broker._alert('entry_cancel_unconfirmed',now,'매수 취소가 확인되지 않아 잔량 매도를 보류합니다.',symbol)
