@@ -168,19 +168,20 @@ def test_failed_cleanup_opens_inspection_and_keeps_successful_backup(tmp_path):
     executable(bindir / "docker", 'echo "docker $*" >> "$CALLS"\nif [[ "$*" == *"--services db"* ]]; then echo db; fi\n')
     executable(bindir / "systemctl", 'echo "systemctl $*" >> "$CALLS"\n')
     executable(deploy / "inspect.sh", 'echo inspection >> "$CALLS"\n')
+    (deploy / 'nightly_checkpoint.py').write_text('pass\n')
     executable(bindir / "sync", 'echo sync >> "$CALLS"\n')
     executable(deploy / "backup.sh", 'echo "UPLOADED new complete.tar.gz" > "$BACKUP_STATUS"\n')
     executable(deploy / "retention_after_update.sh", 'echo retention >> "$CALLS"\nexit 124\n')
     script = tmp_path / "stop.sh"
     script.write_text((DEPLOY / "stop.sh").read_text().replace("/opt/sessionquant", str(root))
-                      .replace("/run/sessionquant-stop.lock", str(tmp_path / "lock"))
+                      .replace("/run/sessionquant-update.lock", str(tmp_path / "update.lock")).replace("/run/sessionquant-stop.lock", str(tmp_path / "lock"))
                       .replace("/etc/sessionquant", str(etc)).replace("/usr/bin/systemctl", str(bindir / "systemctl")))
     result = subprocess.run(["bash", str(script)], env={**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"],
                             "CALLS": str(calls), "BACKUP_STATUS": str(status)}, capture_output=True, text=True, timeout=10)
     assert result.returncode == 1 and status.read_text().startswith("UPLOADED new")
     assert "exit_code=124" in (etc / "retention-status").read_text()
     assert calls.read_text().splitlines()[-2:] == ["sync", "inspection"]
-    assert "down --timeout 120" in calls.read_text()
+    assert "down --timeout" not in calls.read_text()
 
 
 def test_query_failure_keeps_partial_report_but_records_failed_attempt(tmp_path):

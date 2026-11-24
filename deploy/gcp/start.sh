@@ -37,11 +37,11 @@ if ((delay == 0)); then
 fi
 sq_close_usec=$(shutdown_usec "$delay")
 systemd-run --unit=sessionquant-market-close --on-boot="${sq_close_usec}us" \
-    --property=Type=oneshot --property=TimeoutStartSec=4200 \
+    --property=Type=oneshot --property=TimeoutStartSec=16200 \
     /opt/sessionquant/deploy/gcp/stop.sh
 sq_limit_usec=$(shutdown_usec 72000)
 systemd-run --unit=sessionquant-run-limit --on-boot="${sq_limit_usec}us" \
-    --property=Type=oneshot --property=TimeoutStartSec=4200 \
+    --property=Type=oneshot --property=TimeoutStartSec=16200 \
     /opt/sessionquant/deploy/gcp/stop.sh
 if [[ -e /etc/sessionquant/storage-blocked ]]; then
     echo '저장 공간 점검이 필요합니다. 복구·백업 확인 후 storage-blocked 표시를 해제하세요.' >&2
@@ -53,6 +53,11 @@ if [[ -f /etc/sessionquant/backup-status ]] && ! grep -q '^UPLOADED ' /etc/sessi
     exit 1
 fi
 systemctl start sessionquant-storage-guard.timer
+# Opening a trading runtime invalidates last night's proof before allowing writes.
+if [[ -e /etc/sessionquant/nightly-seal.json ]]; then
+    "${compose[@]}" up -d --wait --wait-timeout 180 db
+    python3 deploy/gcp/nightly_checkpoint.py writable
+fi
 # Allow DB startup plus application grace/probes within the service deadline.
 # Compose returns immediately once both services become healthy.
 "${compose[@]}" up -d --wait --wait-timeout 480
