@@ -171,20 +171,29 @@ class PaperBroker:
 
     def submit_buy_with_quote(self, intent, quote, now, *, paper_tradable=None, buy_fill_guard=None):
         """Explicit paper assumption: attempt a new buy on its submission book once."""
-        if intent.side!='buy' or quote.symbol!=intent.symbol or self.settings.paper_fill_model!='market_v2':
-            raise ValueError('주문 시점 호가 체결은 같은 종목의 market_v2 모의 매수에만 적용합니다.')
+        if intent.side!='buy':raise ValueError('모의 매수 주문이 필요합니다.')
+        return self._submit_with_quote(intent,quote,now,paper_tradable=paper_tradable,buy_fill_guard=buy_fill_guard)
+
+    def submit_sell_with_quote(self, intent, quote, now, *, sell_fill_guard=None):
+        """Attempt a new paper exit on its current bid, without a new-quote wait."""
+        if intent.side!='sell':raise ValueError('모의 매도 주문이 필요합니다.')
+        return self._submit_with_quote(intent,quote,now,sell_fill_guard=sell_fill_guard)
+
+    def _submit_with_quote(self, intent, quote, now, *, paper_tradable=None, buy_fill_guard=None, sell_fill_guard=None):
+        if quote.symbol!=intent.symbol or self.settings.paper_fill_model!='market_v2':
+            raise ValueError('주문 시점 호가 체결은 같은 종목의 market_v2 모의 주문에만 적용합니다.')
         if paper_tradable is not None and type(paper_tradable) is not bool:
             raise ValueError('Paper 거래 허용 값은 불리언이어야 합니다.')
         existed=intent.client_id in self.orders
         order=self.submit_order(intent,now)
         if existed or order.status=='rejected':return order
-        order._order_audit(create=True)['buy_fill_timing']='submission_quote'
+        order._order_audit(create=True)[intent.side+'_fill_timing']='submission_quote'
         order.assumed_latency=ZERO
         order.accepted_at=order.submitted_at
         self._transition(order,'accepted',order.submitted_at)
         from .market_fills import process_market_quote
         process_market_quote(self,quote,now,paper_tradable=paper_tradable,
-                             buy_fill_guard=buy_fill_guard,submission_order=order)
+                             buy_fill_guard=buy_fill_guard,sell_fill_guard=sell_fill_guard,submission_order=order)
         return order
 
     def cancel_order(self, client_id: str, now: datetime | None = None, *, reason='cancelled') -> FractionalOrder | None:
@@ -273,7 +282,7 @@ class PaperBroker:
             return False
 
     def process_quote(self, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None,
-                      paper_tradable: bool | None = None, buy_fill_guard=None) -> list[FractionalFill]:
+                      paper_tradable: bool | None = None, buy_fill_guard=None, sell_fill_guard=None) -> list[FractionalFill]:
         if paper_tradable is not None and type(paper_tradable) is not bool:
             raise ValueError('Paper 거래 허용 값은 불리언이어야 합니다.')
         if paper_tradable is not None and self.settings.paper_fill_model != 'market_v2':
@@ -283,7 +292,7 @@ class PaperBroker:
             return process_legacy_quote(self,quote,now,max_fill_qty=max_fill_qty,buy_fill_guard=buy_fill_guard)
         from .market_fills import process_market_quote
         return process_market_quote(self,quote,now,max_fill_qty=max_fill_qty,paper_tradable=paper_tradable,
-                                    buy_fill_guard=buy_fill_guard)
+                                    buy_fill_guard=buy_fill_guard,sell_fill_guard=sell_fill_guard)
 
     def _fill_record(self, order, qty, price, fee, now, pnl, quote):
         """주문 누적값과 체결별 비교 근거를 동일한 형식으로 기록한다."""

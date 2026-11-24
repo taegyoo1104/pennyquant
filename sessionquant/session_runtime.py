@@ -202,7 +202,8 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                                    if config.source=='toss' else None,
                                    execution_clock=(lambda: datetime.now(timezone.utc)) if config.source=='toss' else None,
                                    quote_recovery_wait=config.quote_transport=='websocket',
-                                   submission_quote_buys=config.submission_quote_buys)
+                                   submission_quote_buys=config.submission_quote_buys,
+                                   submission_quote_sells=config.submission_quote_sells)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)

@@ -7,6 +7,7 @@ universe_source: toss_us
 source: toss
 quote_transport: websocket
 paper_buy_fill_timing: submission_quote
+paper_sell_fill_timing: submission_quote
 poll_seconds: 2
 symbols_per_cycle: 10  # 집중 10종목 분봉을 한 순회에서 시도. API 횟수·시간 예산은 유지.
 paper_data_policy: observed_paper_v1

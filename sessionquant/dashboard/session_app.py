@@ -571,6 +571,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
             st.caption('모의 체결 모델: '+str(data.context.get('paper_fill_model','기존 기록·미확인'))+' · 접수·지연·유동성은 가정이며 실제 증권사 체결을 보장하지 않습니다.')
             if data.context.get('submission_quote_buys'):
                 st.caption('신규 모의매수는 주문 시점의 최신 매도 호가에 비용을 반영해 바로 체결을 시도합니다. 수량 부족분은 새 호가를 기다립니다.')
+            if data.context.get('submission_quote_sells'):
+                st.caption('신규 모의매도도 주문 시점의 최신 매수 호가에 비용을 반영해 바로 체결을 시도합니다. 매도 이유와 부분체결 잔량은 별도로 기록합니다.')
             with st.expander('모의 체결 가정·미체결 근거'):
                 from sessionquant.dashboard.trade_reasons import order_cancellation_details, order_quote_wait_details
                 _table([{'주문 ID':row.get('client_id'), '체결 모델':row.get('fill_model_version','UNKNOWN'),

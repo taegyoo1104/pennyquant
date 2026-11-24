@@ -97,7 +97,7 @@ def test_conflicting_or_older_book_and_preexisting_order_cannot_get_instant_fill
     assert not broker.fills and broker.orders['buy'].assumed_latency==1
 
 
-def test_sell_behavior_is_still_post_acceptance_quote():
+def test_plain_broker_without_submission_sell_policy_keeps_next_quote_behavior():
     broker=PaperBroker()
     broker.submit_buy_with_quote(intent(),quote(0),NOW)
     sell=OrderIntent('sell','AAPL','sell',NOW,D('99.8'),qty=broker.positions['AAPL'].qty)

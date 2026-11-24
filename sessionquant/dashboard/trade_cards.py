@@ -31,8 +31,8 @@ def trade_cards_html(rows):
         quantity = format(qty, 'f').rstrip('0').rstrip('.') if qty is not None and '.' in format(qty, 'f') else str(qty) if qty is not None else '—'
         amount = usd(qty * price) if qty is not None and price is not None else '—'
         reason = ('<div class="sq-trade-reason">매도 이유 · ' + escape(row.get('매도 이유', '기록 없음')) + '</div>') if side == 'sell' else ''
-        if side=='buy' and row.get('buy_fill_timing')=='submission_quote':
-            reason='<div class="sq-trade-reason">'+escape(fill_timing_label(row))+'</div>'
+        if row.get(side+'_fill_timing')=='submission_quote':
+            reason+='<div class="sq-trade-reason">'+escape(fill_timing_label(row))+'</div>'
         cards.append('<article class="sq-trade"><div class="sq-trade-top">'
                      f'<span class="sq-trade-badge {css}">{badge}</span>'
                      f'<div class="sq-trade-name"><strong>{escape(symbol)}</strong><small>{escape(korean_name(symbol, row))}</small></div>'

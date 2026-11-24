@@ -33,6 +33,8 @@ ORDER_REASONS = {
     'liquidity_or_quantity_step_insufficient':'체결 가능한 수량 부족',
     'insufficient_unreserved_cash':'주문에 사용할 잔액 부족',
     'liquidity_partial':'일부 체결 · 남은 수량 대기',
+    'runtime_exit_window_closed':'매도 가능 시간 종료',
+    'runtime_sell_quantity_unavailable':'매도 잔여 수량 확인 필요',
 }
 
 QUOTE_WAIT_REASONS = {
@@ -53,7 +55,8 @@ QUOTE_WAIT_REASONS = {
 def fill_timing_label(row):
     history=row.get('lifecycle') or []
     audit=(history[0].get('order_audit') or {}) if history and isinstance(history[0],dict) else {}
-    timing=row.get('buy_fill_timing') or audit.get('buy_fill_timing')
+    timing=(row.get('buy_fill_timing') or row.get('sell_fill_timing')
+            or audit.get('buy_fill_timing') or audit.get('sell_fill_timing'))
     if timing=='submission_quote':return '주문 시점 호가 기준 모의 체결'
     if timing=='next_quote' or row.get('fill_model_version')=='market_v2':return '접수 후 새 호가 기준 모의 체결'
     return '기록 없음'

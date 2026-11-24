@@ -1,4 +1,4 @@
-"""Runtime buy checks with recorded outcomes; strategy clocks stay unchanged."""
+"""Runtime execution checks with recorded outcomes; strategy clocks stay unchanged."""
 from ..models import utc
 from .session import SessionExitManager
 
@@ -6,7 +6,8 @@ MAX_CHECKS = 10_000
 REASONS = {'runtime_clock_rollback', 'runtime_clock_unavailable', 'runtime_quote_stale_or_invalid',
            'runtime_entry_window_closed', 'runtime_execution_check_missing', 'runtime_execution_check_mismatch',
            'runtime_execution_check_invalid', 'runtime_execution_check_limit',
-           'runtime_instrument_eligibility_restricted', 'runtime_order_no_longer_active'}
+           'runtime_instrument_eligibility_restricted', 'runtime_order_no_longer_active',
+           'runtime_exit_window_closed', 'runtime_sell_quantity_unavailable'}
 
 
 class BuyExecutionGuard:
@@ -98,3 +99,24 @@ class BuyExecutionGuard:
     def fill_blocker(self, order, quote, decision_at):
         result = self.check('fill', order, quote, decision_at)
         return (result['reason'] or 'runtime_execution_check_invalid') if result is not None and not result['allowed'] else None
+
+
+class SellExecutionGuard(BuyExecutionGuard):
+    """Exit checks do not inherit entry windows, buy halts or entry eligibility."""
+    def _reason(self, order, quote, checked_at, decision_at):
+        if checked_at < decision_at or (self.last_checked_at and checked_at < self.last_checked_at):
+            return 'runtime_clock_rollback'
+        if not self.broker.quote_is_fresh(quote,checked_at):
+            return 'runtime_quote_stale_or_invalid'
+        schedule=SessionExitManager(self.broker).schedule(checked_at)
+        if schedule is None or not schedule.opens_at<=checked_at<schedule.fractional_deadline:
+            return 'runtime_exit_window_closed'
+        submitted=utc(order.submitted_at or order.intent.created_at)
+        if (order.status not in {'accepted','partial','cancel_pending'}
+                or (checked_at-submitted).total_seconds()>=self.broker.settings.order_ttl_seconds
+                or (order.cancel_effective_at is not None and checked_at>=utc(order.cancel_effective_at))):
+            return 'runtime_order_no_longer_active'
+        position=self.broker.positions.get(order.intent.symbol)
+        if order.intent.side!='sell' or position is None or order.remaining_qty>position.qty:
+            return 'runtime_sell_quantity_unavailable'
+        return ''

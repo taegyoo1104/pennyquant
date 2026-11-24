@@ -19,6 +19,7 @@ class SessionConfig:
     source: str = "toss"
     quote_transport: str = "rest"
     paper_buy_fill_timing: str | None = None
+    paper_sell_fill_timing: str | None = None
     input_path: Path | None = None
     poll_seconds: float = 10.0
     news_refresh_seconds: float = 600.0
@@ -72,6 +73,12 @@ class SessionConfig:
                 (self.paper_buy_fill_timing is None and self.quote_transport=='websocket'
                  and self.portfolio.get('paper_fill_model','market_v2')=='market_v2'))
 
+    @property
+    def submission_quote_sells(self):
+        return (self.paper_sell_fill_timing=='submission_quote' or
+                (self.paper_sell_fill_timing is None and self.quote_transport=='websocket'
+                 and self.portfolio.get('paper_fill_model','market_v2')=='market_v2'))
+
     def __post_init__(self):
         if self.universe_source not in {'sp500', 'toss_us'}:
             raise ValueError('후보 모집단은 sp500 또는 toss_us입니다.')
@@ -82,6 +89,8 @@ class SessionConfig:
             raise ValueError("quote_transport는 rest 또는 websocket입니다.")
         if self.paper_buy_fill_timing not in {None,'submission_quote','next_quote'}:
             raise ValueError('모의 매수 체결 시점은 submission_quote 또는 next_quote입니다.')
+        if self.paper_sell_fill_timing not in {None,'submission_quote','next_quote'}:
+            raise ValueError('모의 매도 체결 시점은 submission_quote 또는 next_quote입니다.')
         if self.quote_transport == "websocket" and (self.source != "toss" or not self.watchlist_enabled
                 or self.watchlist_size > 50 or self.strategy != "pullback_simple"
                 or self.paper_data_policy != "observed_paper_v1"):
@@ -143,7 +152,7 @@ class SessionConfig:
         for name in ("companies", "portfolio", "llm"):
             if not isinstance(getattr(self, name), dict):
                 raise ValueError(f"{name}은 설정 객체여야 합니다.")
-        if self.submission_quote_buys and self.portfolio.get('paper_fill_model','market_v2')!='market_v2':
+        if (self.submission_quote_buys or self.submission_quote_sells) and self.portfolio.get('paper_fill_model','market_v2')!='market_v2':
             raise ValueError('주문 시점 호가 체결은 market_v2 모의 장부에서만 사용할 수 있습니다.')
         if self.llm.get('briefing_separate_schedule') is True:
             explanation = ExplanationSettings(**self.strategy_explanation)

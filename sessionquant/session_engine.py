@@ -51,7 +51,7 @@ class SessionEngine:
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
                  candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None,
                  benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None,quote_recovery_wait=False,
-                 submission_quote_buys=False):
+                 submission_quote_buys=False,submission_quote_sells=False):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
@@ -64,6 +64,11 @@ class SessionEngine:
         if submission_quote_buys and settings is not None and settings.paper_fill_model!='market_v2':
             raise ValueError('주문 시점 호가 체결은 market_v2 모의 장부에서만 사용할 수 있습니다.')
         self.submission_quote_buys=submission_quote_buys
+        if type(submission_quote_sells) is not bool:
+            raise ValueError('매도 주문 시점 호가 체결 설정은 불리언이어야 합니다.')
+        if submission_quote_sells and settings is not None and settings.paper_fill_model!='market_v2':
+            raise ValueError('주문 시점 호가 체결은 market_v2 모의 장부에서만 사용할 수 있습니다.')
+        self.submission_quote_sells=submission_quote_sells
         self.selection_frame=None
         self.selection_source_id=None
         self._batch_candidate_scope=[]
@@ -153,12 +158,16 @@ class SessionEngine:
             raise ValueError("기존 PennyQuant DB는 호환 실행 경로로 열거나 새 DB를 지정하세요.")
         self.manager = PortfolioManager(self.broker,self.exit_policy)
         self.exit_manager = SessionExitManager(self.broker)
-        from .portfolio.execution_guard import BuyExecutionGuard
+        from .portfolio.execution_guard import BuyExecutionGuard, SellExecutionGuard
         if research_replay and execution_clock is not None:
             raise ValueError('기록 재생에는 실제 실행 시계를 사용할 수 없습니다.')
         self.execution_guard = BuyExecutionGuard(self.broker, execution_clock,
             last_checked_at=(stored or {}).get('last_execution_check_at'),
             eligibility_check=self._execution_eligibility_allowed)
+        self.sell_execution_guard=SellExecutionGuard(self.broker,execution_clock,
+            last_checked_at=(stored or {}).get('last_sell_execution_check_at'))
+        self.manager.exit_submitter=self._submit_exit
+        self.exit_manager.manager.exit_submitter=self._submit_exit
         # Display-only latest assessment; never an entry/exit input. Preserve its
         # original timestamp through heartbeat-only ticks and restarts.
         self._lab_rows=((self.repo.get_control('sessionquant_context',{}) or {}).get('strategy_lab',{}).get('rows',[])
@@ -291,6 +300,8 @@ class SessionEngine:
                  'last_decision_at':self.last_decision_at.isoformat() if self.last_decision_at else None,
                  'last_execution_check_at':self.execution_guard.last_checked_at.isoformat()
                      if self.execution_guard.last_checked_at else None,
+                 **({'last_sell_execution_check_at':self.sell_execution_guard.last_checked_at.isoformat()}
+                    if self.sell_execution_guard.last_checked_at else {}),
                  "market_symbols": sorted(self.market_symbols), "consumed_signals": sorted(self.consumed_signals),
                  "risk_records": self.risk_records}
         self.repo.save_state(state)
@@ -302,8 +313,9 @@ class SessionEngine:
         for fill in self.broker.fills:
             row=serialize(fill)
             order=self.broker.orders.get(fill.client_id)
-            if order and order._order_audit().get('buy_fill_timing')=='submission_quote':
-                row['buy_fill_timing']='submission_quote' if fill.timestamp==order.submitted_at else 'next_quote'
+            timing_key=fill.side+'_fill_timing'
+            if order and order._order_audit().get(timing_key)=='submission_quote':
+                row[timing_key]='submission_quote' if fill.timestamp==order.submitted_at else 'next_quote'
             self._record_changed("executions", fill.id, row)
         self.repo.replace_positions(self.broker.positions)
         for alert in self.broker.alerts:
@@ -330,6 +342,7 @@ class SessionEngine:
                    "paper_fill_model":self.broker.settings.paper_fill_model, "paper_ledger_version":2,
                    'quote_recovery_wait':self.quote_recovery_wait,
                    'submission_quote_buys':self.submission_quote_buys,
+                   'submission_quote_sells':self.submission_quote_sells,
                    "source_label": "합성 검증 자료" if self.synthetic else "수신 시각을 보존한 시장 자료"}
         if self.strategy == 'pullback_simple':
             frame=self.selection_frame or {}
@@ -389,6 +402,15 @@ class SessionEngine:
             return 'websocket_quote_unavailable'
         return self.execution_guard.fill_blocker(order, quote, now)
 
+    def _sell_fill_blocker(self, order, quote, now):
+        if self.market.quote_is_conflicted(quote):return 'runtime_quote_stale_or_invalid'
+        return self.sell_execution_guard.fill_blocker(order,quote,now)
+
+    def _submit_exit(self, intent, quote, now):
+        if not self.submission_quote_sells:return self.broker.submit_order(intent)
+        return self.broker.submit_sell_with_quote(intent,quote,now,
+            sell_fill_guard=lambda order,book:self._sell_fill_blocker(order,book,now))
+
     @timed('engine_batch')
     def apply_batch(self, events: list[dict], now: datetime, *, cursor: int | None = None, controls: dict | None = None):
         if self.failed:
@@ -409,6 +431,7 @@ class SessionEngine:
         self._batch_quote_entry_allowed = {}
         self._batch_quote_wait_evidence = {}
         self.execution_guard.begin_batch()
+        self.sell_execution_guard.begin_batch()
         self._batch_scope_blockers = {} if self.watchlist_policy is not None or self.quote_entry_guard is not None else None
         try:
             scope = getattr(self.watchlist_policy, 'read_scope', nullcontext)
@@ -496,7 +519,9 @@ class SessionEngine:
                             and (self.quote_recovery_wait or self._quote_entry_allowed(quote.symbol,now)))
                     self.broker.process_quote(quote, now, paper_tradable=paper_tradable,
                         buy_fill_guard=(lambda order, book: self._buy_fill_blocker(order, book, now))
-                            if self.execution_guard.enabled or self.quote_entry_guard is not None else None)
+                            if self.execution_guard.enabled or self.quote_entry_guard is not None else None,
+                        sell_fill_guard=(lambda order,book:self._sell_fill_blocker(order,book,now))
+                            if self.submission_quote_sells else None)
                 for symbol in list(self.broker.positions):
                     quote = self.market.quotes.get(symbol)
                     risk = self.risk_context(now,symbol)
