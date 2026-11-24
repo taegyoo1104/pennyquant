@@ -2,9 +2,11 @@
 # Catch up after a successful backup; never restart the app or rebuild tables.
 set -Eeuo pipefail
 cd /opt/sessionquant
-[[ $# == 1 ]] || { echo '이번 작업 직전의 백업 상태가 필요합니다.' >&2; exit 1; }
-for sq_pass in 1 2 3 4 5; do
-    echo "백업 후 자료 정리: $sq_pass / 5"
+[[ $# == 1 || ( $# == 2 && $2 == --nightly ) ]] || { echo '이번 작업 직전의 백업 상태가 필요합니다.' >&2; exit 1; }
+sq_passes=5
+if [[ ${2:-} == --nightly ]]; then sq_passes=100; fi
+for ((sq_pass=1; sq_pass<=sq_passes; sq_pass++)); do
+    echo "백업 후 자료 정리: $sq_pass / $sq_passes"
     timeout --kill-after=15 120 bash deploy/gcp/retention.sh "$1" < /dev/null
     sq_pending=$(python3 - /var/lib/sessionquant/app/retention-last.json <<'PY'
 import json, sys
@@ -19,4 +21,6 @@ PY
 )
     if [[ "$sq_pending" == no ]]; then exit 0; fi
 done
-echo '자료 정리 5회 한도에 도달했습니다. 남은 대상은 시스템·설정에서 확인하세요. DB 파일 축소는 수행하지 않았습니다.'
+echo "자료 정리 ${sq_passes}회 한도에 도달했습니다. 남은 대상은 시스템·설정에서 확인하세요. DB 파일 축소는 수행하지 않았습니다."
+
+[[ ${2:-} != --nightly ]] || exit 2

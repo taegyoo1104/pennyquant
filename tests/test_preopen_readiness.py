@@ -123,7 +123,7 @@ def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,pa
     import os
     from test_gcp_deployment import executable
     resume = paused == 'resume'
-    expected_failure = failure if not (resume and failure == 'backup') else ''
+    expected_failure = failure if not ((resume and failure == 'backup') or (not resume and failure == 'retention')) else ''
     repo=tmp_path/'repo';deploy=repo/'deploy/gcp';deploy.mkdir(parents=True)
     stage=tmp_path/'stage';(stage/'deploy/gcp').mkdir(parents=True)
     etc=tmp_path/'etc';etc.mkdir();(etc/'app.env').write_text('PRIVATE')
@@ -180,7 +180,7 @@ exit 0
     if failure in ('build','masked'):assert 'systemctl stop sessionquant.service' not in log
     if failure=='upgrade':
         assert ('backup\n' in log) is (not resume) and 'check\n' not in log
-    if failure=='retention':
+    if failure=='retention' and resume:
         assert ('backup\n' in log) is (not resume) and 'retention\n' in log and 'check\n' not in log
     if not expected_failure:
         assert 'docker build --build-arg SQ_BUILD_REVISION='+'a'*40+' --build-arg SQ_BUILD_SOURCE=reviewed_archive' in log
@@ -195,7 +195,11 @@ exit 0
             assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
             assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
             assert log.index('backup\n')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
-        assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('retention\n')<log.index('check\n')
+        if resume:
+            assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('retention\n')<log.index('check\n')
+        else:
+            assert 'retention\n' not in log
+            assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
         assert 'is-active --quiet sessionquant-market-close.timer' in log
         assert 'is-active --quiet sessionquant-storage-guard.timer' in log
 

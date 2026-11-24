@@ -8,8 +8,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/sessionquant/deploy/gcp/start.sh
-ExecStop=/usr/bin/docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml stop -t 180
-TimeoutStartSec=600
+ExecStop=/usr/bin/docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml stop -t 180 app
+TimeoutStartSec=840
 TimeoutStopSec=240
 
 [Install]

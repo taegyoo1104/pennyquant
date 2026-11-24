@@ -157,15 +157,25 @@ if [[ "$*" == *is-enabled* ]]; then echo disabled; exit 1; fi
         assert ' start ' not in output and 'poweroff' not in output
 
 
+@pytest.mark.parametrize('checkpoint', ['absent', 'valid', 'invalid'])
 @pytest.mark.parametrize('resume', [False, True])
 @pytest.mark.parametrize('failure', ['', 'engine', 'guard', 'backup', 'retention', 'resume_guard', 'receipt_changed'])
-def test_offhours_update_backs_up_before_install_and_never_starts_engine(tmp_path, failure, resume):
-    if (resume and failure == 'backup') or (not resume and failure in {'resume_guard', 'receipt_changed'}):
+def test_offhours_update_backs_up_before_install_and_never_starts_engine(tmp_path, failure, resume, checkpoint):
+    if (resume and checkpoint != "absent") or (checkpoint == "valid" and failure == "backup"):
+        pytest.skip("inapplicable backup path")
+    if (resume and failure == 'backup') or (not resume and failure in {'resume_guard', 'receipt_changed', 'retention'}):
         pytest.skip('not applicable to this update mode')
     root = tmp_path/'repo'; (root/'deploy/gcp').mkdir(parents=True)
     stage = tmp_path/'archive'; deploy = stage/'deploy/gcp'; deploy.mkdir(parents=True)
     etc = tmp_path/'etc'; etc.mkdir(); (etc/'backup-status').write_text('UPLOADED previous')
     (etc/'retention-status').write_text('FAILED fixture')
+    if checkpoint != 'absent':
+        (etc/'nightly-checkpoint.json').write_text('{}')
+        (etc/'nightly-seal.json').write_text('{}')
+    (deploy/'nightly_checkpoint.py').write_text("""import os,sys
+with open(os.environ['CALLS'],'a') as f:f.write('checkpoint-'+sys.argv[1]+'\\n')
+if sys.argv[1]=='verify' and os.environ['CHECKPOINT']=='invalid':raise SystemExit(1)
+""")
     bindir = tmp_path/'bin'; bindir.mkdir(); calls = tmp_path/'calls'
     (deploy/'prepare_update.py').write_text('''import os,sys,shutil
 from pathlib import Path
@@ -219,18 +229,23 @@ if [[ "$1" == is-enabled ]]; then echo disabled; fi
     result = subprocess.run(['bash', str(script), 'a'*40, '--resume-off-hours' if resume else '--off-hours'], capture_output=True,
                             text=True, timeout=15, env={**os.environ,
                             'PATH': str(bindir)+':'+os.environ['PATH'], 'CALLS': str(calls),
-                            'ARCHIVE': str(stage), 'RECEIPT': str(etc/'backup-status'), 'FAILURE': failure})
+                            'ARCHIVE': str(stage), 'RECEIPT': str(etc/'backup-status'), 'FAILURE': failure, 'CHECKPOINT': checkpoint})
     assert (result.returncode == 0) is (not failure), result.stderr
     lines = calls.read_text().splitlines()
     assert 'systemctl start sessionquant.service' not in lines
     assert not any('check-toss' in line or 'poweroff' in line for line in lines)
     if not failure:
-        assert lines.index('install-code') < lines.index('retention')
         if resume:
+            assert lines.index('install-code') < lines.index('retention')
             assert 'backup' not in lines and lines.count('resume-check') == 3
+        elif checkpoint == 'valid':
+            assert 'backup' not in lines and lines.count('checkpoint-verify') == 2
+            assert lines.index('install-code') < lines.index('checkpoint-writable') < lines.index('preopen --offline')
         else:
             assert lines.index('backup') < lines.index('install-code')
-        assert lines.index('retention') < lines.index('preopen --offline') < lines.index('inspection')
+        if resume: assert lines.index('retention') < lines.index('preopen --offline')
+        else: assert 'retention' not in lines
+        assert lines.index('preopen --offline') < lines.index('inspection')
     else:
         assert 'inspection' not in lines
         if failure == 'retention':

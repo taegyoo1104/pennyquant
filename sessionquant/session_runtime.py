@@ -200,7 +200,10 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                                    benchmark_collection_enabled=include_benchmarks if config.source=='toss' else None,
                                    market_reference_symbols=(reference_config['symbols'] if reference_config['enabled'] else [])
                                    if config.source=='toss' else None,
-                                   execution_clock=(lambda: datetime.now(timezone.utc)) if config.source=='toss' else None)
+                                   execution_clock=(lambda: datetime.now(timezone.utc)) if config.source=='toss' else None,
+                                   quote_recovery_wait=config.quote_transport=='websocket',
+                                   submission_quote_buys=config.submission_quote_buys,
+                                   submission_quote_sells=config.submission_quote_sells)
             if config.recording_enabled:
                 from .research.journal import start,stop
                 start(repo,engine,source=config.source)
@@ -242,6 +245,7 @@ async def _run_session(config: SessionConfig, *, no_dashboard=False, port=8501, 
                     market.quote_feed=quote_feed
                     engine.quote_entry_guard=lambda symbol,stamp: quote_delivery.entry_allowed(
                         symbol,stamp,known_quotes=engine.market.quotes)
+                    engine.quote_entry_evidence=quote_delivery.entry_evidence
                     quote_task=asyncio.create_task(quote_feed.run())
                     if reference_config['websocket_chart']:
                         from .market_reference.trade_feed import BenchmarkTradeFeed, VIEW as BENCHMARK_VIEW

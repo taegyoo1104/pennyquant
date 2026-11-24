@@ -1,21 +1,35 @@
 """공개 호가만 사용하는 소수점 시장가 근사. 실제 매칭·지연을 보장하지 않는다."""
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
+import json
 
 from .models import ZERO, QUANTITY_STEP, FractionalPosition, aware, decimal
 
 
 def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill_qty=None, paper_tradable=None,
-                         buy_fill_guard=None):
+                         buy_fill_guard=None, sell_fill_guard=None, submission_order=None):
     now = aware(now or quote.received_at)
+    if submission_order is not None:
+        if (broker.orders.get(submission_order.client_id) is not submission_order
+                or submission_order.intent.symbol!=quote.symbol
+                or submission_order.submitted_at!=now or submission_order.status!='accepted'
+                or submission_order.filled_qty or submission_order.cancel_requested_at is not None
+                or submission_order._order_audit().get(submission_order.intent.side+'_fill_timing')!='submission_quote'):
+            raise ValueError('새 모의 주문의 제출 시점에만 즉시 체결을 시도할 수 있습니다.')
     if broker.last_event_at and now < broker.last_event_at:
         return []
     broker.roll_session(now)
     broker.expire_orders(now)
 
     def unfilled(reason):
-        for order in broker.get_open_orders(quote.symbol):
+        for order in ([submission_order] if submission_order is not None else broker.get_open_orders(quote.symbol)):
             if order.status not in {'unknown','cancel_pending'}:
+                if (reason=='duplicate_or_out_of_order_quote'
+                        and order._order_audit().get('sell_fill_timing')=='submission_quote'
+                        and order.unfilled_reason.startswith('runtime_')):
+                    # A repeated book after an immediate exit attempt must not
+                    # erase the actual runtime reason that blocked that fill.
+                    continue
                 order.unfilled_reason = reason
         return []
 
@@ -25,9 +39,13 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
     schedule = SessionExitManager(broker).schedule(now)
     stamp = aware(quote.timestamp)
     previous = broker.quote_sequences.get(quote.symbol)
-    if previous and stamp <= aware(previous):
+    fingerprint=json.dumps([stamp.isoformat(),str(quote.bid),str(quote.ask),quote.bid_size,quote.ask_size])
+    same_submission_book=(submission_order is not None and previous and stamp==aware(previous)
+                          and broker.quote_watermarks.get(quote.symbol)==fingerprint)
+    if previous and stamp <= aware(previous) and not same_submission_book:
         return unfilled('duplicate_or_out_of_order_quote')
     broker.quote_sequences[quote.symbol] = stamp.isoformat()
+    broker.quote_watermarks[quote.symbol] = fingerprint
     bid,ask = decimal(quote.bid),decimal(quote.ask)
     if quote.symbol in broker.positions:
         broker.positions[quote.symbol].mark_price = bid
@@ -37,14 +55,21 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         return unfilled('outside_fractional_execution_window')
     participation = broker.settings.paper_depth_participation
     depths = {'buy':decimal(quote.ask_size)*participation,'sell':decimal(quote.bid_size)*participation}
+    if submission_order is not None:
+        # Reusing a still-fresh decision book never renews its displayed depth.
+        # Fills and their source clocks survive restart in the existing ledger.
+        side=submission_order.intent.side
+        used=sum((fill.qty for fill in broker.fills if fill.symbol==quote.symbol
+                  and fill.side==side and fill.quote_timestamp==stamp),ZERO)
+        depths[side]=max(ZERO,depths[side]-used)
     liquidity = decimal(max_fill_qty,'max_fill_qty',nonnegative=True) if max_fill_qty is not None else None
     fills = []
-    for order in list(broker.get_open_orders(quote.symbol)):
+    for order in ([submission_order] if submission_order is not None else list(broker.get_open_orders(quote.symbol))):
         intent = order.intent
         if order.status == 'unknown':
             continue
         submitted = order.submitted_at or intent.created_at
-        if order.accepted_at is None or stamp <= submitted or stamp < order.accepted_at:
+        if submission_order is None and (order.accepted_at is None or stamp <= submitted or stamp < order.accepted_at):
             order.unfilled_reason = 'awaiting_post_acceptance_quote'
             continue
         if order.status not in {'accepted','partial','cancel_pending'}:
@@ -53,7 +78,7 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         if side == 'buy':
             from ..session_window import permits_new_entry
             if not permits_new_entry(now,min_entry_to_exit_minutes=broker.settings.min_entry_to_exit_minutes):
-                broker.cancel_order(order.client_id,now)
+                broker.cancel_order(order.client_id,now,reason='outside_entry_window')
                 continue
             # 별도 Paper 정책은 호출자가 재검사한다. 원본 quote.tradable은 변경하지 않는다.
             if broker.halted or not (quote.tradable if paper_tradable is None else paper_tradable):
@@ -103,8 +128,13 @@ def process_market_quote(broker, quote, now: datetime | None = None, *, max_fill
         else:
             position = broker.positions.get(intent.symbol)
             if position is None or qty > position.qty:
-                broker.cancel_order(order.client_id,now)
+                broker.cancel_order(order.client_id,now,reason='insufficient_sellable_quantity')
                 continue
+            if sell_fill_guard is not None:
+                reason=sell_fill_guard(order,quote)
+                if reason:
+                    order.unfilled_reason=reason
+                    continue
             entry_fee = position.entry_fee*qty/position.qty
             pnl = notional-fee-position.avg_price*qty-entry_fee
             broker.cash += notional-fee

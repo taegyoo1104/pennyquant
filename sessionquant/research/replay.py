@@ -69,6 +69,18 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
         raise ValueError('초기 포지션·주문이 없는 시점부터 기록한 묶음이 필요합니다.')
     first = starts[0]['data']
     guard_versions = {row['run_id']: row['data'].get('execution_guard_version') for row in starts}
+    recovery_policies = {row['run_id']: row['data'].get('quote_recovery_wait', False) for row in starts}
+    submission_policies = {row['run_id']: row['data'].get('submission_quote_buys', False) for row in starts}
+    sell_policies = {row['run_id']:row['data'].get('submission_quote_sells',False) for row in starts}
+    sell_guard_versions={row['run_id']:row['data'].get('sell_execution_guard_version') for row in starts}
+    if any(type(value) is not bool for value in sell_policies.values()):
+        raise ValueError('지원하지 않는 매도 주문 시점 호가 체결 기록입니다.')
+    if any(value is not None and (type(value) is not int or value!=1) for value in sell_guard_versions.values()):
+        raise ValueError('지원하지 않는 매도 실행 검사 기록 버전입니다.')
+    if any(type(value) is not bool for value in submission_policies.values()):
+        raise ValueError('지원하지 않는 주문 시점 호가 체결 기록입니다.')
+    if any(type(value) is not bool for value in recovery_policies.values()):
+        raise ValueError('지원하지 않는 호가 복구 대기 기록입니다.')
     if any(version is not None and (type(version) is not int or version != 1) for version in guard_versions.values()):
         raise ValueError('지원하지 않는 매수 실행 검사 기록 버전입니다.')
     if len({row['data'].get('paper_data_policy','strict') for row in starts}) != 1:
@@ -91,6 +103,9 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
     if first.get('paper_data_policy','strict') != 'strict':
         binding=identity([binding,{'paper_data_policy':first['paper_data_policy']}])
     if candidate_options.enabled:binding=identity([binding,serialize(candidate_options)])
+    if any(recovery_policies.values()):binding=identity([binding,{'quote_recovery_wait':recovery_policies}])
+    if any(submission_policies.values()):binding=identity([binding,{'submission_quote_buys':submission_policies}])
+    if any(sell_policies.values()):binding=identity([binding,{'submission_quote_sells':sell_policies}])
     stack, repo = _open(db_path,'sqlite')
     with stack:
         if repo.namespace_has_data() and not resume:raise ValueError('재생 장부가 이미 있습니다. 새 DB 또는 --resume을 지정하세요.')
@@ -129,7 +144,31 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
                     if not universe.members(stamp):raise ValueError('처리 당시 확인 가능한 유니버스 이력이 없습니다.')
                     news.contexts = data.get('news_contexts') or {}
                     allowed=data.get('quote_entry_allowed')
+                    recovery_policy=recovery_policies.get(row['run_id'],False)
+                    recorded_policy=data.get('quote_recovery_wait',recovery_policy)
+                    if type(recorded_policy) is not bool or recorded_policy != recovery_policy:
+                        raise ValueError('실행 중 호가 복구 대기 기록이 바뀌었습니다.')
+                    engine.quote_recovery_wait=recovery_policy
+                    submission_policy=submission_policies.get(row['run_id'],False)
+                    recorded_submission=data.get('submission_quote_buys',submission_policy)
+                    if type(recorded_submission) is not bool or recorded_submission!=submission_policy:
+                        raise ValueError('실행 중 주문 시점 호가 체결 기록이 바뀌었습니다.')
+                    engine.submission_quote_buys=submission_policy
+                    sell_policy=sell_policies.get(row['run_id'],False)
+                    recorded_sell=data.get('submission_quote_sells',sell_policy)
+                    if type(recorded_sell) is not bool or recorded_sell!=sell_policy:
+                        raise ValueError('실행 중 매도 주문 시점 호가 체결 기록이 바뀌었습니다.')
+                    engine.submission_quote_sells=sell_policy
+                    sell_version=data.get('sell_execution_guard_version',sell_guard_versions.get(row['run_id']))
+                    if sell_version is not None and (type(sell_version) is not int or sell_version!=1):
+                        raise ValueError('지원하지 않는 매도 실행 검사 기록 버전입니다.')
+                    engine.sell_execution_guard.recorded=(data.get('sell_execution_checks')
+                        if data.get('sell_execution_checks') is not None else {}) if (
+                            sell_guard_versions.get(row['run_id'])==1 or sell_version==1) else None
                     engine.quote_entry_guard=(lambda symbol,now,values=allowed: values.get(symbol,False)) if allowed is not None else None
+                    evidence=data.get('quote_wait_evidence') or {}
+                    if not isinstance(evidence,dict):raise ValueError('호가 대기 근거 형식이 올바르지 않습니다.')
+                    engine.quote_entry_evidence=lambda symbol,values=evidence: values.get(symbol,{})
                     guard_version = data.get('execution_guard_version', guard_versions.get(row['run_id']))
                     if guard_version is not None and (type(guard_version) is not int or guard_version != 1):
                         raise ValueError('지원하지 않는 매수 실행 검사 기록 버전입니다.')
