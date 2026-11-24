@@ -90,7 +90,7 @@ class HistoryStore:
     @timed('history_save')
     def save(self, symbol, day, bars, *, progress=None):
         old, previous = self.get(symbol, day)
-        from .candle_revisions import grouped_minutes, retain_observation, ordered_observations
+        from .candle_revisions import grouped_minutes, retain_observation, ordered_observations, value_key
         groups = grouped_minutes(previous)
         changed = False
         for bar in ordered_observations(groups, bars):
@@ -100,6 +100,10 @@ class HistoryStore:
                 raise ValueError('과거 분봉의 종목·거래일·출처·확정 시각을 확인하세요.')
             rows = groups[(bar.symbol, bar.timestamp)]
             if retain_observation(rows, bar):
+                # An earlier receipt for an otherwise unchanged minute replaces
+                # the ordinary duplicate, as before. Conflict evidence is kept.
+                if rows and {value_key(b) for b in rows} == {value_key(bar)}:
+                    rows.clear()
                 rows.append(bar)
                 changed = True
         values = sorted((b for rows in groups.values() for b in rows), key=lambda b:(b.timestamp,b.received_at))
