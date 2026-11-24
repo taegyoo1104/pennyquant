@@ -68,7 +68,7 @@ class SessionExitManager:
         return bool(schedule and schedule.entry_start <= now < schedule.entry_end and not self.broker.halted)
 
     def tick(self, now: datetime, quotes: dict) -> dict:
-        """취소·청산 의도만 만들고 실제 모의 체결은 새 호가 처리에 맡긴다."""
+        """청산을 요청한다. 체결 시점은 연결된 모의 주문 처리 정책을 따른다."""
         now = aware(now)
         schedule = self.schedule(now)
         self.broker.roll_session(now)
@@ -79,7 +79,8 @@ class SessionExitManager:
         if not can_enter:
             for order in self.broker.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.broker.cancel_order(order.client_id,now)
+                    self.broker.cancel_order(order.client_id,now,
+                        reason='daily_loss_limit' if self.broker.halted else 'outside_entry_window')
             if schedule and now >= schedule.exit_start:
                 for order in self.broker.get_open_orders():
                     if order.intent.side == 'buy':

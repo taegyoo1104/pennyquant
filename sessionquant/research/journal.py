@@ -78,6 +78,10 @@ def start(repo, engine, *, source):
         'candidate_selection':serialize(engine.candidate_selector.settings),
         'source_reference_filter':serialize(engine.macro_reference_risk.settings) if engine.macro_reference_risk else None,
         'execution_guard_version':1 if engine.execution_guard.enabled else None,
+        'quote_recovery_wait':engine.quote_recovery_wait,
+        'submission_quote_buys':engine.submission_quote_buys,
+        'submission_quote_sells':engine.submission_quote_sells,
+        'sell_execution_guard_version':1 if engine.submission_quote_sells and engine.sell_execution_guard.enabled else None,
         'recording_version': 1})
     for name in CONTROLS:
         value = repo.get_control(name)
@@ -107,7 +111,14 @@ def frame(engine, events, now, *, manual_halt):
         'quote_entry_allowed':engine._batch_quote_entry_allowed if engine.quote_entry_guard is not None else None,
         'execution_checks':engine.execution_guard.checks if engine.execution_guard.enabled else None,
         'execution_guard_version':1 if engine.execution_guard.enabled else None,
+        'quote_recovery_wait':engine.quote_recovery_wait,
+        'submission_quote_buys':engine.submission_quote_buys,
+        'submission_quote_sells':engine.submission_quote_sells,
+        **({'sell_execution_guard_version':1,'sell_execution_checks':engine.sell_execution_guard.checks,
+            'sell_execution_check_overflow':engine.sell_execution_guard.overflow_count}
+           if engine.submission_quote_sells and engine.sell_execution_guard.enabled else {}),
         'execution_check_overflow':engine.execution_guard.overflow_count,
+        **({'quote_wait_evidence':engine._batch_quote_wait_evidence} if engine._batch_quote_wait_evidence else {}),
         'quality_rows': [{key:row.get(key) for key in ('symbol','eligibility_verified','quote_fresh','rvol','bars',
                          'strategy_bars','strategy_rvol','strategy_rvol_status','collection_warnings')}
                          for symbol,row in engine.market.quality_rows.items() if symbol in {item['symbol'] for item in engine._batch_decisions}],

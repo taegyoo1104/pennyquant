@@ -182,6 +182,41 @@ class FractionalOrder:
     unfilled_reason: str = ''
     lifecycle: list[dict] = field(default_factory=list)
 
+    def _order_audit(self, *, create=False):
+        # Keep bounded annotations in the existing lifecycle format so older
+        # app images can still restore the same order/ledger after rollback.
+        if not self.lifecycle:
+            if not create:
+                return {}
+            self.lifecycle.append({'event':'audit','status':self.status,'source':'paper_assumption',
+                'observed_at':aware(self.submitted_at or self.intent.created_at).isoformat()})
+        first = self.lifecycle[0]
+        return first.setdefault('order_audit', {}) if create else first.get('order_audit', {})
+
+    @property
+    def cancel_reason(self):
+        return self._order_audit().get('cancel_reason', '')
+
+    @cancel_reason.setter
+    def cancel_reason(self, value):
+        self._order_audit(create=True)['cancel_reason'] = value
+
+    @property
+    def cancel_unfilled_reason(self):
+        return self._order_audit().get('cancel_unfilled_reason', '')
+
+    @cancel_unfilled_reason.setter
+    def cancel_unfilled_reason(self, value):
+        self._order_audit(create=True)['cancel_unfilled_reason'] = value
+
+    @property
+    def quote_wait(self):
+        return self._order_audit().get('quote_wait', {})
+
+    @quote_wait.setter
+    def quote_wait(self, value):
+        self._order_audit(create=True)['quote_wait'] = value
+
     @property
     def client_id(self):
         return self.intent.client_id

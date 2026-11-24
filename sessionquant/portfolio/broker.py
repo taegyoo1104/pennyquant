@@ -82,7 +82,7 @@ class PaperBroker:
             self.halted = False
             for order in self.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.cancel_order(order.client_id, now)
+                    self.cancel_order(order.client_id, now, reason='day_expired')
 
     def check_daily_loss(self, now: datetime) -> bool:
         self.roll_session(now)
@@ -90,7 +90,7 @@ class PaperBroker:
             self.halted = True
             for order in self.get_open_orders():
                 if order.intent.side == 'buy':
-                    self.cancel_order(order.client_id, now)
+                    self.cancel_order(order.client_id, now, reason='daily_loss_limit')
             self._alert('daily_loss_limit', now, '일일 손실 한도에 도달하여 당일 신규 매수를 중단했습니다.')
         return self.halted
 
@@ -169,7 +169,34 @@ class PaperBroker:
             order.lifecycle.append({'status':status,'event':event or status,'observed_at':aware(now).isoformat(),
                 'source':'paper_assumption','fill_model_version':order.fill_model_version})
 
-    def cancel_order(self, client_id: str, now: datetime | None = None) -> FractionalOrder | None:
+    def submit_buy_with_quote(self, intent, quote, now, *, paper_tradable=None, buy_fill_guard=None):
+        """Explicit paper assumption: attempt a new buy on its submission book once."""
+        if intent.side!='buy':raise ValueError('모의 매수 주문이 필요합니다.')
+        return self._submit_with_quote(intent,quote,now,paper_tradable=paper_tradable,buy_fill_guard=buy_fill_guard)
+
+    def submit_sell_with_quote(self, intent, quote, now, *, sell_fill_guard=None):
+        """Attempt a new paper exit on its current bid, without a new-quote wait."""
+        if intent.side!='sell':raise ValueError('모의 매도 주문이 필요합니다.')
+        return self._submit_with_quote(intent,quote,now,sell_fill_guard=sell_fill_guard)
+
+    def _submit_with_quote(self, intent, quote, now, *, paper_tradable=None, buy_fill_guard=None, sell_fill_guard=None):
+        if quote.symbol!=intent.symbol or self.settings.paper_fill_model!='market_v2':
+            raise ValueError('주문 시점 호가 체결은 같은 종목의 market_v2 모의 주문에만 적용합니다.')
+        if paper_tradable is not None and type(paper_tradable) is not bool:
+            raise ValueError('Paper 거래 허용 값은 불리언이어야 합니다.')
+        existed=intent.client_id in self.orders
+        order=self.submit_order(intent,now)
+        if existed or order.status=='rejected':return order
+        order._order_audit(create=True)[intent.side+'_fill_timing']='submission_quote'
+        order.assumed_latency=ZERO
+        order.accepted_at=order.submitted_at
+        self._transition(order,'accepted',order.submitted_at)
+        from .market_fills import process_market_quote
+        process_market_quote(self,quote,now,paper_tradable=paper_tradable,
+                             buy_fill_guard=buy_fill_guard,sell_fill_guard=sell_fill_guard,submission_order=order)
+        return order
+
+    def cancel_order(self, client_id: str, now: datetime | None = None, *, reason='cancelled') -> FractionalOrder | None:
         order = self.orders.get(client_id)
         if order is None or order.status not in OPEN_STATUSES:
             return order
@@ -182,6 +209,8 @@ class PaperBroker:
             return order
         if order.cancel_effective_at is not None:
             return order
+        order.cancel_reason = reason
+        order.cancel_unfilled_reason = order.unfilled_reason
         order.cancel_requested_at = stamp
         delay = ZERO if self.settings.paper_fill_model == 'legacy_limit_v1' else self.settings.paper_cancel_latency_seconds
         order.cancel_effective_at = stamp+timedelta(microseconds=int(delay*1_000_000))
@@ -222,6 +251,8 @@ class PaperBroker:
                 ny = ZoneInfo('America/New_York')
                 if (now.astimezone(ny).date() > submitted.astimezone(ny).date()
                         or (schedule and now >= schedule.closes_at)):
+                    order.cancel_reason = 'day_expired'
+                    order.cancel_unfilled_reason = order.unfilled_reason
                     self._transition(order,'cancelled',now,event='day_expired')
                     order.unfilled_reason = 'day_expired'
                     continue
@@ -236,7 +267,7 @@ class PaperBroker:
                     order.unfilled_reason = 'cancelled'
                     continue
             if (now-submitted).total_seconds() >= self.settings.order_ttl_seconds:
-                self.cancel_order(order.client_id,now)
+                self.cancel_order(order.client_id,now,reason='assumed_order_timeout')
                 if order.status == 'cancelled':
                     order.unfilled_reason = 'assumed_order_timeout'
 
@@ -251,7 +282,7 @@ class PaperBroker:
             return False
 
     def process_quote(self, quote, now: datetime | None = None, *, max_fill_qty: Decimal | None = None,
-                      paper_tradable: bool | None = None, buy_fill_guard=None) -> list[FractionalFill]:
+                      paper_tradable: bool | None = None, buy_fill_guard=None, sell_fill_guard=None) -> list[FractionalFill]:
         if paper_tradable is not None and type(paper_tradable) is not bool:
             raise ValueError('Paper 거래 허용 값은 불리언이어야 합니다.')
         if paper_tradable is not None and self.settings.paper_fill_model != 'market_v2':
@@ -261,7 +292,7 @@ class PaperBroker:
             return process_legacy_quote(self,quote,now,max_fill_qty=max_fill_qty,buy_fill_guard=buy_fill_guard)
         from .market_fills import process_market_quote
         return process_market_quote(self,quote,now,max_fill_qty=max_fill_qty,paper_tradable=paper_tradable,
-                                    buy_fill_guard=buy_fill_guard)
+                                    buy_fill_guard=buy_fill_guard,sell_fill_guard=sell_fill_guard)
 
     def _fill_record(self, order, qty, price, fee, now, pnl, quote):
         """주문 누적값과 체결별 비교 근거를 동일한 형식으로 기록한다."""

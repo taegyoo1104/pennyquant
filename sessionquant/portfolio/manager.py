@@ -15,6 +15,7 @@ class PortfolioManager:
         self.broker = broker
         self.settings = broker.settings
         self.exit_policy = exit_policy or ExitPolicy()
+        self.exit_submitter = None
 
     def plan_entry(self, symbol: str, ask, stop_price, now: datetime, *, market_state: str = 'UNKNOWN',
                    tradable: bool = False, fractional_supported: bool = False, trend_confirmed: bool = False,
@@ -169,7 +170,7 @@ class PortfolioManager:
             raise ValueError('청산 의도와 현재 보유 포지션의 생성 시각이 다릅니다.')
         for order in self.broker.get_open_orders(symbol):
             if order.intent.side == 'buy':
-                self.broker.cancel_order(order.client_id,now)
+                self.broker.cancel_order(order.client_id,now,reason='position_exit_pending')
         self.broker.expire_orders(now)
         if any(o.intent.side == 'buy' for o in self.broker.get_open_orders(symbol)):
             self.broker._alert('entry_cancel_unconfirmed',now,'매수 취소가 확인되지 않아 잔량 매도를 보류합니다.',symbol)
@@ -194,7 +195,7 @@ class PortfolioManager:
         limit = decimal(quote.bid) * (1 - self.settings.slippage_rate)
         intent = OrderIntent(client_id, symbol, 'sell', now, limit, qty=position.qty,
                              strategy=position.strategy, reason=latch['reason'],expected_price=decimal(quote.bid))
-        return self.broker.submit_order(intent)
+        return self.exit_submitter(intent,quote,now) if self.exit_submitter else self.broker.submit_order(intent)
 
     def check_exits(self, quote, now: datetime, *, bearish_signal: bool = False,
                     confirmed_adverse: bool = False, symbol=None) -> list:
