@@ -114,3 +114,51 @@ def test_dml_and_ddl_counters_include_privileged_writes_but_not_reads(checkpoint
         assert m.WRITE.match(name)
     for name in ('Com_select', 'Com_show_status', 'Com_show_tables', 'Com_commit', 'Com_begin'):
         assert not m.WRITE.match(name)
+
+
+@pytest.mark.parametrize('failure', ['', 'stop', 'pre_backup', 'cleanup', 'seal', 'final_backup', 'record'])
+def test_nightly_stage_failures_never_publish_success_or_delete_without_backup(tmp_path, failure):
+    import os
+    import subprocess
+    from test_gcp_deployment import executable
+    root=tmp_path/'repo';deploy=root/'deploy/gcp';deploy.mkdir(parents=True)
+    etc=tmp_path/'etc';etc.mkdir();(etc/'backup-status').write_text('UPLOADED previous')
+    calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
+    executable(bindir/'docker', '''echo "docker $*" >> "$CALLS"
+if [[ "$*" == *"stop -t 180 app"* && "$FAILURE" == stop ]]; then exit 1; fi
+if [[ "$*" == *"--services db"* ]]; then echo db; fi
+''')
+    executable(bindir/'systemctl', 'echo systemctl >> "$CALLS"\n')
+    executable(bindir/'sync', 'echo sync >> "$CALLS"\n')
+    executable(deploy/'inspect.sh', 'echo inspection >> "$CALLS"\n')
+    executable(deploy/'backup.sh', '''count=$(cat "$COUNT" 2>/dev/null || echo 0)
+count=$((count+1)); echo "$count" > "$COUNT"; echo "backup-$count" >> "$CALLS"
+if [[ ($count == 1 && "$FAILURE" == pre_backup) || ($count == 2 && "$FAILURE" == final_backup) ]]; then
+    echo 'FAILED test' > "$RECEIPT"; exit 1
+fi
+echo "UPLOADED backup-$count" > "$RECEIPT"
+''')
+    executable(deploy/'retention_after_update.sh', 'echo cleanup >> "$CALLS"\n[[ "$FAILURE" != cleanup ]]\n')
+    (deploy/'nightly_checkpoint.py').write_text('''import os,sys
+with open(os.environ['CALLS'],'a') as f:f.write(sys.argv[1]+'\\n')
+if sys.argv[1]==os.environ['FAILURE']:raise SystemExit(1)
+''')
+    script=tmp_path/'stop.sh'
+    script.write_text((DEPLOY/'stop.sh').read_text().replace('/opt/sessionquant',str(root))
+        .replace('/etc/sessionquant',str(etc)).replace('/run/sessionquant-stop.lock',str(tmp_path/'stop.lock'))
+        .replace('/run/sessionquant-update.lock',str(tmp_path/'update.lock')))
+    result=subprocess.run(['bash',str(script)],capture_output=True,text=True,timeout=10,
+        env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],'CALLS':str(calls),
+             'FAILURE':failure,'COUNT':str(tmp_path/'count'),'RECEIPT':str(etc/'backup-status')})
+    lines=calls.read_text().splitlines()
+    assert (result.returncode==0) is (not failure)
+    if failure=='stop':assert 'backup-1' not in lines and 'cleanup' not in lines
+    elif failure=='pre_backup':assert 'cleanup' not in lines and 'seal' not in lines
+    elif failure=='cleanup':assert 'seal' not in lines and 'backup-2' not in lines
+    elif failure=='seal':assert 'backup-2' not in lines and 'record' not in lines
+    elif failure=='final_backup':assert 'record' not in lines
+    else:
+        assert lines.index('backup-1') < lines.index('cleanup') < lines.index('seal') < lines.index('backup-2') < lines.index('record')
+    assert ('야간 정리·최종 백업 완료.' in result.stdout) is (not failure)
+    assert not any('down' in line for line in lines)
+    if failure!='stop':assert lines[-2:]==['sync','inspection']
