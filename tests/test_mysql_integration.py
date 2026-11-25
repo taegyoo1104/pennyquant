@@ -979,3 +979,40 @@ def test_mysql_dashboard_projection_keeps_precision_legacy_orders_and_namespace(
               'equity':'10.00000000000000000001', 'reserved_cash':None, 'positions':{}}}
     repo.save_state(legacy)
     assert repo.load_dashboard_state() == legacy
+
+
+@pytest.mark.parametrize('fail_write', [False, True])
+async def test_mysql_history_reconciliation_is_atomic(mysql_repositories, monkeypatch, fail_write):
+    from sessionquant.market.history import HistoryStore, KIND, history_plan
+    from sessionquant.market.history_repair import repair_conflict
+    from sessionquant.watchlist.budget import ReadCallBudget
+    from test_watchlist_history import NOW, Pages, minute_rows
+    repo = mysql_repositories()
+    store = HistoryStore(repo)
+    day, opened, closed = history_plan(NOW)[-1]
+    bars = minute_rows('AAPL', opened)
+    old = store.save('AAPL', day, bars+[replace(bars[0], volume=999)])
+    with repo.db.cursor() as cur:
+        cur.execute('SELECT COUNT(*) FROM pq_controls WHERE namespace=%s', (repo.namespace,))
+        before_count = cur.fetchone()[0]
+    if fail_write:
+        def fail(*a, **kw):
+            raise RuntimeError('injected write failure')
+        monkeypatch.setattr(repo, 'record', fail)
+        with pytest.raises(RuntimeError):
+            await repair_conflict(store, 'AAPL', day, opened, closed, Pages(bars), ReadCallBudget(4), now=NOW)
+    else:
+        result = await repair_conflict(store, 'AAPL', day, opened, closed, Pages(bars), ReadCallBudget(4), now=NOW)
+        assert result['status']=='REPAIRED'
+    reopened = mysql_repositories(repo.config.namespace, environment=repo.config.environment)
+    row = reopened.get_record(KIND, old['id'])
+    if fail_write:
+        assert row == old
+        with reopened.db.cursor() as cur:
+            cur.execute('SELECT COUNT(*) FROM pq_controls WHERE namespace=%s', (repo.namespace,))
+            assert cur.fetchone()[0] == before_count
+    else:
+        assert row['quality']['complete']
+        audit = reopened.get_control(result['audit_control'])
+        assert audit['before']==old and audit['after']==row
+    assert not reopened.all('orders')
