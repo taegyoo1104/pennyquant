@@ -372,6 +372,34 @@ def test_arrivals_include_new_rows_deleted_during_this_cleanup(mysql_repositorie
     assert measured["high_water_seq"] > 0 and report["deleted"] == 1
 
 
+def test_replay_growth_uses_covering_keys_then_bounded_primary_reads(mysql_repositories, tmp_path, monkeypatch):
+    now = datetime(2026, 11, 23, 18, tzinfo=timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    other = mysql_repositories(environment='PAPER_LOCAL')
+    policy = replace(POLICY, intraday_auxiliary=True)
+    prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))
+    for i in range(12):
+        seed(other, 'research_events', str(i), now, days=0, kind='engine_batch', run_id='other', data={})
+        seed(repo, 'research_events', str(i), now, days=0,
+             kind='engine_batch' if i % 2 == 0 else 'unknown_kind', run_id='current', data={})
+    original, queries = repo._execute, []
+    def record(sql, params=(), **kwargs):
+        if kwargs.get('optional_observation') and 'pq_research_events' in sql:
+            queries.append((sql, params))
+        return original(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', record)
+    later = now + timedelta(seconds=60)
+    result = prune_expired(repo, policy, now=later, apply=True, receipt=receipt(tmp_path, later))
+    generation = result['tables']['research_events']['observation']['generation']
+    assert generation['rows_min'] == 6 and generation['exact'] is True
+    key_sql, key_params = next((s, p) for s, p in queries if 'seq>%s' in s)
+    plan = original('EXPLAIN ' + key_sql, key_params, fetch='all')
+    assert 'Using index' in plan[0][-1]
+    payloads = [(s, p) for s, p in queries if 'FORCE INDEX (PRIMARY)' in s]
+    assert payloads and all(len(p) - 1 <= 10 for _, p in payloads)
+    assert result['inspected'] <= policy.max_rows
+
+
 def test_observation_failure_keeps_committed_cleanup_and_reports_unknown(mysql_repositories, tmp_path, monkeypatch):
     now = datetime.now(timezone.utc)
     repo = mysql_repositories(environment="PAPER_LOCAL")

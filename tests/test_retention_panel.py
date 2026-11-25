@@ -45,7 +45,7 @@ def test_present_backlog_and_capped_generation_are_minimum_counts_without_rates(
     summary = retention_summary(saved, NOW)
     assert saved == original
     assert summary['headline'] == '정리 대상이 남아 있습니다'
-    assert summary['backlog'] == '최소 12행' and summary['oldest_eligible_age'] == '9.5일'
+    assert summary['backlog'] == '최소 12행' and summary['oldest_eligible_age'] == '9.5일 전 기록'
     row = summary['tables'][0]
     assert row['남은 정리 대상'] == '최소 12행' and row['신규 저장 관측'] == '최소 200행'
     assert row['신규 관측 기간'] == '1.0일' and 'high_water_seq' not in row
@@ -58,8 +58,10 @@ def test_clear_zero_is_distinct_from_unknown_zero_and_first_generation_baseline(
                                                           'generation': {'rows_min': None, 'exact': False}}}}
     uncertain = retention_summary(unknown, NOW)
     assert cleared['backlog'] == '0행' and cleared['headline'] == '이번 관측에서 정리 대상 없음'
+    assert cleared['oldest_eligible_age'] == '해당 없음'
     assert uncertain['backlog'] == '미확인'
     assert uncertain['tables'][0]['남은 정리 대상'] == uncertain['tables'][0]['신규 저장 관측'] == '미확인'
+    assert uncertain['tables'][0]['가장 오래된 정리 대상'] == '미확인'
 
 
 def test_repeated_limits_request_measurement_without_inventing_a_backlog_count():
@@ -96,6 +98,22 @@ def test_future_naive_and_missing_run_times_do_not_look_recent():
         saved = report()
         saved['started_at'] = stamp
         assert retention_summary(saved, NOW)['age'] in {'미확인', '시각 확인 필요'}
+
+
+@pytest.mark.parametrize('stage', ['GENERATION', 'GENERATION_KEYS', 'GENERATION_PAYLOAD'])
+def test_growth_timeout_preserves_clear_backlog_and_names_optional_failure(stage):
+    saved = report(backlog_status='CLEAR', eligible_backlog_min=0, stop_reason='PASS_COMPLETE')
+    saved['tables'] = {'research_events': {'deleted': 2, 'observation': {
+        'backlog_status': 'CLEAR', 'eligible_rows_min': 0, 'backlog_exact': True,
+        'status': 'FAILED', 'error_details': {'stage': stage, 'code': 3024},
+        'generation': {'rows_min': None, 'exact': False}}}}
+    summary = retention_summary(saved, NOW)
+    assert summary['pass_status'] == '검사 순회 완료' and summary['backlog'] == '0행'
+    assert summary['observation_issues'] == 1
+    row = summary['tables'][0]
+    assert row['신규 저장 관측'] == '미확인' and row['남은 정리 대상'] == '0행'
+    assert row['가장 오래된 정리 대상'] == '해당 없음'
+    assert row['보조 통계 상태'] == '신규 저장 집계 시간 초과 · 정리 결과와 별도'
 
 
 def test_render_handles_saved_report_without_database_reads(monkeypatch):

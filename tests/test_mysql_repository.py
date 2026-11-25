@@ -184,6 +184,17 @@ def test_driver_code_is_reported_without_query_or_secrets(connection,caplog,code
     assert 'pq_engine_state' not in str(exc.value)+caplog.text
 
 
+def test_optional_observation_error_is_distinct_and_still_reported(connection, caplog):
+    repo = repository(connection)
+    connection.failure = 'SELECT'
+    connection.failure_code = 3024
+    with pytest.raises(RuntimeError) as exc:
+        repo._execute('SELECT PRIVATE FROM private_table', optional_observation=True)
+    assert '코드 3024' in str(exc.value)
+    assert '자료 정리 보조 통계 조회 실패 (삭제 작업과 별도)' in caplog.text
+    assert 'PRIVATE' not in caplog.text and 'private_table' not in caplog.text
+
+
 @pytest.mark.parametrize('code',['PRIVATE password',True,None,-1,70000])
 def test_non_numeric_or_invalid_driver_codes_are_not_echoed(code):
     from sessionquant.database.mysql_repository import mysql_failure_message

@@ -250,7 +250,21 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
         query_limit_ms = max(0, milliseconds)
         if milliseconds < 1 or limit < 1 or remaining < limit:
             raise ObservationBudgetExhausted("TIME_LIMIT" if milliseconds < 1 else "ROW_LIMIT")
-        rows = repo._execute(f"SELECT /*+ MAX_EXECUTION_TIME({milliseconds}) */ {sql}", params, fetch="all")
+        timing = observation.setdefault("timings", {}).setdefault(
+            phase, {"calls": 0, "seconds": 0.0, "max_seconds": 0.0, "timeouts": 0})
+        started = monotonic()
+        try:
+            rows = repo._execute(f"SELECT /*+ MAX_EXECUTION_TIME({milliseconds}) */ {sql}", params,
+                                 fetch="all", optional_observation=True)
+        except Exception as exc:
+            if getattr(exc, "code", None) == 3024:
+                timing["timeouts"] += 1
+            raise
+        finally:
+            seconds = monotonic() - started
+            timing["calls"] += 1
+            timing["seconds"] = round(timing["seconds"] + seconds, 6)
+            timing["max_seconds"] = round(max(timing["max_seconds"], seconds), 6)
         remaining -= len(rows)
         summary["observation_scanned"] += len(rows)
         if clock() >= deadline:
@@ -298,11 +312,38 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
                                    oldest_eligible_age_days=round((now - oldest).total_seconds() / 86400, 3))
             if baseline:
                 generation_limit = quota - 1 - backlog_limit
-                arrivals = read("GENERATION", f"seq,({condition}) FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
+                # Read a covering index first. Evaluating JSON while walking a
+                # secondary index needlessly loads many large replay payloads.
+                if condition != "1=1":
+                    generation_limit //= 2  # charge both keys and payload reads
+                keys = read("GENERATION_KEYS", f"seq FROM pq_{kind} FORCE INDEX (ix_namespace_seq) "
                                 "WHERE namespace=%s AND seq>%s AND seq<=%s ORDER BY seq LIMIT %s",
                                 (repo.namespace, baseline[0], high_water, generation_limit), generation_limit)
-                generation.update(rows_min=sum(bool(allowed) for _, allowed in arrivals) + removed_sequences[kind]["new_min"],
-                                  exact=len(arrivals) < generation_limit and removed_sequences[kind]["exact"],
+                arrived = len(keys)
+                payload_complete = True
+                if condition != "1=1":
+                    arrived, offset, batch_size = 0, 0, 10
+                    while offset < len(keys):
+                        batch = [row[0] for row in keys[offset:offset + batch_size]]
+                        observation["read_batch"] = {"count": len(batch), "first_seq": batch[0], "last_seq": batch[-1]}
+                        placeholders = ",".join(["%s"] * len(batch))
+                        try:
+                            arrivals = read("GENERATION_PAYLOAD",
+                                f"seq,({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
+                                f"WHERE namespace=%s AND seq IN ({placeholders}) ORDER BY seq",
+                                (repo.namespace, *batch), len(batch))
+                        except Exception as exc:
+                            from .mysql_repository import MySQLRepositoryError
+                            if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or len(batch) == 1:
+                                raise
+                            observation["generation_read_splits"] = observation.get("generation_read_splits", 0) + 1
+                            batch_size = max(1, len(batch) // 2)
+                            continue
+                        payload_complete = payload_complete and len(arrivals) == len(batch)
+                        arrived += sum(bool(allowed) for _, allowed in arrivals)
+                        offset += len(batch)
+                generation.update(rows_min=arrived + removed_sequences[kind]["new_min"],
+                                  exact=len(keys) < generation_limit and payload_complete and removed_sequences[kind]["exact"],
                                   interval_seconds=(now - baseline[1]).total_seconds())
             observation["status"] = "COMPLETE"
         except Exception as exc:
