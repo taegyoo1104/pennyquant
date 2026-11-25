@@ -165,7 +165,7 @@ def _stage_timing(table, phase, *, batch=None):
             metrics["timeouts"] += 1
             table["last_read_timeout"] = {"phase": phase, "code": 3024,
                 **{key: value for key, value in (batch or {}).items()
-                   if key in {"count", "first_seq", "last_seq", "after_seq"}}}
+                   if key in {"count", "first_seq", "last_seq", "after_seq", "query_limit_ms"}}}
         raise
     finally:
         elapsed = max(0.0, monotonic() - started)
@@ -181,17 +181,35 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
     table["read_phase"] = "PAYLOAD"
     table["read_batch"] = {"count": len(keys), "first_seq": keys[0][0], "last_seq": keys[-1][0]}
     placeholders = ",".join("%s" for _ in keys)
-    try:
-        with _stage_timing(table, "PAYLOAD", batch=table["read_batch"]):
+
+    def read(limit_ms):
+        with _stage_timing(table, "PAYLOAD", batch={**table["read_batch"], "query_limit_ms": limit_ms}):
             return repo._execute(
-                "SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq,captured_at,created_at,updated_at,"
+                f"SELECT /*+ MAX_EXECUTION_TIME({limit_ms}) */ seq,captured_at,created_at,updated_at,"
                 f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
                 f"WHERE namespace=%s AND seq IN ({placeholders})",
                 (repo.namespace, *(key[0] for key in keys)), fetch="all")
+
+    try:
+        return read(3000)
     except Exception as exc:
         from .mysql_repository import MySQLRepositoryError
-        if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or len(keys) == 1:
+        if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
             raise
+        if len(keys) == 1:
+            # Splitting cannot make this legacy JSON any smaller. Give this
+            # exact row one bounded recovery read, without skipping its safety
+            # metadata or resetting the overall maintenance deadline.
+            remaining_ms = int((deadline - clock()) * 1000)
+            if remaining_ms <= 3000:
+                raise TimeoutError("단일 자료 재조회에 필요한 전체 시간이 부족합니다.") from exc
+            limit_ms = min(10000, remaining_ms)
+            retry = {**table["read_batch"], "query_limit_ms": limit_ms, "recovered": False}
+            table["single_read_retries"] = table.get("single_read_retries", 0) + 1
+            table["last_single_read_retry"] = retry
+            rows = read(limit_ms)
+            retry["recovered"] = True
+            return rows
         table["read_splits"] = table.get("read_splits", 0) + 1
         half = len(keys) // 2
         # Keep the smaller size for the rest of this pass. Repeating a known

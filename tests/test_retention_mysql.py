@@ -520,7 +520,7 @@ def test_read_timeout_is_partial_and_never_deletes_an_unfinished_page(mysql_repo
     execute = repo._execute
     queries = []
     def timeout(sql, params=(), **kwargs):
-        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(') and 'FROM pq_research_events' in sql:
             queries.append(sql)
             if (phase == 'keys' and 'JSON_OBJECT' not in sql) or (phase == 'payload' and len(queries) >= 3):
                 raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'private SQL'), 'SELECT')
@@ -602,3 +602,37 @@ def test_timeout_splits_small_reads_and_preserves_protected_records(mysql_reposi
         first_page_end = max(attempts[0])
         later_pages = [ids for ids in attempts if min(ids) > first_page_end]
         assert later_pages and all(len(ids) <= 2 for ids in later_pages)
+
+
+def test_single_legacy_json_retry_still_checks_protected_evidence(mysql_repositories, tmp_path, monkeypatch):
+    import pymysql
+    from sessionquant.database.mysql_repository import MySQLRepositoryError
+    now = datetime.now(timezone.utc)
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    cases = [('expired', 'closed', {}), ('active', 'active', {}),
+             ('finance', 'closed', {'news_id': 'used-news'}),
+             ('unknown-date', 'closed', {'received_at': 'not-a-date'})]
+    for key, run, metadata in cases:
+        seed(repo, 'research_events', key, now, kind='engine_batch', run_id=run,
+             data={'bulk': 'x' * 1700000, **metadata})
+    repo.set_control('research_recording_v1', {'active': True, 'run_id': 'active'})
+    seed(repo, 'signals', 'signal', now, news_id='used-news')
+    execute = repo._execute
+    recovered = []
+    def cold_payload(sql, params=(), **kwargs):
+        if 'FROM pq_research_events FORCE INDEX (PRIMARY)' in sql and 'JSON_OBJECT' in sql:
+            if 'MAX_EXECUTION_TIME(3000)' in sql:
+                raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'fixture'), 'SELECT')
+            if 'MAX_EXECUTION_TIME(10000)' in sql:
+                assert len(params) == 2
+                recovered.append(params[1])
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', cold_payload)
+    report = prune_expired(repo, replace(POLICY, intraday_auxiliary=True), now=now,
+                           apply=True, receipt=receipt(tmp_path, now))
+    assert report['status'] == 'COMPLETE' and report['deleted'] == 1 and not report['errors']
+    assert {r['id'] for r in repo.all('research_events')} == {'active', 'finance', 'unknown-date'}
+    assert len(repo.all('signals')) == 1
+    assert len(set(recovered)) == 4
+    assert report['tables']['research_events']['single_read_retries'] == 4
+    assert report['tables']['research_events']['last_single_read_retry']['recovered'] is True
