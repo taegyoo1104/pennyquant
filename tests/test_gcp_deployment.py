@@ -61,6 +61,8 @@ def install_lifecycle_lock(root, lock):
     deploy.mkdir(parents=True, exist_ok=True)
     (deploy/'lifecycle_lock.sh').write_text((DEPLOY/'lifecycle_lock.sh').read_text().replace(
         '/run/sessionquant-lifecycle.lock', str(lock)))
+    # File-only progress UI is tested with the real script separately.
+    (deploy/'maintenance_ui.sh').write_text('exit 0\n')
 
 
 @pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
@@ -76,6 +78,7 @@ def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,fai
     executable(bindir/'sync','echo sync >> "$CALLS"\n')
     executable(root/'deploy/gcp/backup.sh',f'echo backup >> "$CALLS"\nexit {int(failed_backup)}\n')
     executable(root/'deploy/gcp/retention_after_update.sh','echo retention >> "$CALLS"\n')
+    executable(root/'deploy/gcp/maintenance_ui.sh','echo progress-ui-$1 >> "$CALLS"\n')
     executable(root/'deploy/gcp/inspect.sh','echo inspection >> "$CALLS"\n')
     (root/'deploy/gcp'/'nightly_checkpoint.py').write_text('pass\n')
     script=tmp_path/'stop.sh'
@@ -90,7 +93,8 @@ def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,fai
     lines=calls.read_text().splitlines()
     assert 'stop -t 180 app' in lines[1]
     assert 'systemctl stop sessionquant-market-close.timer' in lines[0]
-    assert lines.index('backup') < lines.index('inspection')
+    assert lines.index('progress-ui-start') > 1
+    assert lines.index('progress-ui-start') < lines.index('backup') < lines.index('inspection')
     assert not any('down --timeout' in line for line in lines)
     assert ('retention' in lines) is (not failed_backup)
     if not failed_backup: assert lines.index('backup') < lines.index('retention')

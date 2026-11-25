@@ -433,7 +433,7 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
     report["inspected"] = report["scanned"] + summary["observation_scanned"]
 
 
-def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, now=None, clock=monotonic):
+def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, now=None, clock=monotonic, _continuation=None, _completed=None):
     """Fair, resumable bounded passes; a preview never writes cursors or reports."""
     now = utc(now or datetime.now(timezone.utc))
     if type(apply) is not bool or repo.backend != "mysql" or repo.config.environment != "PAPER_LOCAL":
@@ -445,9 +445,12 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
               "provider_calls": 0, "order_writes": 0, "llm_generation_calls": 0}
     if not policy.enabled:
         return report
-    report["backup"] = backup_name(receipt, now) if apply else None
+    if _continuation is not None and not apply:
+        raise ValueError("연속 정리는 실제 정리 전용입니다.")
+    report["backup"] = (_continuation.verify(repo, policy, now) if _continuation is not None
+                        else backup_name(receipt, now) if apply else None)
     rules = retention_rules(policy)
-    deadline = clock() + policy.max_seconds
+    deadline = min(clock() + policy.max_seconds, _continuation.deadline) if _continuation else clock() + policy.max_seconds
     with repo.engine_lease() if apply else nullcontext():
         protected = _protected_ids(repo, deadline, clock)
         if policy.intraday_auxiliary:
@@ -469,14 +472,15 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
             identity.update(version=2, intraday_auxiliary=True)
         cursors = saved.get("positions", {}) if isinstance(saved, dict) and saved.get("policy") == identity else {}
         positions = dict(cursors)
-        pending = list(rules)
+        completed = set(_completed or ()) if _continuation is not None else set()
+        pending = [rule for rule in rules if rule[0] not in completed]
         next_kind = saved.get("next_kind") if saved and saved.get("policy") == identity else None
-        if next_kind in {rule[0] for rule in RULES}:
+        if next_kind in {rule[0] for rule in pending}:
             index = next(i for i, rule in enumerate(pending) if rule[0] == next_kind)
             pending = pending[index:] + pending[:index]
         for kind, age, _ in rules:
             report["tables"][kind] = {"before": retention_cutoff(report["policy"], age, now).isoformat(),
-                "scanned": 0, "eligible": 0, "deleted": 0, "protected": 0, "complete": False}
+                "scanned": 0, "eligible": 0, "deleted": 0, "protected": 0, "complete": kind in completed}
         # Protect shutdown against unexpected lock contention. This connection is
         # dedicated to maintenance; the engine uses another connection/lease.
         previous_wait = repo._execute("SELECT @@SESSION.innodb_lock_wait_timeout", fetch="one")[0]
@@ -526,18 +530,33 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                         break
                     rows = []
                     offset = 0
+                    page_error = False
                     while offset < len(keys):
                         if clock() >= deadline:
                             break
                         batch = keys[offset:offset + table.get("payload_batch_size", 10)]
-                        rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock,
-                                                       cache_writes=apply, cache_filter=lambda row: not (
-                                                           row[5] and max(row[2], row[3]) < naive
-                                                           and _unused(kind, _decode(row[4]), cutoff, protected))))
+                        try:
+                            rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock,
+                                                           cache_writes=apply, cache_filter=lambda row: not (
+                                                               row[5] and max(row[2], row[3]) < naive
+                                                               and _unused(kind, _decode(row[4]), cutoff, protected))))
+                        except Exception as exc:
+                            from .mysql_repository import MySQLRepositoryError
+                            if _continuation is None or not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
+                                raise
+                            # Keep only whole, verified sub-batches before the
+                            # failed row. Never advance across a missing record.
+                            table["error"] = {"code": 3024, "phase": table["read_phase"], "message": "자료 조회 시간 초과"}
+                            page_error = True
+                            break
                         offset += len(batch)
                     rows.sort(key=lambda row: (row[1], row[0]))
-                    if clock() < deadline and [(r[0], r[1]) for r in rows] != list(keys):
+                    expected_keys = keys[:offset] if page_error else keys
+                    if clock() < deadline and [(r[0], r[1]) for r in rows] != list(expected_keys):
                         raise RuntimeError(f"자료 정리 조회 중 pq_{kind} 기록이 변경됐습니다. 재확인이 필요합니다.")
+                    if page_error and not rows:
+                        pending.insert(0, (kind, age, condition))
+                        break
                 except TimeoutError:
                     pending.append((kind, age, condition))
                     break
@@ -586,7 +605,7 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     report[key] += count
                     table[key] += count
                 table["protected"] += len(rows) - len(selected)
-                if len(rows) < limit:
+                if len(rows) < limit and not page_error:
                     positions.pop(kind, None)
                     table["complete"] = True
                 else:
@@ -598,10 +617,19 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     with _stage_timing(table, "CHECKPOINT"):
                         repo.set_control(CURSORS, {"policy": identity, "positions": positions,
                             "next_kind": pending[0][0] if pending else None})
+                if page_error:
+                    break
             report["status"] = "PARTIAL" if pending else "COMPLETE"
             report["errors"] = [{"table": "pq_" + kind, **value["error"]}
                                 for kind, value in report["tables"].items() if "error" in value]
-            _observe_retention(repo, report, previous, protected, removed_sequences, deadline, clock, now)
+            if _continuation is None:
+                _observe_retention(repo, report, previous, protected, removed_sequences, deadline, clock, now)
+            else:
+                # Continuous coverage is stronger than repeatedly sampling the
+                # same large JSON for optional backlog/generation statistics.
+                report["observability"] = {"backlog_status": "UNKNOWN", "attention": "UNKNOWN",
+                    "stop_reason": "QUERY_TIMEOUT" if report["errors"] else
+                                   "PASS_COMPLETE" if not pending else "TIME_LIMIT"}
             report["finished_at"] = datetime.now(timezone.utc).isoformat()
             if apply:
                 repo.set_control(REPORT, report)

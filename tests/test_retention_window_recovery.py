@@ -42,8 +42,8 @@ def test_future_receipt_rejected():
 
 
 @pytest.mark.parametrize('nightly,exit_code', [(False, 0), (True, 2)])
-@pytest.mark.parametrize('passes', [0, 1])
-def test_catchup_defers_next_pass_and_preserves_actual_report(tmp_path, nightly, exit_code, passes):
+def test_single_continuous_worker_preserves_partial_report(tmp_path, nightly, exit_code):
+    passes = 1
     deploy = tmp_path / 'deploy/gcp'
     deploy.mkdir(parents=True)
     report = tmp_path / 'retention-last.json'

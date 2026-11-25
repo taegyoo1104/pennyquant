@@ -262,7 +262,7 @@ def prepare(backup_before=None):
             # verifies that today's UPLOADED receipt changed before any deletion.
             summary['cleanup_attempted'] = True
             summary['after'] = 'UNKNOWN'
-            print('백업 확인 완료. 보호된 자료 정리를 최대 5회 수행합니다 (약 10분 한도).', flush=True)
+            print('백업 확인 완료. 같은 DB 연결·잠금을 유지하며 보호된 자료를 최대 10분 정리합니다.', flush=True)
             cleanup = run_command(['timeout', '--kill-after=15', '690', 'bash',
                                    'deploy/gcp/retention_after_update.sh', previous], timeout=710, live=True)
             if cleanup.returncode or cleanup.timed_out:
