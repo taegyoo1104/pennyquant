@@ -48,7 +48,9 @@ def bar_quality(bars, symbol, now, *, through=None):
     versions = defaultdict(set)
     for b in raw:
         versions[b.timestamp].add((b.open,b.high,b.low,b.close,b.volume))
-    conflicts = sum(len(values)>1 for values in versions.values())
+    from .candle_revisions import conflict_details
+    conflict_times = conflict_details(raw, now)
+    conflicts = len(conflict_times)
     # The coverage cutoff must not make a stale feed look fresh. Conversely,
     # a later valid minute may prove freshness without entering a 5m signal.
     last = available[-1] if available else None
@@ -67,6 +69,7 @@ def bar_quality(bars, symbol, now, *, through=None):
         missing_rate=len(missing)/count if count else None, missing_examples=[t.isoformat() for t in missing[:5]],
         explicit_zero_volume_minutes=sum(b.volume == 0 for b in valid.values()),
         identical_duplicates=max(0,len(raw)-sum(len(v) for v in versions.values())), conflicting_minutes=conflicts,
+        conflicting_examples=[t.isoformat() for t in conflict_times[:5]],
         five_count=len(five), five_expected=count//5, fifteen_count=len(fifteen), fifteen_expected=count//15,
         five_coverage=len(five)/(count//5) if count//5 else None,
         fifteen_coverage=len(fifteen)/(count//15) if count//15 else None,

@@ -96,8 +96,10 @@ def focus_cards(state, assessments=None, *, quotes=None, now=None):
         progress=saved.get('progress') or {}
         if not isinstance(progress,dict):progress={}
         fresh=False
+        evaluation_recent=False
         try:
             evaluated=utc(saved['evaluated_at'])
+            evaluation_recent=0 <= (now-evaluated).total_seconds() <= limit
             five,fifteen=utc(progress['five_at']),utc(progress['fifteen_at'])
             boundary=now.replace(second=0,microsecond=0)
             fresh=bool(monitored and not row.get('focus_refresh_pending')
@@ -105,12 +107,16 @@ def focus_cards(state, assessments=None, *, quotes=None, now=None):
                 and five==boundary-timedelta(minutes=now.minute%5)
                 and fifteen==boundary-timedelta(minutes=now.minute%15))
         except (KeyError,TypeError,ValueError,AttributeError):pass
+        if type(saved.get('bar_conflicts')) is int and saved['bar_conflicts'] > 0 and evaluation_recent:
+            fresh=False
         stage=progress.get('stage') if fresh and isinstance(progress.get('stage'),str) else None
         title,explanation,steps=STAGES.get(stage,('판단 대기','새 분석 자료를 기다려요.',('pending',)*3))
         if not monitored:
             title,explanation='목록 갱신 대기','마지막 집중 기록이에요. 현재 목록을 확인 중이에요.'
         elif row.get('focus_refresh_pending'):
             title,explanation='자료 갱신 대기','집중 감시는 유지하며 새 자료를 기다려요.'
+        elif type(saved.get('bar_conflicts')) is int and saved['bar_conflicts'] > 0 and evaluation_recent:
+            title,explanation='분봉 값 충돌','같은 분봉의 값이 달라 재확인 중이에요. 확인 전 매수는 보류해요.'
         elif not fresh:
             if preopen is None:
                 from ..session_window import schedule_times

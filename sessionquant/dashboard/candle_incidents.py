@@ -6,9 +6,10 @@ def render_incidents(archive):
     import streamlit as st
     from .session_app import timestamp
     from ..market.candle_incidents import MAX_EVENTS
-    labels = {'CANDLE_LATE':'최신 확정봉 지연', 'CANDLE_REQUEST_DELAY':'분봉 요청 실패·대기', 'SLOW_CYCLE':'수집 순회 지연'}
+    labels = {'CANDLE_LATE':'최신 확정봉 지연', 'CANDLE_REQUEST_DELAY':'분봉 요청 실패·대기', 'SLOW_CYCLE':'수집 순회 지연', 'CANDLE_CONFLICT':'분봉 값 충돌'}
     events = (archive or {}).get('events', [])[-MAX_EVENTS:]
     st.subheader('자동 보관한 분봉 지연 기록')
+    st.caption('분봉 값 충돌도 기록합니다. 수신 지연이 없어도 전략 판단을 막을 수 있습니다.')
     st.caption('정상 수집은 추가 기록하지 않습니다. 전 종목 합산 5분에 최대 1회, 최근 96건·최대 256KiB만 보관합니다. 대표 종목은 최대 3개이며 모든 지연의 전체 이력은 아닙니다. 기록 없음이 정상 동작을 보장하지는 않습니다.')
     if not events:
         st.info('아직 자동 보관한 지연 기록이 없습니다.')

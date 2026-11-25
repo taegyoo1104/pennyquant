@@ -90,18 +90,23 @@ class HistoryStore:
     @timed('history_save')
     def save(self, symbol, day, bars, *, progress=None):
         old, previous = self.get(symbol, day)
-        values = {signature(b):b for b in previous}
+        from .candle_revisions import grouped_minutes, retain_observation, ordered_observations, value_key
+        groups = grouped_minutes(previous)
         changed = False
-        for bar in bars:
+        for bar in ordered_observations(groups, bars):
             if (bar.symbol != symbol or bar.source != SOURCE or bar.price_adjustment != 'raw'
                     or bar.received_at < bar.timestamp or bar.timestamp.second or bar.timestamp.microsecond
                     or str(bar.timestamp.astimezone(NEW_YORK).date()) != day):
                 raise ValueError('과거 분봉의 종목·거래일·출처·확정 시각을 확인하세요.')
-            prior = values.get(signature(bar))
-            if prior is None or bar.received_at < prior.received_at:
-                values[signature(bar)] = bar
+            rows = groups[(bar.symbol, bar.timestamp)]
+            if retain_observation(rows, bar):
+                # An earlier receipt for an otherwise unchanged minute replaces
+                # the ordinary duplicate, as before. Conflict evidence is kept.
+                if rows and {value_key(b) for b in rows} == {value_key(bar)}:
+                    rows.clear()
+                rows.append(bar)
                 changed = True
-        values = sorted(values.values(), key=lambda b:(b.timestamp,b.received_at))
+        values = sorted((b for rows in groups.values() for b in rows), key=lambda b:(b.timestamp,b.received_at))
         bounds = session_bounds(datetime.fromisoformat(day+'T12:00:00-05:00'))
         if not bounds:
             raise ValueError('거래일 달력을 확인할 수 없습니다.')

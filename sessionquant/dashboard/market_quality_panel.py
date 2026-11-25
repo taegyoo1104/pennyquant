@@ -102,6 +102,7 @@ def render_quality(state, *, performance=None, details=True, show_benchmarks=Tru
             **quality_observation_fields(item, now),
             '누락 분':bars.get('missing_minutes'),'누락률':bars.get('missing_rate'),
             '정정 충돌 분':bars.get('conflicting_minutes'),'명시적 거래량 0분':bars.get('explicit_zero_volume_minutes'),
+            '값 충돌 분봉 시각':', '.join(timestamp(t) for t in bars.get('conflicting_examples',[])),
             '평가 당시 분봉 지연(초)':bars.get('age_seconds'),'분봉 수신 지연(초)':bars.get('latest_receipt_lag_seconds'),
             'RVOL(비교 근거 검증값)':volume.get('value'),'RVOL(계산값·비교 근거 미확인 가능)':volume.get('calculated_value'),
             'Paper 거래 조건':(item.get('paper_eligibility') or {}).get('status','strict'),
