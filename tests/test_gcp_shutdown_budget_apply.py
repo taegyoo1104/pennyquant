@@ -130,7 +130,7 @@ def installed(tmp_path):
     (tmp_path / "run").mkdir()
     payloads = {name: reviewed_payload(name).read_bytes() for name in patch.PAYLOADS}
     paths = {patch.REPO + name: old_body(name) for name in patch.PAYLOADS}
-    paths.update({patch.REPO + name: (DEPLOY / name).read_bytes() for name in patch.DEPENDENCIES})
+    paths.update({patch.REPO + name: reviewed_payload(name).read_bytes() for name in patch.DEPENDENCIES})
     paths["etc/systemd/system/sessionquant-cost-guard.service"] = old_body("sessionquant-cost-guard.service")
     for relative, body in paths.items():
         path = tmp_path / relative
@@ -145,10 +145,10 @@ def apply(installed):
     return patch.apply(payloads, root=root, run_command=systemd, monotonic=lambda: systemd.monotonic)
 
 
-def test_payload_hashes_match_reviewed_repository_files():
+def test_payload_and_dependency_hashes_match_pinned_historical_files():
     patch.validate_payloads({name: reviewed_payload(name).read_bytes() for name in patch.PAYLOADS})
     for name, expected in patch.DEPENDENCIES.items():
-        assert patch.digest((DEPLOY / name).read_bytes()) == expected
+        assert patch.digest(reviewed_payload(name).read_bytes()) == expected
 
 
 def test_live_install_preserves_timers_app_and_recovery_copy_and_is_repeatable(installed):
@@ -362,3 +362,17 @@ def test_custom_timer_semantics_are_not_replaced(installed, property_name, value
     assert systemd.reloads == 0
     for relative, body in before.items():
         assert (root / relative).read_bytes() == body
+
+
+def test_legacy_installer_rejects_new_capacity_backup_before_any_write(installed):
+    root, _, before, systemd = installed
+    current_backup = (DEPLOY / 'backup.sh').read_bytes()
+    assert patch.digest(current_backup) != patch.DEPENDENCIES['backup.sh']
+    target = root / patch.REPO / 'backup.sh'
+    target.write_bytes(current_backup)
+    with pytest.raises(ValueError, match=r'지원하는 백업·정리 버전이 아닙니다: backup\.sh'):
+        apply(installed)
+    assert systemd.reloads == 0
+    assert not (root / patch.BACKUP_ROOT).exists()
+    for relative, original in before.items():
+        assert (root / relative).read_bytes() == (current_backup if relative == patch.REPO+'backup.sh' else original)

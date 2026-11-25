@@ -52,10 +52,13 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 python3 deploy/gcp/storage_check.py --minimum-mib 512
+phase_begin CAPACITY
+python3 deploy/gcp/backup_capacity.py check
+phase_end
 tmp=$(mktemp -d "$backup_dir/.working.XXXXXXXX")
 phase_begin DUMP
 docker compose -f deploy/gcp/compose.yaml exec -T db sh -c \
-    'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump -u "$MYSQL_USER" --single-transaction --quick --no-tablespaces --set-gtid-purged=OFF "$MYSQL_DATABASE"' < /dev/null | gzip -1 > "$tmp/database.sql.gz.part"
+    'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump -u "$MYSQL_USER" --single-transaction --quick --no-tablespaces --set-gtid-purged=OFF "$MYSQL_DATABASE"' < /dev/null | gzip -1 | python3 deploy/gcp/backup_capacity.py dump "$tmp/database.sql.gz.part"
 mv "$tmp/database.sql.gz.part" "$tmp/database.sql.gz"
 phase_end
 printf '압축 DB 크기: %s bytes\n' "$(stat -c %s "$tmp/database.sql.gz")"
@@ -72,6 +75,7 @@ phase_end
 name="sessionquant-$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid).tar.gz"
 # Only compressed SQL is staged; no potentially multi-GB plaintext dump.
 phase_begin PACKAGE
+python3 deploy/gcp/backup_capacity.py package "$tmp/database.sql.gz"
 python3 deploy/gcp/package_backup.py "$tmp/database.sql.gz" /var/lib/sessionquant/app "$tmp/$name"
 phase_end
 phase_begin VERIFY_ARCHIVE

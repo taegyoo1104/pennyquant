@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 cd /opt/sessionquant
 [[ ! -e /etc/sessionquant/maintenance ]] || exit 0
+# A single small status file, outside sealed app data; no SQL and no history.
+python3 deploy/gcp/backup_capacity.py report || echo '백업 공간 상태를 확인하지 못했습니다.' >&2
 compose=(docker compose -f deploy/gcp/compose.yaml)
 [[ $("${compose[@]}" ps --status running --services app) == app ]] || exit 0
 if ! python3 deploy/gcp/storage_check.py --minimum-mib 1024; then

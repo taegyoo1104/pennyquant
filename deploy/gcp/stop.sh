@@ -27,6 +27,8 @@ elif [[ "$db_services" == db ]]; then
     backup_result=$?
     if ((backup_result != 0)); then
         result=1
+        (umask 077; printf 'SKIPPED %s reason=BACKUP_FAILED\n' "$(date -u +%FT%TZ)" \
+            > /etc/sessionquant/retention-status) || true
         # Also covers an early refusal, timeout, or a killed backup process.
         install -d -m 700 /etc/sessionquant
         # Keep the stage/error recorded by backup.sh; cover hard kills and early
