@@ -121,11 +121,14 @@ def test_prepare_check_and_update_shells_parse_and_do_not_delete_runtime_data():
 @pytest.mark.parametrize('paused',[False,True,'resume'])
 def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,paused):
     import os
-    from test_gcp_deployment import executable
+    import sys
+    from test_gcp_deployment import executable, install_lifecycle_lock
     resume = paused == 'resume'
-    expected_failure = failure if not ((resume and failure == 'backup') or (not resume and failure == 'retention')) else ''
+    expected_failure = '' if resume and failure == 'backup' else failure
     repo=tmp_path/'repo';deploy=repo/'deploy/gcp';deploy.mkdir(parents=True)
     stage=tmp_path/'stage';(stage/'deploy/gcp').mkdir(parents=True)
+    lifecycle_lock=tmp_path/'lifecycle.lock'
+    install_lifecycle_lock(stage,lifecycle_lock)
     etc=tmp_path/'etc';etc.mkdir();(etc/'app.env').write_text('PRIVATE')
     (etc/'backup-status').write_text('UPLOADED unchanged receipt')
     (etc/'retention-status').write_text('FAILED interrupted retention')
@@ -139,6 +142,17 @@ def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,pa
         (folder/'storage_check.py').write_text('')
         (folder/'update_guard.py').write_text('# read-only guard fixture')
         (folder/'resume_retention_guard.py').write_text('# read-only resume fixture')
+    (deploy/'startup_retention.py').write_text('''import os,sys
+with open(os.environ['CALLS'],'a') as f:
+    f.write('retention\\n')
+    f.write('retention-args '+repr(sys.argv[1:])+'\\n')
+if os.environ['FAILURE']=='retention':raise SystemExit(7)
+''')
+    (deploy/'startup_handoff.py').write_text('''import os,sys
+assert sys.argv[1:]==['create']
+assert os.fstat(8).st_ino==os.stat(os.environ['LIFECYCLE_LOCK']).st_ino
+with open(os.environ['CALLS'],'a') as f:f.write('handoff\\n')
+''')
     executable(deploy/'backup.sh','echo backup >> "$CALLS"\n[[ "$FAILURE" != backup ]]\n')
     executable(deploy/'retention_after_update.sh','echo retention >> "$CALLS"\n[[ "$FAILURE" != retention ]]\n')
     executable(deploy/'preopen_check.sh','echo check >> "$CALLS"\n[[ "$FAILURE" != check ]]\n')
@@ -146,10 +160,13 @@ def test_update_sequence_does_not_start_app_on_failed_checks(tmp_path,failure,pa
     executable(binpath/'git','echo "git $*" >> "$CALLS"\nif [[ "$*" == "rev-parse HEAD" ]]; then echo '+ 'b'*40 +' ; fi\n')
     executable(binpath/'tar','cat >/dev/null\n')
     executable(binpath/'mktemp','echo "$STAGE"\n')
-    executable(binpath/'python3','echo "python $*" >> "$CALLS"\n')
+    executable(binpath/'python3','''echo "python $*" >> "$CALLS"
+if [[ "$1" == */startup_retention.py || "$1" == */startup_handoff.py ]]; then exec "$FIXTURE_PYTHON" "$@"; fi
+''')
     executable(binpath/'systemctl','''echo "systemctl $*" >> "$CALLS"
 if [[ "$1" == is-active && "$*" == *service* ]]; then exit 3; fi
 if [[ "$1" == is-enabled && "$FAILURE" == masked ]]; then echo masked; fi
+if [[ "$*" == 'start sessionquant.service' ]]; then flock -n "$LIFECYCLE_LOCK" true || exit 7; fi
 exit 0
 ''')
     executable(binpath/'docker','''echo "docker $*" >> "$CALLS"
@@ -172,7 +189,8 @@ exit 0
         ('$EUID == 0','0 == 0')]:text=text.replace(before,after)
     script.write_text(text)
     result=subprocess.run(['bash',str(script),'a'*40,*(['--resume-retention'] if resume else ['--paused-paper'] if paused else [])],capture_output=True,text=True,timeout=15,
-        env={**os.environ,'PATH':str(binpath)+':'+os.environ['PATH'],'CALLS':str(calls),'STAGE':str(stage),'FAILURE':failure,'BACKUP_STATUS':str(etc/'backup-status')})
+        env={**os.environ,'PATH':str(binpath)+':'+os.environ['PATH'],'CALLS':str(calls),'STAGE':str(stage),'FAILURE':failure,'BACKUP_STATUS':str(etc/'backup-status'),
+             'FIXTURE_PYTHON':sys.executable,'LIFECYCLE_LOCK':str(lifecycle_lock)})
     log=calls.read_text()
     assert (result.returncode==0)==(not expected_failure),result.stderr
     assert ('systemctl start sessionquant.service' in log)==(not expected_failure)
@@ -180,8 +198,10 @@ exit 0
     if failure in ('build','masked'):assert 'systemctl stop sessionquant.service' not in log
     if failure=='upgrade':
         assert ('backup\n' in log) is (not resume) and 'check\n' not in log
-    if failure=='retention' and resume:
+    if failure=='retention':
         assert ('backup\n' in log) is (not resume) and 'retention\n' in log and 'check\n' not in log
+    if expected_failure:
+        assert 'handoff\n' not in log
     if not expected_failure:
         assert 'docker build --build-arg SQ_BUILD_REVISION='+'a'*40+' --build-arg SQ_BUILD_SOURCE=reviewed_archive' in log
         if paused is True:
@@ -195,11 +215,11 @@ exit 0
             assert log.index('docker build')<log.index('systemctl stop sessionquant.service')<log.index('backup\n')
             assert log.index('backup\n')<log.index('--backup ')<log.index('check\n')<log.index('systemctl start sessionquant.service')
             assert log.index('backup\n')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
-        if resume:
-            assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('retention\n')<log.index('check\n')
-        else:
-            assert 'retention\n' not in log
-            assert log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('check\n')
+        previous='RESUME UPLOADED unchanged receipt' if resume else 'UPLOADED unchanged receipt'
+        assert 'retention-args '+repr(['--backup-before',previous]) in log
+        assert log.count('retention\n')==1
+        assert log.index('--backup ')<log.index('sessionquant.portfolio.position_limit_upgrade')<log.index('retention\n')<log.index('check\n')
+        assert log.index('check\n')<log.index('handoff\n')<log.index('systemctl start sessionquant.service')
         assert 'is-active --quiet sessionquant-market-close.timer' in log
         assert 'is-active --quiet sessionquant-storage-guard.timer' in log
 

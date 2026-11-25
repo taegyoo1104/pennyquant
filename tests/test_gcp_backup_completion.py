@@ -10,7 +10,7 @@ import tarfile
 
 import pytest
 
-from test_gcp_deployment import DEPLOY, executable
+from test_gcp_deployment import DEPLOY, executable, install_lifecycle_lock
 
 
 def packager():
@@ -75,6 +75,7 @@ def test_shutdown_retains_failed_stage_and_never_reports_timeout_as_success(tmp_
     root = tmp_path / "repo"
     deploy = root / "deploy/gcp"
     deploy.mkdir(parents=True)
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     etc = tmp_path / "etc"
     etc.mkdir()
     status = etc / "backup-status"
@@ -145,6 +146,7 @@ def test_shutdown_distinguishes_absent_db_from_failed_status_query(tmp_path, que
     root = tmp_path / "repo"
     deploy = root / "deploy/gcp"
     deploy.mkdir(parents=True)
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     etc = tmp_path / "etc"
     etc.mkdir()
     status = etc / "backup-status"

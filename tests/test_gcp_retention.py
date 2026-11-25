@@ -155,9 +155,11 @@ def test_cleanup_status_keeps_backlog_warning_separate_from_completed_pass(tmp_p
 
 
 def test_failed_cleanup_opens_inspection_and_keeps_successful_backup(tmp_path):
+    from test_gcp_deployment import install_lifecycle_lock
     root = tmp_path / "repo"
     deploy = root / "deploy/gcp"
     deploy.mkdir(parents=True)
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     etc = tmp_path / "etc"
     etc.mkdir()
     status = etc / "backup-status"

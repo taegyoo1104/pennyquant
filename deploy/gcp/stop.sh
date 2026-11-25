@@ -5,6 +5,7 @@ flock -n 9 || exit 0
 exec 7>/run/sessionquant-update.lock
 flock -n 7 || { echo "업데이트 중입니다. 마감 정리를 동시에 실행하지 않습니다." >&2; exit 1; }
 cd /opt/sessionquant || exit 1
+source deploy/gcp/lifecycle_lock.sh
 compose=(docker compose -f deploy/gcp/compose.yaml)
 result=0
 systemctl stop sessionquant-market-close.timer sessionquant-run-limit.timer sessionquant-cost-guard.timer || true
