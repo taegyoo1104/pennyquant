@@ -29,6 +29,99 @@ def receipt(tmp_path, now):
     return path
 
 
+def test_startup_probe_is_read_only_and_rechecks_after_cleanup_without_repeating_it(mysql_repositories, tmp_path, monkeypatch):
+    from sessionquant.database.retention_probe import probe_retention
+    now = datetime(2026, 11, 25, 15, tzinfo=timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    other = mysql_repositories(environment="PAPER_LOCAL")
+    policy = replace(POLICY, intraday_auxiliary=True)
+    seed(repo, "research_events", "expired", now, days=1, kind="engine_batch", run_id="closed", data={})
+    seed(other, "research_events", "other", now, days=1, kind="engine_batch", run_id="other", data={})
+    seed(repo, "pipeline_status", "used-selection", now, days=1, kind="portfolio_selection")
+    seed(repo, "pipeline_status", "risk-evidence", now, days=1, kind="risk_decision")
+    seed(repo, "order_intents", "intent", now, days=1, selection_id="used-selection")
+    seed(repo, "signals", "signal", now, news_id="used-news")
+    seed(repo, "news_events", "used-news", now)
+    seed(repo, "research_events", "active", now, days=1, kind="engine_batch", run_id="active", data={})
+    repo.set_control("research_recording_v1", {"active": True, "run_id": "active"})
+    execute = repo._execute
+    queries = []
+    def read_only(sql, *args, **kwargs):
+        assert sql.startswith("SELECT") and "COUNT(" not in sql
+        queries.append(sql)
+        return execute(sql, *args, **kwargs)
+    monkeypatch.setattr(repo, "_execute", read_only)
+    assert probe_retention(repo, policy, now=now)["status"] == "NEEDS_CLEANUP"
+    assert repo.get_control(REPORT) is None
+    assert any("FORCE INDEX (PRIMARY)" in sql for sql in queries)
+    monkeypatch.setattr(repo, "_execute", execute)
+    assert prune_expired(repo, policy, now=now, apply=True, receipt=receipt(tmp_path, now))["deleted"] == 1
+    # A second update on the same trading day sees newly collected data, but
+    # skips cleanup because only protected/retained rows remain eligible by age.
+    seed(repo, "quote_snapshots", "today", now, days=0)
+    seed(repo, "research_events", "today", now, days=0, kind="engine_batch", run_id="today", data={})
+    report_before = repo.get_control(REPORT)
+    cursor_before = repo.get_control(CURSORS)
+    monkeypatch.setattr(repo, "_execute", read_only)
+    result = probe_retention(repo, policy, now=now + timedelta(minutes=1))
+    assert result["status"] == "CLEAR"
+    assert repo.get_control(REPORT) == report_before and repo.get_control(CURSORS) == cursor_before
+    assert len(other.all("research_events")) == 1
+    assert result["tables"]["pipeline_status"]["scanned"] == 2
+
+
+def test_startup_probe_covers_all_retention_rule_scopes_and_uses_real_predicates(mysql_repositories):
+    from sessionquant.database.retention import retention_rules
+    from sessionquant.database.retention_probe import probe_retention
+    now = datetime(2026, 11, 25, 15, tzinfo=timezone.utc)
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    policy = replace(POLICY, intraday_auxiliary=True)
+    for kind, _, _ in retention_rules(policy):
+        fields = {}
+        if kind == "macro_context_analysis":
+            fields = {"status": "SKIPPED_PRECHECK", "llm_requested": False, "llm_call_ids": []}
+        elif kind == "pipeline_status":
+            fields = {"kind": "portfolio_selection"}
+        elif kind == "research_events":
+            fields = {"kind": "engine_batch", "run_id": "old", "data": {}}
+        seed(repo, kind, "eligible", now, **fields)
+        result = probe_retention(repo, policy, now=now)
+        assert result["status"] == "NEEDS_CLEANUP" and result["table"] == kind
+        repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s", (repo.namespace,))
+    assert probe_retention(repo, policy, now=now)["status"] == "CLEAR"
+
+
+def test_startup_probe_does_not_confuse_read_timeout_with_no_cleanup(mysql_repositories, monkeypatch):
+    from sessionquant.database.mysql_repository import MySQLRepositoryError
+    from sessionquant.database.retention_probe import probe_retention
+    repo = mysql_repositories(environment="PAPER_LOCAL")
+    execute = repo._execute
+    def timeout(sql, *args, **kwargs):
+        if "FROM pq_research_events" in sql:
+            raise MySQLRepositoryError(Exception(3024, "fixture timeout"), "SELECT")
+        return execute(sql, *args, **kwargs)
+    monkeypatch.setattr(repo, "_execute", timeout)
+    result = probe_retention(repo, replace(POLICY, intraday_auxiliary=True))
+    assert result["status"] == "UNKNOWN" and result["error"]["code"] == 3024
+    monkeypatch.setattr(repo, "_execute", execute)
+
+
+def test_startup_probe_engine_lease_blocks_external_writer_and_is_released(mysql_repositories):
+    from sessionquant.database.retention_probe import probe_with_engine_lease
+    owner = mysql_repositories(environment="PAPER_LOCAL")
+    reader = mysql_repositories(owner.config.namespace, environment="PAPER_LOCAL")
+    policy = replace(POLICY, intraday_auxiliary=True)
+    with owner.engine_lease():
+        result = probe_with_engine_lease(reader, policy)
+        assert result["status"] == "UNKNOWN" and result["reason"] == "ENGINE_LEASE_UNAVAILABLE"
+        assert result["scanned"] == 0 and result["tables"] == {}
+    assert probe_with_engine_lease(reader, policy)["status"] == "CLEAR"
+    assert reader._lease_depth == 0
+    # Backup/apply must acquire independently after the read-only probe exits.
+    with owner.engine_lease():
+        assert owner._lease_depth == 1
+
+
 def test_intraday_retention_expires_replay_but_keeps_today_active_and_financial_evidence(mysql_repositories, tmp_path):
     from sessionquant.database.retention import REPLAY_PRUNED
     now = datetime(2026, 11, 20, 18, tzinfo=timezone.utc)

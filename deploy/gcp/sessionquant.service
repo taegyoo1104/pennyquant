@@ -9,7 +9,8 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/sessionquant/deploy/gcp/start.sh
 ExecStop=/usr/bin/docker compose -f /opt/sessionquant/deploy/gcp/compose.yaml stop -t 180 app
-TimeoutStartSec=840
+# Fresh recovery backup (90 min), bounded cleanup (10 min), startup and checks.
+TimeoutStartSec=7200
 TimeoutStopSec=240
 
 [Install]

@@ -55,10 +55,19 @@ def executable(path,body):
     path.chmod(0o755)
 
 
+def install_lifecycle_lock(root, lock):
+    """Exercise the production lock while confining its file to the fixture."""
+    deploy = root/'deploy/gcp'
+    deploy.mkdir(parents=True, exist_ok=True)
+    (deploy/'lifecycle_lock.sh').write_text((DEPLOY/'lifecycle_lock.sh').read_text().replace(
+        '/run/sessionquant-lifecycle.lock', str(lock)))
+
+
 @pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
 @pytest.mark.parametrize('failed_backup',[False,True])
 def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,failed_backup):
     root=tmp_path/'repo';(root/'deploy/gcp').mkdir(parents=True)
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     disk=root/'database-disk';disk.write_text('preserved')
     calls=tmp_path/'calls'
     bindir=tmp_path/'bin';bindir.mkdir()
@@ -97,6 +106,7 @@ def test_close_saves_backs_up_and_opens_inspection_without_poweroff(tmp_path,fai
 def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     root=tmp_path/'repo';root.mkdir()
     (root/'deploy/gcp').mkdir(parents=True)
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     executable(root/'deploy/gcp/inspect.sh','echo inspection >> "$CALLS"\n')
     (root/'deploy/gcp'/'nightly_checkpoint.py').write_text('pass\n')
     calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
@@ -106,12 +116,13 @@ def test_start_arms_shutdown_before_starting_app(tmp_path,delay,error,started):
     # Use a known monotonic epoch plus the requested delay; storage is separate.
     executable(bindir/'python3','if [[ "$1" == - ]]; then echo "$((1000000000 + $2 * 1000000))"; fi\n')
     script=tmp_path/'start.sh'
-    script.write_text((DEPLOY/'start.sh').read_text().replace('/opt/sessionquant',str(root)))
+    script.write_text((DEPLOY/'start.sh').read_text().replace('/opt/sessionquant',str(root))
+                      .replace('/etc/sessionquant', str(tmp_path/'etc')))
     result=subprocess.run(['bash',str(script)],env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],
         'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
     lines=calls.read_text().splitlines()
     timers=[i for i,line in enumerate(lines) if line.startswith('timer ')]
-    apps=[i for i,line in enumerate(lines) if ' up -d --wait' in line]
+    apps=[i for i,line in enumerate(lines) if ' up -d --wait' in line and not line.endswith(' db')]
     assert len(timers)==(2 if started else 0) and bool(apps) is started
     assert ('inspection' in lines) is (not started)
     if started:
@@ -240,6 +251,7 @@ def test_storage_guard_stops_only_app_and_latches_without_deleting_data(tmp_path
 @pytest.mark.parametrize('condition', ['maintenance', 'storage-blocked', 'backup-failed', 'low-space'])
 def test_start_never_starts_app_when_maintenance_or_storage_recovery_is_needed(tmp_path,condition):
     root=tmp_path/'repo'; root.mkdir(); etc=tmp_path/'etc'; etc.mkdir()
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     if condition in ('maintenance', 'storage-blocked'): (etc/condition).touch()
     if condition=='backup-failed': (etc/'backup-status').write_text('FAILED fixture\n')
     calls=tmp_path/'calls'; bindir=tmp_path/'bin'; bindir.mkdir()
@@ -253,8 +265,8 @@ def test_start_never_starts_app_when_maintenance_or_storage_recovery_is_needed(t
         'CALLS':str(calls)},capture_output=True,text=True,timeout=10)
     assert result.returncode == (0 if condition=='maintenance' else 1)
     log=calls.read_text() if calls.exists() else ''
-    assert 'up -d' not in log
-    assert ('timer' in log) == (condition!='maintenance')
+    assert not any('up -d' in line and not line.endswith(' db') for line in log.splitlines())
+    assert 'timer' not in log
 
 
 @pytest.mark.skipif(os.name=='nt',reason='GCE Linux shell scripts')
