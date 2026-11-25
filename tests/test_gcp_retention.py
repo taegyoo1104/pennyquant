@@ -38,6 +38,7 @@ if status=='QUERY_TIMEOUT':
 pathlib.Path(os.environ['REPORT']).write_text(json.dumps(report))
 ''')
     executable(deploy/'retention.sh', 'python3 "$WORKER" "$1"\n')
+    (deploy/'retention_window.py').write_text('# receipt window covered separately\n')
     script = tmp_path/'catchup.sh'
     script.write_text((DEPLOY/'retention_after_update.sh').read_text().replace('/opt/sessionquant', str(root))
                       .replace('/var/lib/sessionquant/app', str(data)))
