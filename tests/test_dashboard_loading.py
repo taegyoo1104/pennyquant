@@ -291,3 +291,13 @@ def test_hidden_raw_json_is_not_serialized_to_browser_until_requested():
     app.toggle(key='dashboard_raw_data').set_value(True).run()
     assert not app.exception and len(app.json) == 1
     assert 'new_provider_code' in app.json[0].value
+
+
+def test_auxiliary_budget_read_only_on_system_page(database):
+    report={'day':'2026-11-24','bytes':1024,'records':2,'limited':False}
+    database.controls['auxiliary_storage_budget_v1']=report
+    main=load_database('unused.db',page='대시보드')
+    assert main.connected and 'auxiliary_storage_budget_v1' not in database.calls
+    data=load_database('unused.db',page='시스템·설정')
+    assert data.auxiliary_storage==report
+    assert database.calls.count('auxiliary_storage_budget_v1')==1

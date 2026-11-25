@@ -63,6 +63,7 @@ class DashboardData:
     warmup: dict = field(default_factory=dict)
     engine_state: dict = field(default_factory=dict)
     retention: dict = field(default_factory=dict)
+    auxiliary_storage: dict = field(default_factory=dict)
 
 
 def decimal_value(value: Any, default: Decimal | None = None) -> Decimal | None:

@@ -1016,3 +1016,22 @@ async def test_mysql_history_reconciliation_is_atomic(mysql_repositories, monkey
         audit = reopened.get_control(result['audit_control'])
         assert audit['before']==old and audit['after']==row
     assert not reopened.all('orders')
+
+
+def test_mysql_auxiliary_budget_survives_restart_and_isolates_ledgers(mysql_repositories):
+    from sessionquant.research.storage import BUDGET, StoragePolicy, store
+    repo, other = mysql_repositories(), mysql_repositories()
+    now = datetime(2026,11,24,16,tzinfo=timezone.utc)
+    policy = StoragePolicy(mode='bounded_diagnostics',daily_records=1)
+    assert store(repo,policy,'research_events',{'id':'sample'},'frame',now)
+    reopened = mysql_repositories(repo.config.namespace,environment=repo.config.environment)
+    assert not store(reopened,policy,'research_events',{'id':'over-budget'},'frame',now,urgent=True)
+    assert len(reopened.all('research_events'))==1
+    assert reopened.get_control(BUDGET)['records']==1
+    assert store(other,policy,'research_events',{'id':'sample'},'frame',now)
+    with pytest.raises(RuntimeError):
+        with reopened.transaction():
+            assert store(reopened,policy,'research_events',{'id':'rollback'},'frame',now+timedelta(days=1))
+            raise RuntimeError('rollback')
+    assert reopened.get_record('research_events','rollback') is None
+    assert reopened.get_control(BUDGET)['day']=='2026-11-24'

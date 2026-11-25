@@ -13,6 +13,12 @@ symbols_per_cycle: 10  # 집중 10종목 분봉을 한 순회에서 시도. API 
 paper_data_policy: observed_paper_v1
 actual_account_monitor_enabled: false
 recording_enabled: true
+auxiliary_storage:
+  mode: bounded_diagnostics  # 운영 진단 표본. 전 과정 재현은 recording 예제의 full 모드 사용.
+  sample_seconds: 60
+  daily_bytes: 134217728  # 미국 날짜별 보조 JSON 합산 128MiB. 주문 근거·장부는 한도 제외.
+  daily_records: 5000
+  max_record_bytes: 524288
 retention:
   enabled: true
   intraday_auxiliary: true  # 새 백업 후 지난 거래일의 재현·임시 관측 자료 정리. 장부·과거 분봉은 보존.
