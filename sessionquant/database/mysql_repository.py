@@ -176,6 +176,15 @@ class MySQLRepository:
                       ("LLM 호출 감사·제한된 암호화 본문·이벤트 맥락 분석 추가",))
         self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(7,%s)",
                       ("감시 종목의 거래일별 1분봉·RVOL 비교 이력 저장",))
+        from .retention_metadata import install
+        install(self)
+        if self._research_retention_metadata:
+            self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(8,%s)",
+                          ("재현 기록의 보존 검사 요약과 원본 갱신·삭제 동기화",))
+
+    def retention_metadata_available(self):
+        from .retention_metadata import available
+        return available(self)
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -527,7 +536,7 @@ class MySQLRepository:
 
     def storage_stats(self) -> dict:
         names = tuple("pq_" + kind for kind in self.kinds) + ("pq_engine_state", "pq_controls")
-        physical_names = names + ("sq_financial_ledger", "sq_schema_versions")
+        physical_names = names + ("sq_financial_ledger", "sq_schema_versions", "sq_research_retention_meta")
         placeholders = ",".join(["%s"] * len(physical_names))
         rows = self._execute("SELECT TABLE_NAME,TABLE_ROWS,DATA_LENGTH,INDEX_LENGTH FROM information_schema.TABLES "
             f"WHERE TABLE_SCHEMA=%s AND TABLE_NAME IN ({placeholders}) ORDER BY TABLE_NAME",

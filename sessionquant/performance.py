@@ -68,7 +68,7 @@ def database_query(sql, kinds):
     if operation not in {'SELECT','INSERT','UPDATE','DELETE','CREATE','ALTER','SET','START'}:
         operation = 'OTHER'
     allowed = {'pq_'+kind for kind in kinds} | {
-        'pq_controls','pq_engine_state','sq_financial_ledger','sq_schema_versions'}
+        'pq_controls','pq_engine_state','sq_financial_ledger','sq_schema_versions','sq_research_retention_meta'}
     match = re.search(r'\b(?:FROM|INTO|UPDATE|TABLE(?:\s+IF\s+NOT\s+EXISTS)?)\s+`?([a-zA-Z0-9_]+)',sql,re.I)
     table = match.group(1).lower() if match and match.group(1).lower() in allowed else 'other'
     key = (operation,table)

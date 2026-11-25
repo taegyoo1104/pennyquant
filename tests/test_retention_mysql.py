@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requi
 POLICY = RetentionPolicy(enabled=True, batch_size=2)
 
 
-def seed(repo, table_name, key, now, *, days=45, stored_days=None, **fields):
+def seed(repo, table_name, key, now, *, days=45, stored_days=None, legacy=True, **fields):
     stamp = now - timedelta(days=days)
     data = {"id": key, "timestamp": stamp.isoformat(), **fields}
     repo.import_record(table_name, data, key)
@@ -20,6 +20,9 @@ def seed(repo, table_name, key, now, *, days=45, stored_days=None, **fields):
     repo._execute(f"UPDATE pq_{table_name} SET captured_at=%s,created_at=%s,updated_at=%s "
                   "WHERE namespace=%s AND record_id=%s",
                   (stamp.replace(tzinfo=None), persisted.replace(tzinfo=None), persisted.replace(tzinfo=None), repo.namespace, key))
+    if table_name == 'research_events' and legacy and repo.retention_metadata_available():
+        repo._execute('DELETE m FROM sq_research_retention_meta m JOIN pq_research_events r '
+                      'ON m.source_seq=r.seq WHERE r.namespace=%s AND r.record_id=%s', (repo.namespace, key))
     return data
 
 
@@ -520,7 +523,7 @@ def test_read_timeout_is_partial_and_never_deletes_an_unfinished_page(mysql_repo
     execute = repo._execute
     queries = []
     def timeout(sql, params=(), **kwargs):
-        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(') and 'FROM pq_research_events' in sql:
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(') and 'FROM pq_research_events' in sql and 'STRAIGHT_JOIN' not in sql and 'retention metadata refresh' not in sql:
             queries.append(sql)
             if (phase == 'keys' and 'JSON_OBJECT' not in sql) or (phase == 'payload' and len(queries) >= 3):
                 raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'private SQL'), 'SELECT')
@@ -550,7 +553,7 @@ def test_large_replay_reads_covering_keys_then_bounded_primary_key_payloads(mysq
     execute = repo._execute
     plans, payload_sizes = [], []
     def capture(sql, params=(), **kwargs):
-        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql and 'STRAIGHT_JOIN' not in sql and 'retention metadata refresh' not in sql:
             if 'JSON_OBJECT' not in sql:
                 plan = json.loads(execute('EXPLAIN FORMAT=JSON ' + sql, params, fetch='one')[0])
                 plans.append(plan)
@@ -581,7 +584,7 @@ def test_timeout_splits_small_reads_and_preserves_protected_records(mysql_reposi
     execute = repo._execute
     attempts = []
     def slow_large_batch(sql, params=(), **kwargs):
-        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql:
+        if sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)') and 'FROM pq_research_events' in sql and 'STRAIGHT_JOIN' not in sql and 'retention metadata refresh' not in sql:
             if (phase == 'keys') == ('JSON_OBJECT' not in sql):
                 attempts.append(params[-1] if phase == 'keys' else tuple(params[1:]))
             if (phase == 'keys' and 'JSON_OBJECT' not in sql and params[-1] > 2
@@ -620,7 +623,7 @@ def test_single_legacy_json_retry_still_checks_protected_evidence(mysql_reposito
     execute = repo._execute
     recovered = []
     def cold_payload(sql, params=(), **kwargs):
-        if 'FROM pq_research_events FORCE INDEX (PRIMARY)' in sql and 'JSON_OBJECT' in sql:
+        if 'FROM pq_research_events FORCE INDEX (PRIMARY)' in sql and 'JSON_OBJECT' in sql and 'retention metadata refresh' not in sql:
             if 'MAX_EXECUTION_TIME(3000)' in sql:
                 raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'fixture'), 'SELECT')
             if 'MAX_EXECUTION_TIME(10000)' in sql:

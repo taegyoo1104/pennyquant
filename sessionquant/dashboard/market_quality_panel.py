@@ -181,7 +181,7 @@ def database_rows(snapshot):
         'pq_positions':'보유 종목','pq_account_snapshots':'자산 기록',
         'pq_reconciliations':'장부 확인','pq_session_state':'거래 상태',
         'pq_daily_performance':'일별 성과','pq_market_regimes':'시장 방향',
-        'sq_financial_ledger':'금액 장부','pq_system_logs':'운영 기록'}
+        'sq_research_retention_meta':'재현 기록 정리 요약','sq_financial_ledger':'금액 장부','pq_system_logs':'운영 기록'}
     return [{'DB 작업':operations.get(r['operation'],'기타'),
              '자료':tables.get(r['table'],'연결·기타 자료'),'횟수':r['calls'],
              '누적 시간(초)':r['seconds'],'최장 시간(초)':r['max_seconds']}

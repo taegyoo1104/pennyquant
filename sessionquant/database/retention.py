@@ -147,6 +147,7 @@ def _projection(kind):
     paths.update({field: root + "." + field for field in TIME_FIELDS})
     paths["event_published_at"] = root + ".event.published_at"
     if kind == "research_events":
+        paths["_record_kind"] = "$.kind"
         paths.update({"journal_" + field: "$." + field for field in ("received_at", "available_at", "ingested_at")})
         paths["journal_run_id"] = "$.run_id"
     return "JSON_OBJECT(" + ",".join(f"'{key}',JSON_EXTRACT(payload,'{path}')" for key, path in paths.items()) + ")"
@@ -174,12 +175,25 @@ def _stage_timing(table, phase, *, batch=None):
         metrics["max_seconds"] = round(max(metrics["max_seconds"], elapsed), 6)
 
 
-def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
+def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, cache_writes=False, use_metadata=True, cache_filter=None):
     """Split timed-out reads, never skip a record or authorize partial deletion."""
     if clock() >= deadline:
         raise TimeoutError("자료 조회 전체 시간 한도")
     table["read_phase"] = "PAYLOAD"
     table["read_batch"] = {"count": len(keys), "first_seq": keys[0][0], "last_seq": keys[-1][0]}
+    from . import retention_metadata
+    if use_metadata and retention_metadata.supports(repo, kind):
+        table['read_phase'] = 'METADATA_READ'
+        with _stage_timing(table, 'METADATA_READ', batch=table['read_batch']):
+            cached = retention_metadata.read(repo, keys, condition)
+        found = {row[0] for row in cached}
+        table['metadata_hits'] = table.get('metadata_hits', 0) + len(cached)
+        missing = [key for key in keys if key[0] not in found]
+        if not missing:
+            return cached
+        rows = _read_payload_page(repo, kind, condition, missing, table, deadline, clock,
+                                  cache_writes=cache_writes, use_metadata=False, cache_filter=cache_filter)
+        return cached + rows
     placeholders = ",".join("%s" for _ in keys)
 
     def read(limit_ms):
@@ -191,7 +205,7 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
                 (repo.namespace, *(key[0] for key in keys)), fetch="all")
 
     try:
-        return read(3000)
+        rows = read(3000)
     except Exception as exc:
         from .mysql_repository import MySQLRepositoryError
         if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
@@ -209,14 +223,34 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock):
             table["last_single_read_retry"] = retry
             rows = read(limit_ms)
             retry["recovered"] = True
-            return rows
-        table["read_splits"] = table.get("read_splits", 0) + 1
-        half = len(keys) // 2
-        # Keep the smaller size for the rest of this pass. Repeating a known
-        # oversized read on every page otherwise spends the budget on timeouts.
-        table["payload_batch_size"] = min(table.get("payload_batch_size", 10), half)
-        return (_read_payload_page(repo, kind, condition, keys[:half], table, deadline, clock)
-                + _read_payload_page(repo, kind, condition, keys[half:], table, deadline, clock))
+        else:
+            table["read_splits"] = table.get("read_splits", 0) + 1
+            half = len(keys) // 2
+            # Reuse successful sub-batches even if a later batch exhausts budget.
+            table["payload_batch_size"] = min(table.get("payload_batch_size", 10), half)
+            return (_read_payload_page(repo, kind, condition, keys[:half], table, deadline, clock,
+                                      cache_writes=cache_writes, use_metadata=use_metadata, cache_filter=cache_filter)
+                    + _read_payload_page(repo, kind, condition, keys[half:], table, deadline, clock,
+                                         cache_writes=cache_writes, use_metadata=use_metadata, cache_filter=cache_filter))
+    cache_rows = []
+    if cache_writes and retention_metadata.supports(repo, kind):
+        cache_rows = [row for row in rows if cache_filter is None or cache_filter(row)]
+    if cache_rows and deadline-clock() >= 3:
+        table['read_phase'] = 'METADATA_WRITE'
+        try:
+            with _stage_timing(table, 'METADATA_WRITE', batch=table['read_batch']):
+                retention_metadata.backfill(repo, cache_rows)
+            table['metadata_backfill_checked'] = table.get('metadata_backfill_checked', 0) + len(cache_rows)
+        except Exception as exc:
+            from .mysql_repository import MySQLRepositoryError
+            if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
+                raise
+            # Only the optional cache transaction rolled back. Original rows
+            # have already passed the bounded read; deletion still rechecks
+            # the original predicate when no valid metadata is available.
+            table['metadata_write_timeouts'] = table.get('metadata_write_timeouts', 0) + 1
+        table['read_phase'] = 'PAYLOAD'
+    return rows
 
 
 def _unused(kind, metadata, cutoff, protected):
@@ -496,7 +530,10 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                         if clock() >= deadline:
                             break
                         batch = keys[offset:offset + table.get("payload_batch_size", 10)]
-                        rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock))
+                        rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock,
+                                                       cache_writes=apply, cache_filter=lambda row: not (
+                                                           row[5] and max(row[2], row[3]) < naive
+                                                           and _unused(kind, _decode(row[4]), cutoff, protected))))
                         offset += len(batch)
                     rows.sort(key=lambda row: (row[1], row[0]))
                     if clock() < deadline and [(r[0], r[1]) for r in rows] != list(keys):
@@ -530,7 +567,11 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                     # partially retained run must never pass as a full replay.
                     # Includes the deletion, replay marker and transaction commit.
                     with _stage_timing(table, "DELETE"), repo.transaction():
-                        removed = repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s AND seq IN ({placeholders}) "
+                        from . import retention_metadata
+                        if retention_metadata.supports(repo, kind):
+                            removed = retention_metadata.delete(repo, selected, naive, condition)
+                        else:
+                            removed = repo._execute(f"DELETE FROM pq_{kind} WHERE namespace=%s AND seq IN ({placeholders}) "
                                                 f"AND captured_at<%s AND created_at<%s AND updated_at<%s AND ({condition})",
                                                 (repo.namespace, *selected, naive, naive, naive))
                         if removed and kind == "research_events" and policy.intraday_auxiliary:

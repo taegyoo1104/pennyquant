@@ -92,6 +92,18 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-dev.lock
           python -m pip install --no-deps -e .
+      - name: 폐기 가능한 DB의 트리거 검사 준비
+        env:
+          SQ_CI_MYSQL_PORT: ${{ job.services.mysql.ports[3306] }}
+        run: |
+          python - <<'PY'
+          import os, pymysql
+          # 서비스 전용 DB만 변경한다. 운영 DB는 compose에서 binlog를 사용하지 않는다.
+          with pymysql.connect(host='127.0.0.1', port=int(os.environ['SQ_CI_MYSQL_PORT']),
+                               user='root', password='ci-only-root', autocommit=True) as db:
+              with db.cursor() as cursor:
+                  cursor.execute('SET GLOBAL log_bin_trust_function_creators=1')
+          PY
       - name: 폐기 가능한 MySQL의 임의 namespace 검사
         env:
           PQ_TEST_MYSQL: '1'
@@ -100,4 +112,4 @@ jobs:
           PQ_MYSQL_DATABASE: sessionquant_ci
           PQ_MYSQL_USER: sessionquant_ci
           PQ_MYSQL_PASSWORD: ci-only-fixture
-        run: python -m pytest -q tests/test_mysql_integration.py tests/test_retention_mysql.py
+        run: python -m pytest -q tests/test_mysql_integration.py tests/test_retention_mysql.py tests/test_retention_metadata_mysql.py

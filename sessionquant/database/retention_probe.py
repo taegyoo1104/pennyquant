@@ -124,11 +124,20 @@ def probe_retention(repo, policy: RetentionPolicy, *, now=None, max_seconds=10,
                         protected = protections()
                     for offset in range(0, len(keys), 10):
                         batch = keys[offset:offset + 10]
-                        placeholders = ",".join("%s" for _ in batch)
-                        rows = read("PAYLOAD", "seq,captured_at,created_at,updated_at,"
-                                    f"({_projection(table_name)}),({condition}) FROM pq_{table_name} "
-                                    f"FORCE INDEX (PRIMARY) WHERE namespace=%s AND seq IN ({placeholders})",
-                                    (repo.namespace, *(key[0] for key in batch)))
+                        from . import retention_metadata
+                        rows, missing = [], batch
+                        if retention_metadata.supports(repo, table_name):
+                            sql, params = retention_metadata.read_query(repo, batch, condition)
+                            rows = read("METADATA_READ", sql, params)
+                            found = {row[0] for row in rows}
+                            table["metadata_hits"] = table.get("metadata_hits", 0) + len(rows)
+                            missing = [key for key in batch if key[0] not in found]
+                        if missing:
+                            placeholders = ",".join("%s" for _ in missing)
+                            rows += read("PAYLOAD", "seq,captured_at,created_at,updated_at,"
+                                         f"({_projection(table_name)}),({condition}) FROM pq_{table_name} "
+                                         f"FORCE INDEX (PRIMARY) WHERE namespace=%s AND seq IN ({placeholders})",
+                                         (repo.namespace, *(key[0] for key in missing)))
                         rows.sort(key=lambda row: (row[1], row[0]))
                         if [(row[0], row[1]) for row in rows] != list(batch):
                             raise _ProbeLimit("ROWS_CHANGED")
