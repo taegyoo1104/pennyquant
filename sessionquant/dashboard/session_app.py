@@ -147,7 +147,7 @@ def load_database(path: str | Path, *, page=None, news_section=None, panel=None)
         from contextlib import nullcontext
         with repository.transaction() if hasattr(repository,'transaction') else nullcontext():
             if include_state:
-                result.state = read('state', repository.load_dashboard_state if page == '대시보드' else repository.load_state) or {}
+                result.state = read('state', repository.load_dashboard_state if page in {'대시보드','시스템·설정'} else repository.load_state) or {}
             for name in controls:
                 key, _ = CONTROLS[name]
                 value = read(name, lambda: repository.get_control(key))
@@ -163,7 +163,10 @@ def load_database(path: str | Path, *, page=None, news_section=None, panel=None)
                 result.news_status['schedule'] = read('news_schedule', lambda: repository.get_control('news_provider_schedule_v1', {})) or {}
             for name, limit in tables.items():
                 if name in KINDS:
-                    result.tables[name] = read(name, lambda: repository.recent(name, limit=limit))
+                    if name == 'pipeline_status' and page == '시스템·설정':
+                        result.tables[name] = read(name, lambda: repository.recent_pipeline_summary(limit=limit))
+                    else:
+                        result.tables[name] = read(name, lambda: repository.recent(name, limit=limit))
             if page == '대시보드' and include_state and result.tables['executions']:
                 latest = max(result.tables['executions'], key=lambda row: str(row.get('timestamp') or row.get('filled_at') or ''))
                 client_id = latest.get('client_id')

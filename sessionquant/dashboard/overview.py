@@ -261,9 +261,7 @@ def render_system(data,view):
     st.subheader('처리 기록')
     st.caption('종목 선정과 매수 검사 당시의 기록입니다. 시각은 한국시간이며 현재 연결 상태를 뜻하지 않습니다.')
     _table(pipeline_rows(data.tables['pipeline_status']))
-    if data.tables['pipeline_status']:
-        with st.expander('처리 기록 원본 보기'):
-            st.json(data.tables['pipeline_status'])
+    st.caption('최근 최대 100건의 처리 요약입니다. 큰 원본 진단 자료는 화면으로 전송하지 않습니다.')
     from .reference_panel import reference_rows, reference_benchmarks_visible
     st.subheader('시장 참고 지표')
     _table(reference_rows(data.market_reference,

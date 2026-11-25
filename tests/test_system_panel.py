@@ -53,7 +53,8 @@ def test_missing_fields_do_not_invent_success_counts_or_timestamps():
 def test_system_page_renders_processing_summary_and_preserves_full_original(tmp_path, monkeypatch):
     path = tmp_path / 'system.db'
     record = {'id': 'focus-test', 'kind': 'watchlist_focus', 'known_at': STAMP,
-              'data_status': 'UNKNOWN', 'items': [], 'watchlist_id': 'original-detail'}
+              'data_status': 'UNKNOWN', 'items': [{'detail':'original-detail'*1000} for _ in range(50)],
+              'watchlist_id': 'original-detail'}
     repo = Repository(path, backend='sqlite')
     repo.record('pipeline_status', record)
     repo.close()
@@ -67,7 +68,13 @@ def test_system_page_renders_processing_summary_and_preserves_full_original(tmp_
     table = next(frame.value for frame in app.dataframe if '작업' in frame.value.columns)
     assert table.iloc[0]['작업'] == '집중 분석 종목 선정'
     assert table.iloc[0]['기록 시각'] == '11.15 18:39:58 KST'
-    assert any('original-detail' in str(item.value) for item in app.json)
+    assert not app.json
+    app.toggle(key='dashboard_raw_data').set_value(True).run()
+    assert not app.exception
+    assert all('original-detail' not in item.value for item in app.json)
+    assert sum(len(item.value) for item in app.json)<10000
+    app.radio(key='dashboard_page').set_value('시장·종목').run()
+    assert not app.exception and app.radio(key='dashboard_page').value == '시장·종목'
     repo = Repository(path, backend='sqlite')
     assert repo.all('pipeline_status') == [record]
     assert not repo.all('orders') and not repo.all('order_intents')

@@ -156,6 +156,12 @@ class Repository:
             raise ValueError(f"unknown record kind {kind}")
         return [json.loads(row[0]) for row in self.db.execute(f"SELECT payload FROM {kind} ORDER BY seq")]
 
+    def recent_pipeline_summary(self, limit=100):
+        from .pipeline_projection import expression, summary, validate_limit
+        validate_limit(limit)
+        rows = self.db.execute(f"SELECT {expression('sqlite')} FROM pipeline_status ORDER BY seq DESC LIMIT ?", (limit,)).fetchall()
+        return [summary(row[0]) for row in reversed(rows)]
+
     def recent(self, kind: str, limit: int = 2000) -> list[dict]:
         """저장 이력은 보존하면서 화면에서 읽는 최근 기록 수를 제한한다."""
         if kind not in KINDS:
