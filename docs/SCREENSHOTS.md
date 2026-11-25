@@ -7,6 +7,7 @@
 | 화면 | 확인할 내용 | 원본 PDF |
 | --- | --- | --- |
 | [메인 대시보드](#main) | 자산·시장 흐름, 집중 종목, 보유 종목과 매매 기록 | [메인](assets/screenshots/2026-11/main.pdf) |
+| [모바일 실행 화면](#mobile) | 휴대폰에서 보는 자산 요약·집중 감시·보유·체결 카드 | 아래 이미지로 보기 |
 | [시장·종목](#market) | 최신 호가, 분봉 준비 상태, 매수를 기다리는 이유 | [종목·시세 품질](assets/screenshots/2026-11/market-quality.pdf) |
 | [뉴스·LLM](#news) | AI 설명, 기사 수집과 분석 진행 상황 | [뉴스·LLM](assets/screenshots/2026-11/news-llm.pdf) |
 | [전략·백테스트](#backtest) | 저장된 평가 보고서와 일별 모의매매 성과 | [백테스트](assets/screenshots/2026-11/backtest.pdf) |
@@ -47,6 +48,24 @@ SPY·QQQ·SOXX는 시장을 참고하기 위한 ETF입니다. 지수 자체의 �
 [![자산 요약부터 집중 감시, 매매 기록, AI 브리핑까지 이어지는 메인 전체 화면](assets/screenshots/2026-11/main-full.png)](assets/screenshots/2026-11/main-full.png)
 
 </details>
+
+<a id="mobile"></a>
+
+## 모바일 실행 화면
+
+휴대폰에서 직접 확인한 화면입니다. 자산 요약은 두 열로, 집중 종목은 카드로 보여주고 보유·체결 기록은 아래로 이어집니다. 각 사진을 누르면 크게 볼 수 있습니다.
+
+| 자산 요약 | 집중 감시 |
+| --- | --- |
+| [<img src="assets/screenshots/2026-11/mobile-overview.png" width="320" alt="모바일 자산 요약: 모의 총자산, 매수 가능 금액, 일간·총 수익률" />](assets/screenshots/2026-11/mobile-overview.png) | [<img src="assets/screenshots/2026-11/mobile-watchlist.png" width="320" alt="모바일 집중 감시: TSM·SPCX의 가격과 상승·조정·반등 단계" />](assets/screenshots/2026-11/mobile-watchlist.png) |
+| 모의 총자산·매수 가능 금액과 일간·총 수익률을 구분합니다. | 가격·전일 대비 등락률 아래에 전략 단계와 대기 이유를 표시합니다. |
+
+| 보유 종목 | 매매 기록 |
+| --- | --- |
+| [<img src="assets/screenshots/2026-11/mobile-holdings.png" width="320" alt="모바일 보유 종목: TSM 평가액·평가손익과 최근 매수 체결" />](assets/screenshots/2026-11/mobile-holdings.png) | [<img src="assets/screenshots/2026-11/mobile-trades.png" width="320" alt="모바일 매매 기록: TSM 매수와 AMD 매도 카드, 수량·체결가·매도 이유" />](assets/screenshots/2026-11/mobile-trades.png) |
+| TSM 보유 평가액·평가손익과 최근 매수 시각을 확인합니다. | 매수·매도를 색으로 구분하고, 수량·체결가·시각과 기록된 이유를 보여줍니다. |
+
+사진의 기록 시각은 한국시간 11월 25일 01:13~01:24이며, 실제 체결 수는 5건입니다. ‘최근 75건’은 당시 조회 상한 문구입니다. 상태 표시줄과 브라우저 주소 영역은 제외하고 앱 화면을 옮겼습니다.
 
 <a id="market"></a>
 
@@ -107,4 +126,4 @@ SPY·QQQ·SOXX는 시장을 참고하기 위한 ETF입니다. 지수 자체의 �
 
 ## 이미지 출처
 
-사용자가 제공한 `세션퀀트-메인.pdf`, `세션퀀트-종목,시세품질.pdf`, `세션퀀트-뉴스,LLM.pdf`, `세션퀀트-백테스트.pdf`를 이미지로 변환했습니다. 읽기 쉽도록 PDF의 바깥 여백을 줄이고, 긴 화면은 영역별로 나눴습니다. 가격·문구·차트는 수정하지 않았으며 위 표에서 원본 PDF를 열 수 있습니다. 휴대폰 사진은 카드 배치와 이후 체결 상태를 설명하는 참고로 사용했습니다.
+사용자가 제공한 `세션퀀트-메인.pdf`, `세션퀀트-종목,시세품질.pdf`, `세션퀀트-뉴스,LLM.pdf`, `세션퀀트-백테스트.pdf`와 모바일 사진 4쪽을 담은 `png2pdf.pdf`를 이미지로 변환했습니다. 읽기 쉽도록 PDF의 바깥 여백을 줄이고, 긴 화면은 영역별로 나눴습니다. 가격·문구·차트는 수정하지 않았으며 위 표에서 데스크톱 화면의 원본 PDF를 열 수 있습니다. 모바일 사진에서는 상태 표시줄·브라우저 주소 영역을 제외했습니다.
