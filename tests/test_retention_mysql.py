@@ -636,3 +636,37 @@ def test_single_legacy_json_retry_still_checks_protected_evidence(mysql_reposito
     assert len(set(recovered)) == 4
     assert report['tables']['research_events']['single_read_retries'] == 4
     assert report['tables']['research_events']['last_single_read_retry']['recovered'] is True
+
+
+@pytest.mark.parametrize('changed', [None, 'report', 'heartbeat', 'lease'])
+def test_expired_cleanup_start_recovery_checks_real_db_without_writes(mysql_repositories, monkeypatch, changed):
+    from types import SimpleNamespace
+    from test_retention_window_recovery import module, evidence, RECEIPT, UPLOADED
+    from sessionquant.database.config import MySQLConfig
+    import sessionquant.build_info as build
+    import sessionquant.session_config as configs
+    host = module('resume_start_after_retention_expiry')
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    report, _ = evidence()
+    report['namespace'] = repo.namespace
+    repo.set_control('data_retention_v1', report)
+    repo.set_control('trade_control_state', {'mode': 'paper', 'status': 'OFFLINE', 'running': False, 'armed': False})
+    repo._execute('UPDATE pq_controls SET updated_at=%s WHERE namespace=%s AND name=%s',
+                  ((UPLOADED + timedelta(seconds=1 if changed == 'heartbeat' else -1)).replace(tzinfo=None),
+                   repo.namespace, 'trade_control_state'))
+    before = repo._execute('SELECT name,payload,updated_at FROM pq_controls WHERE namespace=%s ORDER BY name',
+                           (repo.namespace,), fetch='all')
+    monkeypatch.setattr(build, 'read_build_info', lambda: {'revision': host.REVISION})
+    monkeypatch.setattr(configs, 'load_session_config', lambda _: SimpleNamespace(
+        database_backend='mysql', environment='PAPER_LOCAL', db_path='unused'))
+    monkeypatch.setattr(MySQLConfig, 'from_env', classmethod(lambda cls: repo.config))
+    expected = host.digest({**report, 'deleted': -1}) if changed == 'report' else host.digest(report)
+    if changed == 'lease':
+        with repo.engine_lease(), pytest.raises(RuntimeError):
+            host.verify_db(RECEIPT, expected)
+    elif changed:
+        with pytest.raises(ValueError): host.verify_db(RECEIPT, expected)
+    else:
+        host.verify_db(RECEIPT, expected)
+    assert repo._execute('SELECT name,payload,updated_at FROM pq_controls WHERE namespace=%s ORDER BY name',
+                         (repo.namespace,), fetch='all') == before
