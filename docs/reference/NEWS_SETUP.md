@@ -96,7 +96,7 @@ strategy_explanation:
 
 ## 5. 기업 SEC·RSS
 
-SEC는 티커→CIK를 공식 매핑에서 찾는다. 기업 RSS는 패키지에 포함한 [시가총액 상위 100개 기업 중 검증된 공식 피드 목록](COMPANY_RSS.md)을 기본으로 적용한다. 확인되지 않은 피드는 제외한다. RSS 기본 목록과 운영 감시목록은 분리한다. 현재 추천 프로필은 시총 후보 최대 50개·거래대금 중심 집중 10개를 사용한다. 뉴스 수집 대상은 보유·집중 우선순위와 호출 예산을 따르며 RSS 카탈로그의 100개를 매 주기 전부 분석하지 않는다. [단계 01](../archive/stages/STAGE01_WATCHLIST.md)의 100→20은 이전 계획이다.
+SEC는 티커→CIK를 공식 매핑에서 찾는다. 기업 RSS는 패키지에 포함한 [시가총액 상위 100개 기업 중 검증된 공식 피드 목록](COMPANY_RSS.md)을 기본으로 적용한다. 확인되지 않은 피드는 제외한다. RSS 기본 목록과 운영 감시목록은 분리한다. 현재 추천 프로필은 시총 후보 최대 50개·거래대금 중심 집중 10개를 사용한다. 뉴스 수집 대상은 보유·집중 우선순위와 호출 예산을 따르며 RSS 카탈로그의 100개를 매 주기 전부 분석하지 않는다. [단계 01](https://github.com/taegyoo1104/pennyquant/blob/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/stages/STAGE01_WATCHLIST.md)의 100→20은 이전 계획이다.
 
 기업별 사용자 설정은 기본 목록의 같은 필드보다 우선한다. 직접 확인한 피드 주소는 아래처럼 `companies`에 추가한다. 목록 전체를 해제하려면 `company_rss_catalog: false`, 특정 기업의 RSS를 해제하려면 그 기업에 `rss_urls: []`를 지정한다. RSS 카탈로그는 새 기업 피드를 자동 발견하거나 운영 시총 순위를 갱신하는 기능이 아니다. 시총·집중 목록 갱신은 별도 수집기가 담당한다.
 
@@ -149,7 +149,7 @@ OpenAI의 `accessible: true`는 모델 메타데이터 접근 성공이며 실�
 .\venv\Scripts\python.exe -m sessionquant run --config config/sessionquant.strategy-lab-websocket.example.yaml
 ```
 
-`news_enabled: true`, `include_alpaca: true`에서 위 소스를 수집·분석한다. 기업 180초·거시 900초 등 설정 주기는 작업 요청 간격이다. 실제 도착량·처리량은 공급자 응답·중복·허용 본문·예산에 따라 달라지며 그 주기마다 기사나 LLM 호출이 반드시 생기는 것은 아니다. 기존 명시적 `news_refresh_seconds`는 기업/거시 새 키가 없을 때만 fallback으로 사용한다. [독립 주기·권한 설정 예시](../../config/sessionquant.news.example.yaml)와 [06 운영 안내](../archive/stages/STAGE06_NEWS.md)를 참고한다. 화면에서 매매 시작을 누르기 전에도 뉴스·시세 수집은 동작하며 OpenAI 키가 있으면 분석 비용이 발생할 수 있다.
+`news_enabled: true`, `include_alpaca: true`에서 위 소스를 수집·분석한다. 기업 180초·거시 900초 등 설정 주기는 작업 요청 간격이다. 실제 도착량·처리량은 공급자 응답·중복·허용 본문·예산에 따라 달라지며 그 주기마다 기사나 LLM 호출이 반드시 생기는 것은 아니다. 기존 명시적 `news_refresh_seconds`는 기업/거시 새 키가 없을 때만 fallback으로 사용한다. [독립 주기·권한 설정 예시](../../config/sessionquant.news.example.yaml)와 [06 운영 안내](https://github.com/taegyoo1104/pennyquant/blob/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/stages/STAGE06_NEWS.md)를 참고한다. 화면에서 매매 시작을 누르기 전에도 뉴스·시세 수집은 동작하며 OpenAI 키가 있으면 분석 비용이 발생할 수 있다.
 
 뉴스·LLM과 전략의 연결은 `run`의 PAPER_LOCAL 엔진에서 사용한다. 추천 단순 전략에서 검증된 기업 뉴스 분석은 **후보 순위 가점**, `strategy_explanation`은 **현재 판단 설명** 역할이다. 뉴스가 없어도 가격 전략을 평가하며 LLM이 주문하거나 뉴스 악재만으로 강제 청산하지 않는다. 기존 `pullback` 등 뉴스 위험을 사용하는 프로필과 구분한다. `run-account`는 실제 계좌 조회이고 `live-local`은 Phase 5의 소액 주문 검증이다. 두 경로에 키를 넣었다고 뉴스 기반 완전 자동 실거래가 연결되지는 않는다.
 
@@ -174,7 +174,7 @@ OpenAI의 `accessible: true`는 모델 메타데이터 접근 성공이며 실�
 
 ## 07 호출 감사·비용 설정
 
-[07 구현 기록](../archive/stages/STAGE07_LLM.md)과 [기능별 설정 예시](../../config/sessionquant.llm.example.yaml)는 세부 계약을 확인하는 참고 자료다. 실제 운영의 활성화·예산 값은 실행 중인 YAML을 따른다. 메타데이터 감사는 기본 적용하며 `llm_debug_audit.enabled`와 `macro_context_llm.enabled`는 기본 false다. 06 원문 보강 정책과 별도로 원문 보관 권한이 필요하다. `SQ_LLM_AUDIT_ALLOW_READ=1`은 허용되어 암호화 보관된 원문을 로컬에서 읽는 추가 권한이며, 원문 취득·저장이나 유료 평가를 자동 활성화하지 않는다.
+[07 구현 기록](https://github.com/taegyoo1104/pennyquant/blob/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/stages/STAGE07_LLM.md)과 [기능별 설정 예시](../../config/sessionquant.llm.example.yaml)는 세부 계약을 확인하는 참고 자료다. 실제 운영의 활성화·예산 값은 실행 중인 YAML을 따른다. 메타데이터 감사는 기본 적용하며 `llm_debug_audit.enabled`와 `macro_context_llm.enabled`는 기본 false다. 06 원문 보강 정책과 별도로 원문 보관 권한이 필요하다. `SQ_LLM_AUDIT_ALLOW_READ=1`은 허용되어 암호화 보관된 원문을 로컬에서 읽는 추가 권한이며, 원문 취득·저장이나 유료 평가를 자동 활성화하지 않는다.
 
 현재 메뉴는 6개다. 홈은 집중 감시·장부·AI 설명을 요약하고, 호출 필터·실패 필드·정제 결과·비용·수동 잔액 메모는 뉴스·LLM 상세에 표시한다. 공식 조직 비용은 미연결 UNKNOWN, 선불 잔액은 수동 확인 기준의 추정이다. `llm-evaluate` 기본 미리보기에는 유료 생성이 없으며 실제 `--execute`는 사용자가 유료 평가를 선택했을 때 실행한다.
 
