@@ -127,9 +127,12 @@ if [[ "$1" == is-enabled ]]; then echo disabled; fi
 if [[ "$*" == "start sessionquant.service" ]]; then
     if [[ "$HANDOFF_CHANGE" == stale ]]; then
         python3 - "$HANDOFF" <<'PY'
-import json,sys
+import json,sys,time
 from pathlib import Path
-path=Path(sys.argv[1]); value=json.loads(path.read_text()); value['at']=-1
+path=Path(sys.argv[1]); value=json.loads(path.read_text())
+# Monotonic time has no guaranteed epoch. -1 can be within the 120-second
+# window on a freshly started runner; expire relative to this clock instead.
+value['at']=time.monotonic()-121
 path.write_text(json.dumps(value))
 PY
     fi
