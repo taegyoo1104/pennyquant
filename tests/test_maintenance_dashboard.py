@@ -80,5 +80,6 @@ def test_catchup_uses_detached_bounded_service_and_refuses_open_market(tmp_path,
     else:
         assert result.returncode == 0, result.stderr
         assert 'TimeoutStartSec=34200' in log and 'SQ_MAINTENANCE_SECONDS=21600' in log
+        assert '--no-block' in log
         assert '/stop.sh' in log and '/start.sh' not in log
         assert 34200 > 21600 + 2*5400 + 180 + 480 + 120

@@ -13,7 +13,7 @@ now=datetime.now(timezone.utc); bounds=session_bounds(now)
 if bounds and now < bounds[1]:
     raise SystemExit("밀린 자료 정리는 휴장일·정규장 마감 후에 실행하세요.")
 ' < /dev/null
-systemd-run --unit=sessionquant-maintenance-catchup --collect \
+systemd-run --unit=sessionquant-maintenance-catchup --collect --no-block \
     --property=Type=oneshot --property=TimeoutStartSec=34200 --property=TimeoutStopSec=60 \
     --property=Environment=SQ_MAINTENANCE_SECONDS=21600 \
     /opt/sessionquant/deploy/gcp/stop.sh
