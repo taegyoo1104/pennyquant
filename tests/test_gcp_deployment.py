@@ -187,6 +187,9 @@ if [[ "$FAILURE" == dump ]]; then exit 1; fi
     (deploy/'storage_check.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="space"))')
     (deploy/'upload_backup.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="upload"))')
     shutil.copyfile(DEPLOY/'package_backup.py',deploy/'package_backup.py')
+    (data/'mysql').mkdir(exist_ok=True)
+    (deploy/'backup_capacity.py').write_text((DEPLOY/'backup_capacity.py').read_text().replace(
+        '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)))
     body=(DEPLOY/'backup.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
         '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)).replace(
         '/run/sessionquant-backup.lock',str(tmp_path/'backup.lock'))
