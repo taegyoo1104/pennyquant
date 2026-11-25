@@ -120,8 +120,9 @@ def test_dml_and_ddl_counters_include_privileged_writes_but_not_reads(checkpoint
 def test_nightly_stage_failures_never_publish_success_or_delete_without_backup(tmp_path, failure):
     import os
     import subprocess
-    from test_gcp_deployment import executable
+    from test_gcp_deployment import executable, install_lifecycle_lock
     root=tmp_path/'repo';deploy=root/'deploy/gcp';deploy.mkdir(parents=True)
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     etc=tmp_path/'etc';etc.mkdir();(etc/'backup-status').write_text('UPLOADED previous')
     calls=tmp_path/'calls';bindir=tmp_path/'bin';bindir.mkdir()
     executable(bindir/'docker', '''echo "docker $*" >> "$CALLS"

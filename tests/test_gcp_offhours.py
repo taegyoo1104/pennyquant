@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from test_gcp_deployment import DEPLOY, executable
+from test_gcp_deployment import DEPLOY, executable, install_lifecycle_lock
 from test_paused_update_guard import guard
 
 
@@ -31,6 +31,7 @@ def test_offhours_update_and_startup_use_actual_close(stamp, allowed):
 def test_inspect_refuses_to_replace_running_trading_engine(tmp_path, running):
     root = tmp_path/'repo'
     root.mkdir()
+    install_lifecycle_lock(root, tmp_path/'lifecycle.lock')
     bindir = tmp_path/'bin'; bindir.mkdir()
     calls = tmp_path/'calls'
     executable(bindir/'docker', '''echo "docker $*" >> "$CALLS"
@@ -163,10 +164,11 @@ if [[ "$*" == *is-enabled* ]]; then echo disabled; exit 1; fi
 def test_offhours_update_backs_up_before_install_and_never_starts_engine(tmp_path, failure, resume, checkpoint):
     if (resume and checkpoint != "absent") or (checkpoint == "valid" and failure == "backup"):
         pytest.skip("inapplicable backup path")
-    if (resume and failure == 'backup') or (not resume and failure in {'resume_guard', 'receipt_changed', 'retention'}):
+    if (resume and failure == 'backup') or (not resume and failure in {'resume_guard', 'receipt_changed'}):
         pytest.skip('not applicable to this update mode')
     root = tmp_path/'repo'; (root/'deploy/gcp').mkdir(parents=True)
     stage = tmp_path/'archive'; deploy = stage/'deploy/gcp'; deploy.mkdir(parents=True)
+    install_lifecycle_lock(stage, tmp_path/'lifecycle.lock')
     etc = tmp_path/'etc'; etc.mkdir(); (etc/'backup-status').write_text('UPLOADED previous')
     (etc/'retention-status').write_text('FAILED fixture')
     if checkpoint != 'absent':
@@ -183,6 +185,12 @@ with open(os.environ['CALLS'],'a') as f: f.write('install-code\\n' if '--backup'
 if '--backup' in sys.argv: shutil.copytree(Path(__file__).parents[2],sys.argv[sys.argv.index('--repo')+1],dirs_exist_ok=True)
 ''')
     (deploy/'storage_check.py').write_text('pass\n')
+    (deploy/'startup_retention.py').write_text('''import os,sys
+with open(os.environ['CALLS'],'a') as f:
+    f.write('retention\\n')
+    f.write('retention-args '+repr(sys.argv[1:])+'\\n')
+if os.environ['FAILURE']=='retention':raise SystemExit(7)
+''')
     (deploy/'update_guard.py').write_text('# the actual guard has separate DB/lease tests\n')
     (deploy/'resume_retention_guard.py').write_text('# receipt age and offline heartbeat tested separately\n')
     (deploy/'sessionquant.service').write_text('[Unit]\nDescription=test\n')
@@ -243,14 +251,17 @@ if [[ "$1" == is-enabled ]]; then echo disabled; fi
             assert lines.index('install-code') < lines.index('checkpoint-writable') < lines.index('preopen --offline')
         else:
             assert lines.index('backup') < lines.index('install-code')
-        if resume: assert lines.index('retention') < lines.index('preopen --offline')
-        else: assert 'retention' not in lines
+        assert lines.count('retention') == 1
+        assert lines.index('install-code') < lines.index('retention') < lines.index('preopen --offline')
+        previous = 'RESUME UPLOADED previous' if resume else 'UPLOADED previous'
+        args = [] if checkpoint == 'valid' else ['--backup-before', previous]
+        assert 'retention-args '+repr(args) in lines
         assert lines.index('preopen --offline') < lines.index('inspection')
     else:
         assert 'inspection' not in lines
         if failure == 'retention':
             assert lines.index('install-code') < lines.index('retention')
-            assert ('backup' in lines) is (not resume)
+            assert ('backup' in lines) is (not resume and checkpoint != 'valid')
         else:
             assert 'install-code' not in lines and 'retention' not in lines
             assert ('backup' in lines) is (failure == 'backup')

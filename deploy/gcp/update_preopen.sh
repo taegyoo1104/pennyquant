@@ -24,6 +24,7 @@ sq_stage=$(mktemp -d /var/tmp/sessionquant-update.XXXXXXXX)
 trap 'rm -rf -- "$sq_stage"' EXIT
 trap 'echo "업데이트가 중단됐습니다. 위 오류를 확인하세요. DB·환경 파일은 삭제하지 않았습니다." >&2' ERR
 git archive "$sq_target" | tar -x -C "$sq_stage"
+source "$sq_stage/deploy/gcp/lifecycle_lock.sh"
 python3 "$sq_stage/deploy/gcp/prepare_update.py" --repo /opt/sessionquant --target "$sq_target"
 python3 "$sq_stage/deploy/gcp/storage_check.py" --minimum-mib 4096
 # Existing image/calendar first; do not start the trading engine for inspection.
@@ -142,12 +143,12 @@ fi
 # The app is stopped and its original ledger has been backed up. Preserve the
 # strict restart-settings guard; upgrade only the reviewed, flat Paper profile.
 "${compose[@]}" run --rm --no-deps -T app python -m sessionquant.portfolio.position_limit_upgrade < /dev/null
-# Preserve explicit interrupted-retention recovery; ordinary deployment never
-# repeats cleanup. Storage checks still gate startup when space is inadequate.
-if [[ "$sq_resume" == true ]]; then
-    bash deploy/gcp/retention_after_update.sh "$sq_previous_backup" < /dev/null
+# Probe using the new policy/image. A fresh backup from this same operation
+# covers cleanup; a reused nightly snapshot is not a fresh deletion receipt.
+if [[ "$sq_reuse" == true ]]; then
+    python3 deploy/gcp/startup_retention.py < /dev/null
 else
-    echo '낮 업데이트 자료 정리는 장 마감 작업으로 넘깁니다. 정리 정책 변경도 다음 마감에 적용합니다.'
+    python3 deploy/gcp/startup_retention.py --backup-before "$sq_previous_backup" < /dev/null
 fi
 systemctl enable sessionquant.service
 systemctl disable --now sessionquant-cost-guard.timer
@@ -157,6 +158,14 @@ if [[ "$sq_mode" == --off-hours ]]; then
     bash deploy/gcp/inspect.sh < /dev/null
 else
     bash deploy/gcp/preopen_check.sh < /dev/null
+    # systemd does not inherit fd 8. Hand off this operation's completed check,
+    # then release the lifecycle lock before asking the service to acquire it.
+    if ! python3 deploy/gcp/startup_handoff.py create; then
+        rm -f /run/sessionquant-startup-prepared.json
+        echo '이번 정리 확인을 전달하지 못했습니다. 서비스 시작에서 다시 확인합니다.' >&2
+    fi
+    flock -u 8
+    exec 8>&-
     systemctl start sessionquant.service
     systemctl is-active --quiet sessionquant-market-close.timer
     systemctl is-active --quiet sessionquant-run-limit.timer

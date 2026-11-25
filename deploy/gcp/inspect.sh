@@ -2,6 +2,7 @@
 # Start the stored-record UI only. Never starts the trading runtime.
 set -Eeuo pipefail
 cd /opt/sessionquant
+source deploy/gcp/lifecycle_lock.sh
 [[ ! -e /etc/sessionquant/maintenance && ! -e /etc/sessionquant/storage-blocked ]] || {
     echo '저장 공간·복구 점검 표시를 먼저 확인하세요.' >&2; exit 1;
 }
