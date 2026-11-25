@@ -24,7 +24,7 @@
 2. **자료 확인:** 메인 화면에서 연결, 집중 감시 종목, 관측 가격의 시각을 봅니다. 장전에는 오늘 정규장 봉과 전략 판단이 대기여도 정상입니다.
 3. **매매 시작:** 자료 준비가 끝나면 확인란을 선택해 요청합니다. `자동매매 켜짐`은 조건 평가를 허용했다는 뜻이며 체결 완료가 아닙니다.
 4. **장중 확인:** 집중 카드의 단계와 **시장·종목 → 매수 판단**을 봅니다. 주문이 생기면 **매매 내역**에서 체결과 잔량을 구분합니다.
-5. **종료 확인:** 전체 매도·매매 종료를 요청했다면 보유·미체결이 정리됐는지 봅니다. GCP 자동 종료 후에는 VM 중지와 새 백업 성공을 각각 확인합니다.
+5. **종료 확인:** 전체 매도·매매 종료를 요청했다면 보유·미체결이 정리됐는지 봅니다. GCP에서는 장 마감 저장·백업·보조 자료 정리 후 조회용 대시보드로 전환합니다. 백업 성공과 정리 결과를 각각 확인하고, VM은 조회를 마친 뒤 직접 중지합니다.
 
 로컬 실행 명령입니다. 설치 때 정한 `SQ_DB_NAMESPACE=sessionquant-strategy-lab-ws-v1` 환경도 유지합니다.
 
@@ -168,7 +168,7 @@ python -m sessionquant record-quality --bundle data/paper-review-01
 python -m sessionquant replay-recording --bundle data/paper-review-01 --db data/paper-replay-01.db
 ```
 
-재생은 당시 수신·분석 완료 시각과 Paper 정책을 보존하며 외부 API·LLM을 다시 호출하지 않습니다. 초기 포지션이 없는 시점부터 기록이 완전해야 하며, 혼합 정책 기록은 거부합니다. [기록 연구 상세](archive/stages/STAGE05_RECORDING_BACKTEST.md)와 `evaluate-candidates --help`도 참고할 수 있습니다.
+재생은 당시 수신·분석 완료 시각과 Paper 정책을 보존하며 외부 API·LLM을 다시 호출하지 않습니다. 초기 포지션이 없는 시점부터 기록이 완전해야 하며, 혼합 정책 기록은 거부합니다. [기록 연구 상세](https://github.com/taegyoo1104/pennyquant/blob/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/stages/STAGE05_RECORDING_BACKTEST.md)와 `evaluate-candidates --help`도 참고할 수 있습니다.
 
 ## 문제별로 먼저 볼 것
 
@@ -212,4 +212,4 @@ python -m sessionquant history-status --config config/sessionquant.realtime-pape
 
 이전 프로필의 예열은 완전한 종목·거래일의 검사를 해시·달력·검사 버전으로 재사용합니다. 끝까지 조회해도 누락·충돌이 남은 구간은 내용이 같으면 6시간 재조회를 생략하며, 누락을 정상으로 인정하지 않습니다. 오류·호출 한도 등으로 끝내지 못한 구간에는 적용하지 않습니다. DB 변경, 달력·검사 버전 변경, 6시간 경과 시 다시 검사합니다. 수동 `history-backfill`은 이 대기 기록을 사용하지 않습니다.
 
-이전 REST 프로필의 종목/SPY 두 시점 비교, 호가용 요청 시간 예약, 필수 RVOL·시장 필터, 최대 집중 20개는 그 프로필의 정책입니다. 현재 권장 웹소켓 프로필의 동작과 섞어 해석하지 않습니다. [후보 선정 상세](archive/stages/STAGE08_CANDIDATES.md)는 이전 단계의 설계 기록입니다.
+이전 REST 프로필의 종목/SPY 두 시점 비교, 호가용 요청 시간 예약, 필수 RVOL·시장 필터, 최대 집중 20개는 그 프로필의 정책입니다. 현재 권장 웹소켓 프로필의 동작과 섞어 해석하지 않습니다. [후보 선정 상세](https://github.com/taegyoo1104/pennyquant/blob/03fc270546c72c15c7ffed9af9b60a7207f3ae14/docs/archive/stages/STAGE08_CANDIDATES.md)는 이전 단계의 설계 기록입니다.

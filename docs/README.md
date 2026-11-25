@@ -20,8 +20,10 @@ SessionQuant는 **OpenAI Codex와 함께 기획·구현·검증하는 모의매�
 | --- | --- |
 | 설치, API 없이 첫 재현 시나리오 실행 | [시작 안내](GETTING_STARTED.md) |
 | 실제 데이터로 모의매매, 자료 준비, 매매 시작·종료, 기록 확인 | [매일 운영하기](REALTIME_PAPER.md) |
-| GCP VM, 대시보드 연결, 업데이트, 자동 종료와 백업 | [GCP 운영](GCP_PAPER.md) |
+| Windows CMD → PuTTY → tmux, Tailscale 접속, 업데이트·마감 백업 | [GCP 운영](GCP_PAPER.md#windows-cmd에서-시작하기) |
 | 기존 REST 프로필에서 웹소켓 프로필로 전환 | [웹소켓 전환](WEBSOCKET_ROLLOUT.md) |
+| 분봉 지연이 API·DB·계산 중 어디서 생겼는지 확인 | [부담을 제한한 지연 진단](WEBSOCKET_ROLLOUT.md#다음-운영에서-분봉-지연-확인하기) |
+| 구버전 VM이 켜진 직후 종료되어 최초 업데이트가 어려움 | [최초 점검 부팅](GCP_OFFHOURS_MIGRATION.md) |
 | 디스크 부족·백업 시간 초과의 근거와 복구 절차 | [저장 공간·백업 장애 기록](GCP_STORAGE_RECOVERY.md) |
 
 프로그램 시작, 매매 시작, 코드 업데이트, 대시보드 연결은 다른 작업입니다. 운영 절차에 표시한 **로컬 PC / Cloud Shell / 운영 VM**을 먼저 확인하고 명령을 실행하세요.
@@ -41,7 +43,7 @@ SessionQuant는 **OpenAI Codex와 함께 기획·구현·검증하는 모의매�
 
 ## 과거 기록은 따로 읽습니다
 
-[과거 문서 안내](archive/README.md)에서 초기 PennyQuant 기획, 중간 단계의 설계와 이전 운영 안내를 찾을 수 있습니다. 당시에는 맞았던 종목 수·전략 조건·명령·미완료 상태가 지금과 다를 수 있습니다. 과거 문서는 현재 운영 매뉴얼로 사용하지 않습니다.
+[과거 문서 안내](archive/README.md)는 초기 PennyQuant 기획, 단계별 보고, 옛 README·인수인계를 Git 이력의 고정된 원문으로 연결합니다. 중복된 과거 파일 31개는 현재 작업 트리에서 정리했습니다. 이전 요구사항과 복구 근거가 사라진 것은 아닙니다. 과거 문서는 현재 운영 매뉴얼로 사용하지 않습니다.
 
 ## 문서의 기준
 
