@@ -48,6 +48,7 @@ if [[ -e /etc/sessionquant/storage-blocked ]]; then
     exit 1
 fi
 python3 deploy/gcp/storage_check.py --minimum-mib 2048
+python3 deploy/gcp/backup_capacity.py check
 if [[ -f /etc/sessionquant/backup-status ]] && ! grep -q '^UPLOADED ' /etc/sessionquant/backup-status; then
     echo '이전 백업이 완료되지 않았습니다. DB만 켜서 backup.sh를 성공시킨 후 재시작하세요.' >&2
     exit 1

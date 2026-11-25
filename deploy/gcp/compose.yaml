@@ -21,7 +21,7 @@ services:
     init: true
     network_mode: host
     env_file: /etc/sessionquant/app.env
-    volumes: ["/var/lib/sessionquant/app:/app/data"]
+    volumes: ["/var/lib/sessionquant/app:/app/data", "/var/lib/sessionquant/health:/app/health:ro"]
     # Select in /etc/sessionquant/app.env; expansion happens inside the container.
     command: ["sh", "-c", 'exec python -m sessionquant run --config "$${SQ_SESSION_CONFIG:-config/sessionquant.realtime-paper.example.yaml}" --no-desktop-notifications']
     depends_on:

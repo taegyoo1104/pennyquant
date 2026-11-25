@@ -162,3 +162,12 @@ if sys.argv[1]==os.environ['FAILURE']:raise SystemExit(1)
     assert ('야간 정리·최종 백업 완료.' in result.stdout) is (not failure)
     assert not any('down' in line for line in lines)
     if failure!='stop':assert lines[-2:]==['sync','inspection']
+
+
+def test_host_health_report_does_not_invalidate_sealed_application_data(checkpoint):
+    m, _, _ = completed(checkpoint)
+    (m.DATA/'health').mkdir()
+    (m.DATA/'health/storage.json').write_text('{"status":"OK"}')
+    m.verify()
+    (m.DATA/'health/storage.json').write_text('{"status":"LOW"}')
+    m.verify()

@@ -128,6 +128,8 @@ wait
     assert result.returncode == int(mode != "success")
     assert data.read_bytes() == b"keep actual DB"
     assert calls.read_text().splitlines()[-2:] == ["sync", "inspection"]
+    if mode != "success":
+        assert 'reason=BACKUP_FAILED' in (etc/'retention-status').read_text()
     if mode == "timeout":
         assert "제한 시간" in result.stderr
         assert "phase=DUMP" in status.read_text() and "UPLOADED" not in status.read_text()
@@ -255,6 +257,9 @@ def test_failed_verification_never_uploads_or_removes_previous_archive(tmp_path,
     (deploy / "storage_check.py").write_text("pass")
     (deploy / "upload_backup.py").write_text('raise AssertionError("must never upload")')
     shutil.copyfile(DEPLOY / "package_backup.py", deploy / "package_backup.py")
+    (data/'mysql').mkdir(exist_ok=True)
+    (deploy/'backup_capacity.py').write_text((DEPLOY/'backup_capacity.py').read_text().replace(
+        '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)))
     if invalid == "package_failure":
         (deploy / "package_backup.py").write_text("raise SystemExit(2)")
     script = tmp_path / "backup.sh"

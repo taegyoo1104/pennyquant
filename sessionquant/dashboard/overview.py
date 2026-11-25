@@ -130,6 +130,9 @@ def recent_trades(rows,now):
 
 
 def render_overview(data,view,path,usage_path=None,usage_environment=None):
+    import streamlit as st
+    from .storage_health import render_storage_health
+    render_storage_health(st)
     if view['environment']=='PAPER_LOCAL':
         from .operations_overview import render_operations
         return render_operations(data,view,path)
@@ -244,6 +247,8 @@ def render_system(data,view):
     import streamlit as st
     from .session_app import _table,timestamp
     st.subheader('시스템·설정 · 읽기 전용')
+    from .storage_health import render_storage_health
+    render_storage_health(st, detailed=True)
     from .retention_panel import render_retention
     render_retention(st, data.retention)
     from .operations_overview import render_warmup_details
