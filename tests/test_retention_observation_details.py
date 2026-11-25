@@ -22,7 +22,8 @@ def observe(monkeypatch, *, fail_at=None, budget=90, after_query=None, baseline=
     class Repo:
         namespace = "fixture"
 
-        def _execute(self, sql, params, fetch):
+        def _execute(self, sql, params, fetch, optional_observation=False):
+            assert optional_observation is True
             calls.append(sql)
             if len(calls) == fail_at:
                 raise MySQLRepositoryError(pymysql.err.OperationalError(3024, "private query credentials"), "SELECT")
@@ -41,7 +42,7 @@ def observe(monkeypatch, *, fail_at=None, budget=90, after_query=None, baseline=
     return report, calls
 
 
-@pytest.mark.parametrize(("failed_query", "stage"), [(1, "HIGH_WATER"), (2, "BACKLOG"), (3, "GENERATION")])
+@pytest.mark.parametrize(("failed_query", "stage"), [(1, "HIGH_WATER"), (2, "BACKLOG"), (3, "GENERATION_KEYS")])
 def test_optional_query_timeout_identifies_stage_without_losing_committed_deletions(monkeypatch, failed_query, stage):
     report, calls = observe(monkeypatch, fail_at=failed_query, baseline=True)
     observation = report["tables"][KIND]["observation"]
