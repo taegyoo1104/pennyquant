@@ -75,10 +75,9 @@ class MarketEngine:
         if bar.received_at < bar.timestamp:
             raise ValueError("확정봉의 수신 시각이 봉 종료 시각보다 빠릅니다")
         values = self.bars.setdefault(bar.symbol, [])
-        signature = (bar.timestamp, bar.open, bar.high, bar.low, bar.close, bar.volume)
-        for existing in reversed(values):
-            if (existing.timestamp, existing.open, existing.high, existing.low, existing.close, existing.volume) == signature:
-                return
+        from .candle_revisions import retain_observation
+        if not retain_observation([b for b in values if b.timestamp == bar.timestamp], bar):
+            return
         values.append(bar)
         if bar.symbol in {'SPY', 'QQQ'} and self._regime_cache is not None:
             self._regime_cache.clear()
