@@ -159,3 +159,25 @@ def render_retention(st, report):
         st.dataframe(summary['tables'], hide_index=True, width='stretch')
     st.caption('순회 완료는 남은 정리 대상이 없다는 뜻이 아닙니다. 최소 수량은 확인한 하한이며, 미확인은 0이 아닙니다. '
                '신규 저장은 관측 기간의 행 수이며 초당 생성률이나 전체 저장량을 뜻하지 않습니다.')
+
+
+def render_auxiliary_storage(st, report):
+    report = _mapping(report)
+    if not report:
+        return
+    policy = _mapping(report.get('policy'))
+    used = _count(report.get('bytes'))
+    cap = _count(policy.get('daily_bytes'))
+    records = _count(report.get('records'))
+    limit = _count(policy.get('daily_records'))
+    if None in (used, cap, records, limit):
+        return
+    st.subheader('보조 기록 저장량')
+    st.caption(f"미국 동부 날짜 {report.get('day', '미확인')} 기준 · 마지막 기록 {_timestamp(report.get('updated_at'))}")
+    st.write(f'{used / 1024**2:.2f} / {cap / 1024**2:.0f} MiB · {records:,} / {limit:,}건')
+    if report.get('limited'):
+        st.info('당일 보조 기록 한도 도달 · 매매와 필수 장부 저장은 계속합니다.')
+    elif report.get('last_skip_reason') == 'record_size':
+        st.caption('크기가 큰 진단 표본은 건너뛰었습니다.')
+    st.caption('일반 판단 이력과 진단 표본의 JSON 크기 합계입니다. DB 전체 크기와 다릅니다. '
+               '주문에 연결된 선정 근거, 주문·체결·손익, 재시작 상태와 전략용 분봉은 이 한도로 제한하지 않습니다.')

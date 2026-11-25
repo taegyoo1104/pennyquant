@@ -244,8 +244,9 @@ def render_system(data,view):
     import streamlit as st
     from .session_app import _table,timestamp
     st.subheader('시스템·설정 · 읽기 전용')
-    from .retention_panel import render_retention
+    from .retention_panel import render_retention, render_auxiliary_storage
     render_retention(st, data.retention)
+    render_auxiliary_storage(st, data.auxiliary_storage)
     from .operations_overview import render_warmup_details
     render_warmup_details(data.warmup)
     st.caption('엔진 마지막 수신: '+view['last_event']+' · API 연결 정상 여부는 저장 기록만으로 확정하지 않습니다.')

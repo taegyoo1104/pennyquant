@@ -25,6 +25,7 @@ SessionQuant는 **OpenAI Codex와 함께 기획·구현·검증하는 모의매�
 | 기존 REST 프로필에서 웹소켓 프로필로 전환 | [웹소켓 전환](WEBSOCKET_ROLLOUT.md) |
 | 분봉 지연이 API·DB·계산 중 어디서 생겼는지 확인 | [부담을 제한한 지연 진단](WEBSOCKET_ROLLOUT.md#다음-운영에서-분봉-지연-확인하기) |
 | 구버전 VM이 켜진 직후 종료되어 최초 업데이트가 어려움 | [최초 점검 부팅](GCP_OFFHOURS_MIGRATION.md) |
+| 어떤 데이터를 줄이고 매매 기록은 어떻게 보존하나? | [저장량·보관 기준](DATA_STORAGE.md) |
 | 디스크 부족·백업 시간 초과의 근거와 복구 절차 | [저장 공간·백업 장애 기록](GCP_STORAGE_RECOVERY.md) |
 
 프로그램 시작, 매매 시작, 코드 업데이트, 대시보드 연결은 다른 작업입니다. 운영 절차에 표시한 **로컬 PC / Cloud Shell / 운영 VM**을 먼저 확인하고 명령을 실행하세요.

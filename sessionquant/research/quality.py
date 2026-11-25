@@ -16,6 +16,7 @@ def quality_report(path):
     late, quotes, eligibility, eligibility_good, rvol, rvol_good = 0, 0, 0, 0, 0, 0
     decisions, ready, news_total, news_verified, missing_news_versions, news_confirmed = 0, 0, 0, 0, 0, 0
     synthetic, last = False, None
+    bounded = False
     frame_last, clock_gaps = None, 0
     session_frames = Counter()
     seen = set(); duplicate_count = 0
@@ -24,6 +25,7 @@ def quality_report(path):
         seen.add(row['id']); kinds[row['kind']] += 1
         synthetic = synthetic or row['synthetic']; last = utc(row['available_at'])
         data = row['data']
+        bounded = bounded or data.get('recording_mode') == 'bounded_diagnostics'
         if row['kind'] == 'recording_start': starts.append(row)
         if row['kind'] == 'market_reference_observations': reference[data.get('quality_status','UNKNOWN')] += 1
         if row['kind'] in {'news_analysis','macro_analysis'}:
@@ -77,6 +79,8 @@ def quality_report(path):
             'missing_minutes':missing,'missing_rate':missing/expected if expected else None,
             'basis':'received_by_export_cutoff_not_historical_decision_readiness','sources':sorted(sources[symbol])})
     issues = []
+    if bounded or any(row['data'].get('auxiliary_storage',{}).get('mode') == 'bounded_diagnostics' for row in starts):
+        issues.append('bounded_diagnostic_recording_not_full_replay')
     if not starts or not frames: issues.append('no_causal_engine_recording')
     if any(row['data'].get('strict_market_data') is not True for row in starts):issues.append('strict_market_data_not_enabled')
     if starts and not starts[0]['data']['initial_flat']: issues.append('recording_started_with_untracked_positions_or_orders')

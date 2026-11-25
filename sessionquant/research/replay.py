@@ -1,6 +1,7 @@
 """저장된 처리 시계와 당시 분석만 사용하는 격리 Paper 재생."""
 from collections import Counter
 from pathlib import Path
+import json
 
 from ..market.universe import UniverseStore
 from ..market_reference.risk import MacroReferenceRiskMonitor, filter_settings
@@ -67,6 +68,10 @@ def replay_recording(bundle, db_path, *, strategy=None, policy='baseline', use_n
     starts = manifest['recording_starts']
     if not starts or not starts[0]['data']['initial_flat']:
         raise ValueError('초기 포지션·주문이 없는 시점부터 기록한 묶음이 필요합니다.')
+    quality = json.loads((bundle/'quality.json').read_text(encoding='utf-8'))
+    if ('bounded_diagnostic_recording_not_full_replay' in quality.get('blocking_reasons',[])
+            or any(row['data'].get('auxiliary_storage',{}).get('mode') == 'bounded_diagnostics' for row in starts)):
+        raise ValueError('운영 진단 표본은 전체 입력이 아니므로 전략 재생에 사용할 수 없습니다. full 연구 기록을 사용하세요.')
     first = starts[0]['data']
     guard_versions = {row['run_id']: row['data'].get('execution_guard_version') for row in starts}
     recovery_policies = {row['run_id']: row['data'].get('quote_recovery_wait', False) for row in starts}

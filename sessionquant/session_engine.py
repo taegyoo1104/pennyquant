@@ -51,7 +51,7 @@ class SessionEngine:
                  strict_market_data: bool = False, exit_policy: ExitPolicy | None = None, macro_reference_risk=None, record_inputs=False, research_replay=False,
                  candidate_settings=None, paper_data_policy='strict', quote_entry_guard=None,
                  benchmark_collection_enabled=None,market_reference_symbols=None,execution_clock=None,quote_recovery_wait=False,
-                 submission_quote_buys=False,submission_quote_sells=False):
+                 submission_quote_buys=False,submission_quote_sells=False,auxiliary_storage=None):
         from .portfolio.selection import PortfolioCandidateSelector,CandidateSettings
         self.candidate_selector=PortfolioCandidateSelector(CandidateSettings(enabled=False) if candidate_settings is None else candidate_settings)
         self.quote_entry_guard=quote_entry_guard
@@ -73,6 +73,8 @@ class SessionEngine:
         self.selection_source_id=None
         self._batch_candidate_scope=[]
         self.record_inputs = record_inputs
+        from .research.storage import StoragePolicy
+        self.auxiliary_storage = StoragePolicy(**(auxiliary_storage or {}))
         self._batch_decisions = []
         self._batch_news_contexts = {}
         self._batch_scope_blockers = None
@@ -673,7 +675,8 @@ class SessionEngine:
                         row['exposure_overlap']=self.candidate_selector.exposure_overlap(row,self.broker,strength)
                         self.repo.record('candidates',{'id':decision.symbol,'timestamp':now,**decision.to_dict(),
                             'news_risk':risk,'selection_id':frame['id'],'selection':row})
-                    self.repo.record('pipeline_status',frame)
+                    from .research.storage import archive_selection
+                    archive_selection(self,frame,now)
                     self.repo.set_control(VIEW,frame)
                     self.selection_frame=frame
                 session_status = self.exit_manager.snapshot(now,orders=session_status['orders'])

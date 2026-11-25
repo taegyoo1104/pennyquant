@@ -55,6 +55,7 @@ class SessionConfig:
     market_reference: dict = field(default_factory=dict)
     macro_reference_filter: dict = field(default_factory=dict)
     recording_enabled: bool = True
+    auxiliary_storage: dict = field(default_factory=dict)
     retention: dict = field(default_factory=dict)
     news_enabled: bool = True
     include_alpaca: bool = True
@@ -105,6 +106,10 @@ class SessionConfig:
             raise ValueError('집중 재선정 주기는 0(기존 방식) 또는 30분입니다.')
         if self.focus_rebalance_minutes and (self.strategy!='pullback_simple' or self.focus_selection!='turnover'):
             raise ValueError('30분 집중 재선정은 단순 눌림목·거래대금 선정 프로필에서 사용합니다.')
+        from .research.storage import StoragePolicy
+        if not isinstance(self.auxiliary_storage, dict):
+            raise ValueError('보조 기록 설정은 객체여야 합니다.')
+        StoragePolicy(**self.auxiliary_storage)
         from .database.retention import RetentionPolicy
         if not isinstance(self.retention, dict):
             raise ValueError('자료 보관 설정은 객체여야 합니다.')
