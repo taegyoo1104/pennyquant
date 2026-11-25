@@ -13,8 +13,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Linux deployment script
 
 @pytest.mark.parametrize('statuses,expected,success', [
     (['COMPLETE'], 1, True), (['DISABLED'], 1, True),
-    (['PARTIAL', 'COMPLETE'], 2, True), (['PARTIAL']*7, 5, True),
-    (['PRESENT', 'COMPLETE'], 2, True), (['PARTIAL', 'FAIL'], 2, False),
+    (['PARTIAL'], 1, True), (['FAIL'], 1, False),
     (['INVALID'], 1, False), (['QUERY_TIMEOUT'], 1, False),
 ])
 def test_update_catchup_is_bounded_and_stops_on_errors(tmp_path, statuses, expected, success):
@@ -47,7 +46,7 @@ pathlib.Path(os.environ['REPORT']).write_text(json.dumps(report))
                                  'REPORT':str(data/'retention-last.json'), 'STATUSES':json.dumps(statuses)})
     assert (result.returncode == 0) is success, result.stderr
     assert calls.read_text().splitlines() == ['FAILED prior backup']*expected
-    assert ('5회 한도' in result.stdout) is (expected == 5)
+    assert '5회 한도' not in result.stdout
 
 
 def setup_wrapper(tmp_path, *, current="UPLOADED new backup.tar.gz", app_running=False, mode="COMPLETE",

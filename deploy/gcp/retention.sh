@@ -5,7 +5,7 @@ cd /opt/sessionquant
 compose=(docker compose -f deploy/gcp/compose.yaml)
 status=/etc/sessionquant/backup-status
 report=/var/lib/sessionquant/app/retention-last.json
-[[ $# == 1 ]] || { echo '이번 종료 직전의 백업 상태가 필요합니다.' >&2; exit 1; }
+[[ $# == 1 || ( $# == 2 && $2 =~ ^[0-9]+$ && $2 -ge 1 && $2 -le 21600 ) ]] || { echo '이번 종료 직전의 백업 상태가 필요합니다.' >&2; exit 1; }
 previous=$1
 current=$(cat "$status")
 if [[ "$current" != UPLOADED\ * || "$current" == "$previous" ]]; then
@@ -45,9 +45,15 @@ proof=$(mktemp /var/lib/sessionquant/app/.retention-proof.XXXXXXXX)
 printf '%s\n' "$current" > "$proof"
 chown 1000:1000 "$proof"
 printf 'RUNNING %s\n' "$(date -u +%FT%TZ)" > /etc/sessionquant/retention-status
+if [[ $# == 2 ]]; then
+    "${compose[@]}" run --rm --no-deps -T --name "$container" \
+        --volume "$proof:/run/sessionquant-backup-status:ro" app \
+        sh -c 'exec python -m sessionquant.database.maintenance --config "${SQ_SESSION_CONFIG:-config/sessionquant.realtime-paper.example.yaml}" --backup-receipt /run/sessionquant-backup-status --seconds "$1" --progress /app/data/maintenance/progress.json' _ "$2" > "$part" < /dev/null &
+else
 "${compose[@]}" run --rm --no-deps -T --name "$container" \
     --volume "$proof:/run/sessionquant-backup-status:ro" app \
     sh -c 'exec python -m sessionquant data-retention --config "${SQ_SESSION_CONFIG:-config/sessionquant.realtime-paper.example.yaml}" --apply --backup-receipt /run/sessionquant-backup-status' > "$part" < /dev/null &
+fi
 worker=$!
 wait "$worker"
 # Validate a bounded, content-free report before replacing the previous result.

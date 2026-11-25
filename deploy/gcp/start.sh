@@ -29,6 +29,7 @@ if [[ -e /etc/sessionquant/storage-blocked ]]; then
     echo '저장 공간 점검이 필요합니다. 복구·백업 확인 후 storage-blocked 표시를 해제하세요.' >&2
     exit 1
 fi
+bash deploy/gcp/maintenance_ui.sh stop
 python3 deploy/gcp/storage_check.py --minimum-mib 2048
 "${compose[@]}" up -d --wait --wait-timeout 180 db
 # A read-only probe does not invalidate a sealed night's backup. The helper

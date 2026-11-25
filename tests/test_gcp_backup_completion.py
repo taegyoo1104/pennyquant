@@ -60,11 +60,13 @@ def test_shutdown_deadline_covers_backup_and_container_stop_budgets():
     kill_after, backup = map(int, re.search(r"timeout --kill-after=(\d+) (\d+)", stop).groups())
     app_stop = int(re.search(r"stop -t (\d+) app", stop)[1])
     final_backup = backup + kill_after
-    cleanup_kill, cleanup = map(int, re.findall(r"timeout --kill-after=(\d+) (\d+)", stop)[1])
+    cleanup_kill, cleanup = 15, 2730
+    assert '"$((sq_cleanup_seconds + 30))"' in stop
+    assert "SQ_MAINTENANCE_SECONDS:-2700" in stop
     outer = [int(n) for n in re.findall(r"TimeoutStartSec=(\d+)", start)]
     outer.append(int(re.search(r"TimeoutStartSec=(\d+)", (DEPLOY / "sessionquant-cost-guard.service").read_text())[1]))
     assert backup == 5400 and backup > 1928  # measured successful production backup
-    assert cleanup == 2700 and all(limit == 16200 for limit in outer)
+    assert cleanup == 2730 and all(limit == 16200 for limit in outer)
     assert "retention_after_update.sh" in stop
     assert len(outer) == 3 and all(limit > app_stop + backup + kill_after + cleanup + cleanup_kill + final_backup + 480 + 120 for limit in outer)
 

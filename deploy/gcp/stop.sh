@@ -8,10 +8,13 @@ cd /opt/sessionquant || exit 1
 source deploy/gcp/lifecycle_lock.sh
 compose=(docker compose -f deploy/gcp/compose.yaml)
 result=0
+sq_cleanup_seconds=${SQ_MAINTENANCE_SECONDS:-2700}
+[[ $sq_cleanup_seconds =~ ^[0-9]+$ ]] && ((sq_cleanup_seconds >= 1 && sq_cleanup_seconds <= 21600)) || exit 1
 systemctl stop sessionquant-market-close.timer sessionquant-run-limit.timer sessionquant-cost-guard.timer || true
-echo '장 마감: 저장·종료 → 백업 → 자료 정리 → 최종 백업을 진행합니다. 전체 최대 4시간 30분이며 VM은 유지합니다.'
+echo "장 마감: 저장·종료 → 백업 → 자료 정리(최대 $((sq_cleanup_seconds / 60))분) → 최종 백업. VM과 DB는 유지합니다."
 "${compose[@]}" stop -t 180 app || { echo '프로그램 종료 실패: 자료를 변경하지 않습니다.' >&2; exit 1; }
 python3 deploy/gcp/nightly_checkpoint.py writable || exit 1
+bash deploy/gcp/maintenance_ui.sh start || echo '진행 화면을 열지 못했습니다. 터미널 로그로 확인하세요.' >&2
 db_services=$("${compose[@]}" ps --status running --services db)
 db_status=$?
 if ((db_status != 0)); then
@@ -45,9 +48,9 @@ elif [[ "$db_services" == db ]]; then
             echo "백업 실패: 종료 코드 $backup_result. DB 디스크는 유지됩니다." >&2
         fi
     else
-        # Keep per-query/per-pass bounds; allow up to 45 minutes overall.
-        # The backup receipt stays within the existing one-hour deletion rule.
-        timeout --kill-after=15 2700 bash /opt/sessionquant/deploy/gcp/retention_after_update.sh "$backup_status_before" --nightly
+        # Verify a fresh backup once, then keep one live DB lease/connection.
+        # Ordinary receipts still expire; the grant cannot cross a restart.
+        timeout --kill-after=15 "$((sq_cleanup_seconds + 30))" bash /opt/sessionquant/deploy/gcp/retention_after_update.sh "$backup_status_before" --nightly
         retention_result=$?
         if ((retention_result != 0)); then
             result=1
