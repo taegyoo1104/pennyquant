@@ -413,6 +413,13 @@ class MySQLRepository:
                              (self.namespace,), fetch="all")
         return [self._decode(row[0]) for row in rows]
 
+    def recent_pipeline_summary(self, limit=100):
+        from .pipeline_projection import expression, summary, validate_limit
+        validate_limit(limit)
+        rows = self._execute(f"SELECT {expression('mysql')} FROM pq_pipeline_status FORCE INDEX (ix_namespace_seq) "
+            "WHERE namespace=%s ORDER BY seq DESC LIMIT %s", (self.namespace,limit), fetch='all')
+        return [summary(row[0]) for row in reversed(rows)]
+
     def recent(self, kind: str, limit: int = 2000) -> list[dict]:
         table = self._kind(kind)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:

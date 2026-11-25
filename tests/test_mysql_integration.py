@@ -1035,3 +1035,10 @@ def test_mysql_auxiliary_budget_survives_restart_and_isolates_ledgers(mysql_repo
             raise RuntimeError('rollback')
     assert reopened.get_record('research_events','rollback') is None
     assert reopened.get_control(BUDGET)['day']=='2026-11-24'
+
+
+def test_mysql_system_summary_bounds_payloads_and_isolates_namespaces(mysql_repositories):
+    from test_pipeline_projection import assert_projection
+    repo,other=mysql_repositories(),mysql_repositories()
+    assert_projection(repo)
+    assert other.recent_pipeline_summary()==[]

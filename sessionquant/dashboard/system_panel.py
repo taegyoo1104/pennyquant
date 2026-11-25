@@ -16,7 +16,7 @@ TASKS = {
 def _description(value, missing='기록 없음'):
     if value is None or value == '':
         return missing
-    if value in LABELS:
+    if isinstance(value,str) and value in LABELS:
         return LABELS[value]
     if isinstance(value, str) and any('가' <= c <= '힣' for c in value):
         return value
@@ -31,8 +31,11 @@ def pipeline_rows(records):
         detail = _description(record.get('reason') or record.get('code'), '—')
         if kind == 'watchlist_focus':
             result = _description(record.get('data_status'))
-            if isinstance(record.get('items'), list):
-                detail = f"집중 분석 대상 {len(record['items'])}종목"
+            count = record.get('items_count')
+            if type(count) is not int and isinstance(record.get('items'),list):
+                count = len(record['items'])
+            if type(count) is int and count >= 0:
+                detail = f'집중 분석 대상 {count}종목'
         elif kind == 'watchlist_history_selection':
             result = '준비 중' if record.get('preparing') is True else '검사 기록'
             detail = _counts(record, [('included_count', '자료 준비'), ('excluded_count', '자료 부족으로 제외')])

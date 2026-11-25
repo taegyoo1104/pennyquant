@@ -41,6 +41,9 @@ def database(monkeypatch):
             if kind == self.failure:
                 raise MySQLRepositoryError(Exception(2013, 'PRIVATE password=secret'), 'SELECT')
             return [{'symbol': 'SPY', 'bid': '500', 'ask': '501'}] if kind == 'quote_snapshots' else []
+        def recent_pipeline_summary(self, limit=100):
+            self.calls.append(('pipeline_summary',limit))
+            return []
         def recent_llm_attempts(self, limit):
             self.calls.append(('llm_attempts', limit))
             return []
@@ -301,3 +304,11 @@ def test_auxiliary_budget_read_only_on_system_page(database):
     data=load_database('unused.db',page='시스템·설정')
     assert data.auxiliary_storage==report
     assert database.calls.count('auxiliary_storage_budget_v1')==1
+
+
+def test_system_page_uses_projected_state_and_processing_summary(database):
+    data=load_database('unused.db',page='시스템·설정')
+    assert data.connected and not data.error
+    assert 'dashboard_state' in database.calls and 'state' not in database.calls
+    assert ('pipeline_summary',100) in database.calls
+    assert ('pipeline_status',100) not in database.calls
