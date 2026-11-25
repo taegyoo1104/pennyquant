@@ -139,3 +139,21 @@ def test_metadata_write_timeout_preserves_original_checked_cleanup(mysql_reposit
     assert result['tables']['research_events']['metadata_write_timeouts'] == 1
     assert result['tables']['research_events']['last_read_timeout']['phase'] == 'METADATA_WRITE'
     assert not cached(repo) and not repo.all('research_events')
+
+
+def test_startup_probe_reads_cached_protection_without_source_body_or_writes(mysql_repositories, monkeypatch):
+    from sessionquant.database.retention_probe import probe_retention
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    now = datetime.now(timezone.utc)
+    seed(repo, 'research_events', 'protected', now, legacy=False, kind='engine_batch', run_id='closed',
+         data={'bulk': 'x' * 1700000, 'received_at': 'unknown'})
+    execute = repo._execute
+    def read_only(sql, params=(), **kwargs):
+        assert sql.startswith('SELECT')
+        if 'pq_research_events' in sql:
+            assert 'JSON_OBJECT' not in sql
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', read_only)
+    result = probe_retention(repo, replace(POLICY, intraday_auxiliary=True), now=now)
+    assert result['status'] == 'CLEAR'
+    assert result['tables']['research_events']['metadata_hits'] == 1

@@ -79,13 +79,18 @@ def predicate(condition):
     return condition.replace("payload->>'$.kind'", "m.metadata->>'$._record_kind'")
 
 
-def read(repo, keys, condition):
+def read_query(repo, keys, condition):
     placeholders = ','.join('%s' for _ in keys)
-    return repo._execute(
-        'SELECT /*+ MAX_EXECUTION_TIME(3000) */ r.seq,r.captured_at,r.created_at,r.updated_at,'
+    return (
+        'r.seq,r.captured_at,r.created_at,r.updated_at,'
         f'm.metadata,({predicate(condition)}) FROM pq_research_events r FORCE INDEX (PRIMARY) '
         f'STRAIGHT_JOIN {JOIN} WHERE r.namespace=%s AND r.seq IN ({placeholders})',
-        (repo.namespace, *(key[0] for key in keys)), fetch='all')
+        (repo.namespace, *(key[0] for key in keys)))
+
+
+def read(repo, keys, condition):
+    sql, params = read_query(repo, keys, condition)
+    return repo._execute('SELECT /*+ MAX_EXECUTION_TIME(3000) */ ' + sql, params, fetch='all')
 
 
 def backfill(repo, rows):
