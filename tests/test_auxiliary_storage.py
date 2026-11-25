@@ -63,7 +63,7 @@ def test_bytes_record_size_and_transaction_rollback(repo,monkeypatch):
     assert repo.get_control(BUDGET)==before
 
 
-@pytest.mark.parametrize('bad',[['bad'],{'version':1,'day':'not-date'},
+@pytest.mark.parametrize('bad',[{},[],False,0,['bad'],{'version':1,'day':'not-date'},
     {'version':1,'day':'2026-11-25','bytes':1,'records':1,'last_capture':{}}])
 def test_invalid_or_future_budget_stops_only_optional_copies(repo,bad):
     repo.set_control(BUDGET,bad)

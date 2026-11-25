@@ -39,8 +39,8 @@ def day_at(now):
 
 def budget(repo, now):
     day = day_at(now)
-    saved = repo.get_control(BUDGET, {}) or {}
-    if not saved:
+    saved = repo.get_control(BUDGET, None)
+    if saved is None:
         return {'version':1,'day':day,'bytes':0,'records':0,'last_capture':{},'limited':False}
     invalid = not isinstance(saved,dict)
     if not invalid:
