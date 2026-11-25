@@ -1,5 +1,6 @@
 import pytest
 import pymysql
+import re
 
 from sessionquant.database.mysql_repository import MySQLRepositoryError
 from sessionquant.database.retention import _read_payload_page
@@ -12,9 +13,11 @@ class Repo:
         self.calls = []
         self.fatal = fatal
         self.size = size
+        self.limits = []
 
     def _execute(self, sql, params, **kwargs):
-        assert sql.startswith('SELECT /*+ MAX_EXECUTION_TIME(3000)')
+        limit = int(re.search(r'MAX_EXECUTION_TIME\((\d+)\)', sql)[1])
+        self.limits.append(limit)
         assert 'FORCE INDEX (PRIMARY)' in sql
         ids = list(params[1:])
         self.calls.append(ids)
@@ -37,7 +40,9 @@ def test_individual_record_timeout_still_fails_without_skipping_it():
     table = {}
     with pytest.raises(MySQLRepositoryError) as caught:
         _read_payload_page(repo, 'research_events', '1=1', [(42, None), (43, None)], table, 90, lambda: 0)
-    assert caught.value.code == 3024 and repo.calls == [[42, 43], [42]]
+    assert caught.value.code == 3024 and repo.calls == [[42, 43], [42], [42]]
+    assert repo.limits == [3000, 3000, 10000]
+    assert table['last_single_read_retry']['recovered'] is False
     assert table['read_batch'] == {'count': 1, 'first_seq': 42, 'last_seq': 42}
 
 
@@ -73,7 +78,8 @@ def test_timing_keeps_recovered_timeout_context_after_later_success(monkeypatch)
     assert table['timings']['PAYLOAD'] == {
         'calls': 3, 'seconds': .375, 'max_seconds': .125, 'timeouts': 1}
     assert table['last_read_timeout'] == {
-        'phase': 'PAYLOAD', 'code': 3024, 'count': 4, 'first_seq': 0, 'last_seq': 3}
+        'phase': 'PAYLOAD', 'code': 3024, 'count': 4, 'first_seq': 0, 'last_seq': 3,
+        'query_limit_ms': 3000}
     assert table['read_batch'] == {'count': 2, 'first_seq': 2, 'last_seq': 3}
     assert len(policy_ticks) == 3  # Timing does not consume the cleanup budget clock.
     _read_payload_page(repo, 'research_events', '1=1', [(42, None)], table, 90, policy_clock)
@@ -95,3 +101,30 @@ def test_non_timeout_error_is_measured_and_propagated(monkeypatch):
     assert table['timings']['PAYLOAD'] == {
         'calls': 1, 'seconds': .5, 'max_seconds': .5, 'timeouts': 0}
     assert 'last_read_timeout' not in table
+
+
+@pytest.mark.parametrize('remaining,limit', [(90, 10000), (4.5, 4500)])
+def test_single_record_retry_is_bounded_and_reads_the_same_key(remaining, limit):
+    class SlowRecord(Repo):
+        def _execute(self, sql, params, **kwargs):
+            self.size = 0 if 'MAX_EXECUTION_TIME(3000)' in sql else 1
+            return super()._execute(sql, params, **kwargs)
+    repo, table = SlowRecord(), {}
+    ticks = iter([0, 90-remaining])
+    assert _read_payload_page(repo, 'research_events', '1=1', [(651777, None)],
+                              table, 90, lambda: next(ticks)) == [651777]
+    assert repo.calls == [[651777], [651777]] and repo.limits == [3000, limit]
+    assert table['single_read_retries'] == 1
+    assert table['last_single_read_retry'] == {
+        'count': 1, 'first_seq': 651777, 'last_seq': 651777,
+        'query_limit_ms': limit, 'recovered': True}
+
+
+@pytest.mark.parametrize('remaining', [3, 1, 0, -1])
+def test_single_retry_defers_when_overall_budget_is_insufficient(remaining):
+    repo, table = Repo(size=0), {}
+    ticks = iter([0, 90-remaining])
+    with pytest.raises(TimeoutError):
+        _read_payload_page(repo, 'research_events', '1=1', [(42, None)],
+                           table, 90, lambda: next(ticks))
+    assert repo.calls == [[42]] and 'single_read_retries' not in table
