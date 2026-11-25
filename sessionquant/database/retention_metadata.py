@@ -16,6 +16,7 @@ JOIN = (f'{TABLE} m ON m.source_seq=r.seq AND m.namespace=r.namespace '
 
 
 def projection(source='payload'):
+    # Changing these protection fields requires a new metadata/trigger version.
     from .retention import _projection
     return _projection('research_events').replace('JSON_EXTRACT(payload,', f'JSON_EXTRACT({source},')
 

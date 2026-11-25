@@ -127,6 +127,8 @@ def test_metadata_write_timeout_preserves_original_checked_cleanup(mysql_reposit
     repo = mysql_repositories(environment='PAPER_LOCAL')
     now = datetime.now(timezone.utc)
     seed(repo, 'research_events', 'legacy', now, kind='engine_batch', run_id='closed', data={})
+    seed(repo, 'research_events', 'protected', now, kind='engine_batch', run_id='closed',
+         data={'received_at': 'unknown'})
     execute = repo._execute
     def slow_cache(sql, *args, **kwargs):
         if 'retention metadata refresh' in sql:
@@ -138,7 +140,7 @@ def test_metadata_write_timeout_preserves_original_checked_cleanup(mysql_reposit
     assert result['status'] == 'COMPLETE' and result['deleted'] == 1 and not result['errors']
     assert result['tables']['research_events']['metadata_write_timeouts'] == 1
     assert result['tables']['research_events']['last_read_timeout']['phase'] == 'METADATA_WRITE'
-    assert not cached(repo) and not repo.all('research_events')
+    assert not cached(repo) and [r['id'] for r in repo.all('research_events')] == ['protected']
 
 
 def test_startup_probe_reads_cached_protection_without_source_body_or_writes(mysql_repositories, monkeypatch):
@@ -157,3 +159,16 @@ def test_startup_probe_reads_cached_protection_without_source_body_or_writes(mys
     result = probe_retention(repo, replace(POLICY, intraday_auxiliary=True), now=now)
     assert result['status'] == 'CLEAR'
     assert result['tables']['research_events']['metadata_hits'] == 1
+
+
+def test_expired_legacy_rows_are_not_cached_just_before_deletion(mysql_repositories, tmp_path):
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    now = datetime.now(timezone.utc)
+    for index in range(12):
+        seed(repo, 'research_events', str(index), now, kind='engine_batch', run_id='closed', data={})
+    result = prune_expired(repo, replace(POLICY, batch_size=12, intraday_auxiliary=True), now=now,
+                           apply=True, receipt=receipt(tmp_path, now))
+    assert result['deleted'] == 12 and not result['errors']
+    table = result['tables']['research_events']
+    assert table.get('metadata_backfill_checked', 0) == 0
+    assert 'METADATA_WRITE' not in table['timings'] and not cached(repo)

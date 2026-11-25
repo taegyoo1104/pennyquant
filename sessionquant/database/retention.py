@@ -175,7 +175,7 @@ def _stage_timing(table, phase, *, batch=None):
         metrics["max_seconds"] = round(max(metrics["max_seconds"], elapsed), 6)
 
 
-def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, cache_writes=False, use_metadata=True):
+def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, cache_writes=False, use_metadata=True, cache_filter=None):
     """Split timed-out reads, never skip a record or authorize partial deletion."""
     if clock() >= deadline:
         raise TimeoutError("자료 조회 전체 시간 한도")
@@ -192,7 +192,7 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, c
         if not missing:
             return cached
         rows = _read_payload_page(repo, kind, condition, missing, table, deadline, clock,
-                                  cache_writes=cache_writes, use_metadata=False)
+                                  cache_writes=cache_writes, use_metadata=False, cache_filter=cache_filter)
         return cached + rows
     placeholders = ",".join("%s" for _ in keys)
 
@@ -229,15 +229,18 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, c
             # Reuse successful sub-batches even if a later batch exhausts budget.
             table["payload_batch_size"] = min(table.get("payload_batch_size", 10), half)
             return (_read_payload_page(repo, kind, condition, keys[:half], table, deadline, clock,
-                                      cache_writes=cache_writes, use_metadata=use_metadata)
+                                      cache_writes=cache_writes, use_metadata=use_metadata, cache_filter=cache_filter)
                     + _read_payload_page(repo, kind, condition, keys[half:], table, deadline, clock,
-                                         cache_writes=cache_writes, use_metadata=use_metadata))
-    if cache_writes and retention_metadata.supports(repo, kind) and deadline-clock() >= 3:
+                                         cache_writes=cache_writes, use_metadata=use_metadata, cache_filter=cache_filter))
+    cache_rows = []
+    if cache_writes and retention_metadata.supports(repo, kind):
+        cache_rows = [row for row in rows if cache_filter is None or cache_filter(row)]
+    if cache_rows and deadline-clock() >= 3:
         table['read_phase'] = 'METADATA_WRITE'
         try:
             with _stage_timing(table, 'METADATA_WRITE', batch=table['read_batch']):
-                retention_metadata.backfill(repo, rows)
-            table['metadata_backfill_checked'] = table.get('metadata_backfill_checked', 0) + len(rows)
+                retention_metadata.backfill(repo, cache_rows)
+            table['metadata_backfill_checked'] = table.get('metadata_backfill_checked', 0) + len(cache_rows)
         except Exception as exc:
             from .mysql_repository import MySQLRepositoryError
             if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024:
@@ -528,7 +531,9 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
                             break
                         batch = keys[offset:offset + table.get("payload_batch_size", 10)]
                         rows.extend(_read_payload_page(repo, kind, condition, batch, table, deadline, clock,
-                                                       cache_writes=apply))
+                                                       cache_writes=apply, cache_filter=lambda row: not (
+                                                           row[5] and max(row[2], row[3]) < naive
+                                                           and _unused(kind, _decode(row[4]), cutoff, protected))))
                         offset += len(batch)
                     rows.sort(key=lambda row: (row[1], row[0]))
                     if clock() < deadline and [(r[0], r[1]) for r in rows] != list(keys):
