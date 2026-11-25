@@ -13,7 +13,7 @@ PROGRESS = 'watchlist_history_backfill_v1'
 
 
 async def backfill(repo, symbols, client, *, now=None, max_requests=5000, refresh=False, progress_fn=None,
-                   selection_context=None):
+                   selection_context=None, repair_conflicts=False):
     now = utc(now or datetime.now(timezone.utc))
     if not symbols or len(symbols) > 100 or len(set(symbols)) != len(symbols):
         raise ValueError('검증된 감시 종목 1~100개가 필요합니다.')
@@ -30,11 +30,24 @@ async def backfill(repo, symbols, client, *, now=None, max_requests=5000, refres
               'session_dates':[r[0] for r in plan], 'complete_symbol_days':0, 'skipped_symbol_days':0,
               'required_symbol_days':len(plan)*len(symbols), 'read_requests':0,
               'status':'RUNNING','error':None,'retry_after':None,
+              'conflict_repairs':[],
               'selection':selection_context or {'status':'UNSPECIFIED','ranking_verified':False}}
     try:
         for index,symbol in enumerate(symbols,1):
             for day,opened,closed in plan:
                 row,bars = store.get(symbol,day)
+                if repair_conflicts and row and row['quality']['conflicting_minutes']:
+                    from .history_repair import repair_conflict
+                    report.update(current_symbol=symbol,current_session=day)
+                    result = await repair_conflict(store,symbol,day,opened,closed,client,budget,now=now)
+                    report['conflict_repairs'].append(result)
+                    report['complete_symbol_days'] += int(result['status']=='REPAIRED')
+                    report['read_requests'] = budget.used
+                    repo.set_control(PROGRESS,report)
+                    if progress_fn:
+                        progress_fn(f"[{index}/{len(symbols)}] {symbol} {day}: 충돌 복구 {result['status']} · "
+                                    f"{result.get('reason','두 번의 완전한 조회 일치')} · 요청 {budget.used}")
+                    continue
                 if row and row['quality']['complete'] and not refresh:
                     report['complete_symbol_days'] += 1
                     report['skipped_symbol_days'] += 1
@@ -122,7 +135,8 @@ def collection_selection(manager, now, *, allow_partial=False):
         'missing_market_cap_symbols':sorted({row['ticker'] for row in issues if row.get('code') in EXCLUDABLE_CAP_ISSUES})}
 
 
-async def command(config, action, *, max_requests=5000, refresh=False, allow_partial=False, details=False, output=None):
+async def command(config, action, *, max_requests=5000, refresh=False, allow_partial=False, details=False, output=None,
+                  repair_conflicts=False):
     from ..session_runtime import _open, bind_runtime
     from ..database.repository import Repository
     from ..watchlist.selection import WatchlistManager
@@ -183,6 +197,7 @@ async def command(config, action, *, max_requests=5000, refresh=False, allow_par
             print('PARTIAL 후보의 분봉 사전 수집입니다. 상위 순위 확정·감시목록 활성화·매수 허용은 하지 않습니다.',flush=True)
         try:
             result = await backfill(repo,symbols,client,max_requests=max_requests,refresh=refresh,
+                                    repair_conflicts=repair_conflicts,
                                     selection_context=selection,
                                     progress_fn=lambda text:print(text,flush=True))
         finally:
