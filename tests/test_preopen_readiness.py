@@ -106,6 +106,72 @@ def test_unknown_or_staged_edits_stop_before_checkout(checkout,tmp_path,mode):
     assert (repo/'.env').read_text()=='PRIVATE'
 
 
+def next_script_update(checkout, tmp_path):
+    repo, _, target, run = checkout
+    updater().apply(repo, target, tmp_path/'initial-backup')
+    run('config', 'core.filemode', 'true')
+    script = repo/'deploy/gcp/start.sh'
+    script.chmod(0o644)
+    script.write_text('next verified start\n')
+    run('add', '.');run('commit', '-m', 'change previously non-executable helper')
+    next_target = run('rev-parse', 'HEAD')
+    run('update-ref', 'refs/remotes/origin/main', next_target)
+    run('checkout', '--detach', target)
+    script.chmod(0o755)
+    return repo, target, next_target, run, script
+
+
+def test_previous_updater_chmod_does_not_block_next_content_update(checkout, tmp_path):
+    repo, base, target, run, script = next_script_update(checkout, tmp_path)
+    module = updater()
+    checked = module.plan(repo, target)
+    assert checked['files']['deploy/gcp/start.sh']['mode'] == 0o755
+    backup = tmp_path/'mode-backup'
+    module.apply(repo, target, backup)
+    assert run('rev-parse', 'HEAD') == target
+    assert script.read_text() == 'next verified start\n'
+    # Git tracks executable/non-executable, while the updater's umask may
+    # intentionally withhold group/other read permissions.
+    assert script.stat().st_mode & 0o111 == 0
+    saved = backup/'files/deploy/gcp/start.sh'
+    assert saved.read_text() == 'new start\n' and saved.stat().st_mode & 0o777 == 0o755
+    assert json.loads((backup/'manifest.json').read_text())['head'] == base
+    assert module.plan(repo, target)['files'] == {}
+    assert run('status', '--porcelain') == ''
+    assert (repo/'data/db').read_bytes() == b'db-sentinel'
+
+
+@pytest.mark.parametrize('change', ['content', 'staged_mode', 'special_mode'])
+def test_mode_recovery_cannot_hide_other_changes(checkout, tmp_path, change):
+    repo, base, target, run, script = next_script_update(checkout, tmp_path)
+    if change == 'content':
+        script.write_text('unreviewed operator edit\n')
+    elif change == 'staged_mode':
+        run('add', 'deploy/gcp/start.sh')
+    else:
+        script.chmod(0o4755)
+    with pytest.raises(ValueError):
+        updater().apply(repo, target, tmp_path/'rejected-backup')
+    assert run('rev-parse', 'HEAD') == base
+    assert not (tmp_path/'rejected-backup').exists()
+
+
+def test_mode_recovery_is_limited_to_gcp_shell_helpers(checkout, tmp_path):
+    repo, base, target, run, script = next_script_update(checkout, tmp_path)
+    script.chmod(0o644)
+    history = repo/'sessionquant/market/history.py'
+    # The arbitrary Python source is byte-identical to HEAD but not target.
+    run('checkout', '--detach', target)
+    history.write_text('future code\n')
+    run('add', '.');run('commit', '-m', 'future')
+    future = run('rev-parse', 'HEAD')
+    run('update-ref', 'refs/remotes/origin/main', future)
+    run('checkout', '--detach', base)
+    history.chmod(0o755)
+    with pytest.raises(ValueError):
+        updater().plan(repo, future)
+
+
 def test_prepare_check_and_update_shells_parse_and_do_not_delete_runtime_data():
     for name in ('update_preopen.sh','preopen_check.sh'):
         path=ROOT/'deploy/gcp'/name
