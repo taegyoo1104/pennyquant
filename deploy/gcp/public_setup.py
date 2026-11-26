@@ -26,7 +26,7 @@ def env_update(path, values):
 
 
 def main():
-    if os.geteuid() != 0 or Path('/etc/hostname').read_text().strip().split('.')[0] != 'sessionquant-paper':
+    if os.geteuid() != 0 or os.uname().nodename.split('.')[0] != 'sessionquant-paper':
         raise SystemExit('sessionquant-paper에서 sudo python3로 실행하세요.')
     os.umask(0o077)
     if not os.isatty(0):

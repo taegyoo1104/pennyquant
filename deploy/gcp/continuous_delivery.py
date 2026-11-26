@@ -136,7 +136,7 @@ def deliver():
 
 
 def main():
-    if os.geteuid() != 0 or Path('/etc/hostname').read_text().strip().split('.')[0] != 'sessionquant-paper':
+    if os.geteuid() != 0 or os.uname().nodename.split('.')[0] != 'sessionquant-paper':
         raise SystemExit('sessionquant-paper root only')
     os.umask(0o077)
     with open('/run/sessionquant-cd.lock', 'a') as handle:
