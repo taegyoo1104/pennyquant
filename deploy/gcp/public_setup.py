@@ -54,8 +54,9 @@ def main():
     # Fixed identity, SELECT only; revoke stale privileges on setup/rekey.
     sql = ("CREATE USER IF NOT EXISTS 'sq_public_viewer'@'%' IDENTIFIED BY '"+viewer_password+"';\n"
            "ALTER USER 'sq_public_viewer'@'%' IDENTIFIED BY '"+viewer_password+"' WITH MAX_USER_CONNECTIONS 4;\n"
-           "REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'sq_public_viewer'@'%';\n"
-           f"GRANT SELECT ON `{database}`.* TO 'sq_public_viewer'@'%';\n")
+           "REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'sq_public_viewer'@'%';\n")
+    for table in ('pq_controls', 'pq_engine_state', 'pq_executions', 'pq_quote_snapshots', 'pq_orders'):
+        sql += f"GRANT SELECT ON `{database}`.`{table}` TO 'sq_public_viewer'@'%';\n"
     if (ROOT/'nightly-seal.json').exists():
         subprocess.run(['python3', '/opt/sessionquant/deploy/gcp/nightly_checkpoint.py', 'writable'], check=True)
     subprocess.run(COMPOSE+['exec', '-T', 'db', 'sh', '-c',

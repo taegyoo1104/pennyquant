@@ -133,3 +133,26 @@ def test_admin_hash_only_passes_to_dashboard_database_process(monkeypatch):
     assert 'SQ_DASHBOARD_ADMIN_HASH' not in dashboard_environment()
     assert dashboard_environment(database=True)['SQ_DASHBOARD_ADMIN_HASH'] == 'hash-only'
     assert 'OPENAI_API_KEY' not in dashboard_environment(database=True)
+
+
+def test_public_read_plan_excludes_audit_logs_and_raw_news(tmp_path, monkeypatch):
+    from sessionquant.database.repository import Repository
+    from sessionquant.dashboard.session_app import load_database
+    path = tmp_path/'public-read.db'
+    from contextlib import closing
+    with closing(Repository(path)) as repo:
+        repo.set_control('sessionquant_context', {'environment': 'PAPER_LOCAL'})
+        repo.set_control('strategy_explanation_v1', {'status': 'READY'})
+        repo.save_state({'environment': 'PAPER_LOCAL', 'broker': {'positions': {}, 'cash': '100'}})
+    monkeypatch.setenv('SQ_DB_BACKEND', 'sqlite')
+    original = Repository.recent
+    calls = []
+    def recent(self, kind, limit=100):
+        assert kind in {'executions', 'quote_snapshots'}
+        calls.append(kind)
+        return original(self, kind, limit)
+    monkeypatch.setattr(Repository, 'recent', recent)
+    data = load_database(path, page='대시보드', panel='public')
+    assert data.connected and not data.error
+    assert data.strategy_explanation['status'] == 'READY'
+    assert set(calls) == {'executions', 'quote_snapshots'}

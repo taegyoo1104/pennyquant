@@ -80,6 +80,10 @@ MARKET_SECTIONS = {
 
 def read_plan(page, *, news_section=None, panel=None):
     if panel is not None:
+        if page == '대시보드' and panel == 'public':
+            return ('context', 'engine_state', 'watchlist_state', 'warmup', 'market_reference',
+                    'benchmark_stream', 'close_display', 'strategy_explanation'), {
+                'executions': 75, 'quote_snapshots': 300}
         if page == '대시보드' and panel == 'benchmarks':
             return ('context','market_reference','benchmark_stream','close_display'), {}
         if page == '대시보드' and panel == 'live':

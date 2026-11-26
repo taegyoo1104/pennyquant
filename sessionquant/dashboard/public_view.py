@@ -8,7 +8,7 @@ from .session_app import load_database, build_view
 @st.cache_data(ttl=10, max_entries=2, show_spinner=False)
 def snapshot(path):
     # One shared DB read per 10s, rather than a connection/scan for every visitor.
-    return load_database(Path(path), page='대시보드')
+    return load_database(Path(path), page='대시보드',panel='public')
 
 
 def render_public(path):
