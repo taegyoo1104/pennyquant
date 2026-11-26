@@ -156,3 +156,16 @@ def test_successful_deployment_checks_revision_health_and_clears_marker(tmp_path
     cd.deliver()
     assert not (tmp_path/'attempt.json').exists()
     assert 'COMPLETE' in (tmp_path/'status.json').read_text()
+
+
+def test_standalone_backup_lock_defers_cd(tmp_path, monkeypatch):
+    cd = module()
+    monkeypatch.setattr(Path, 'exists', lambda p: False)
+    monkeypatch.setattr(cd.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess([], 3))
+    import builtins
+    import fcntl
+    original = builtins.open
+    monkeypatch.setattr(builtins, 'open', lambda p, mode: original(tmp_path/Path(p).name, mode))
+    with original(tmp_path/'sessionquant-backup.lock', 'a') as backup:
+        fcntl.flock(backup, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert cd.readiness() == 'LIFECYCLE_BUSY'

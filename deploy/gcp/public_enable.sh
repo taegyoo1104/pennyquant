@@ -4,6 +4,8 @@ set -Eeuo pipefail
 [[ $EUID == 0 ]] || exit 1
 cd /opt/sessionquant
 source deploy/gcp/lifecycle_lock.sh
+exec 7>/run/sessionquant-backup.lock
+flock -n 7 || { echo '백업이 끝난 뒤 공개 설정을 진행하세요.' >&2; exit 1; }
 [[ ! -e /etc/sessionquant/maintenance && ! -e /etc/sessionquant/storage-blocked ]] || exit 1
 python3 deploy/gcp/check_public_routes.py
 python3 deploy/gcp/public_setup.py

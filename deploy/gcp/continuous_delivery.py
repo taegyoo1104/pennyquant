@@ -55,7 +55,7 @@ def readiness():
         if subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode == 0:
             return 'MAINTENANCE_RUNNING'
     # Probe locks without holding them while the existing update script acquires its own locks.
-    for name in ('lifecycle', 'update'):
+    for name in ('lifecycle', 'update', 'backup', 'stop'):
         with open('/run/sessionquant-'+name+'.lock', 'a') as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
