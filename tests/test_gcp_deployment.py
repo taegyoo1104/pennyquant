@@ -11,6 +11,20 @@ import pytest
 DEPLOY=Path(__file__).parents[1]/'deploy'/'gcp'
 
 
+def install_backup_capacity_fixture(deploy, data, etc):
+    """Give phase tests known disk capacity; low-space guards have separate tests.
+
+    The real capacity algorithm still runs. Only the host-dependent free-space
+    observation is fixed so these tiny fixtures reach dump/verification/upload.
+    """
+    (deploy/'backup_capacity_impl.py').write_text((DEPLOY/'backup_capacity.py').read_text().replace(
+        '/var/lib/sessionquant', str(data)).replace('/etc/sessionquant', str(etc)))
+    (deploy/'backup_capacity.py').write_text(
+        'import backup_capacity_impl as capacity\n'
+        'capacity.free_bytes = lambda path: 10 * capacity.GIB\n'
+        'raise SystemExit(capacity.main())\n')
+
+
 def uploader():
     spec=importlib.util.spec_from_file_location('upload_backup',DEPLOY/'upload_backup.py')
     module=importlib.util.module_from_spec(spec)
@@ -203,8 +217,7 @@ if [[ "$FAILURE" == dump ]]; then exit 1; fi
     (deploy/'upload_backup.py').write_text('import os; raise SystemExit(int(os.environ["FAILURE"]=="upload"))')
     shutil.copyfile(DEPLOY/'package_backup.py',deploy/'package_backup.py')
     (data/'mysql').mkdir(exist_ok=True)
-    (deploy/'backup_capacity.py').write_text((DEPLOY/'backup_capacity.py').read_text().replace(
-        '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)))
+    install_backup_capacity_fixture(deploy, data, etc)
     body=(DEPLOY/'backup.sh').read_text().replace('/opt/sessionquant',str(root)).replace(
         '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)).replace(
         '/run/sessionquant-backup.lock',str(tmp_path/'backup.lock'))

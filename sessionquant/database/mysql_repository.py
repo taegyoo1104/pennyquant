@@ -181,6 +181,13 @@ class MySQLRepository:
         if self._research_retention_metadata:
             self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(8,%s)",
                           ("재현 기록의 보존 검사 요약과 원본 갱신·삭제 동기화",))
+        from .pipeline_summary import install as install_pipeline_summary
+        install_pipeline_summary(self)
+        if self._pipeline_summary_available:
+            self._execute("INSERT IGNORE INTO sq_schema_versions(version,description) VALUES(9,%s)",
+                          ("시스템 화면용 처리 요약과 원본 갱신·삭제 동기화",))
+        from .llm_attempt_index import install as install_llm_attempt_index
+        install_llm_attempt_index(self)
 
     def retention_metadata_available(self):
         from .retention_metadata import available
@@ -423,11 +430,8 @@ class MySQLRepository:
         return [self._decode(row[0]) for row in rows]
 
     def recent_pipeline_summary(self, limit=100):
-        from .pipeline_projection import expression, summary, validate_limit
-        validate_limit(limit)
-        rows = self._execute(f"SELECT {expression('mysql')} FROM pq_pipeline_status FORCE INDEX (ix_namespace_seq) "
-            "WHERE namespace=%s ORDER BY seq DESC LIMIT %s", (self.namespace,limit), fetch='all')
-        return [summary(row[0]) for row in reversed(rows)]
+        from .pipeline_summary import recent
+        return recent(self, limit)
 
     def recent(self, kind: str, limit: int = 2000) -> list[dict]:
         table = self._kind(kind)
@@ -445,13 +449,8 @@ class MySQLRepository:
                 self.record("positions", value)
 
     def recent_llm_attempts(self, limit=500):
-        """Keep namespace isolation and filter prechecks before the display limit."""
-        if type(limit) is not int or not 1 <= limit <= 10000:
-            raise ValueError('요청 조회 개수는 1~10000 정수여야 합니다.')
-        rows = self._execute("SELECT payload FROM pq_llm_calls FORCE INDEX (ix_namespace_seq) WHERE namespace=%s "
-            "AND JSON_EXTRACT(payload,'$.network_attempted')=CAST('true' AS JSON) "
-            "ORDER BY seq DESC LIMIT %s",(self.namespace,limit),fetch='all')
-        return [self._decode(row[0]) for row in reversed(rows)]
+        from .llm_attempt_index import recent
+        return recent(self, limit)
 
     def save_state(self, state: dict) -> None:
         payload = self._json(state)
@@ -536,7 +535,8 @@ class MySQLRepository:
 
     def storage_stats(self) -> dict:
         names = tuple("pq_" + kind for kind in self.kinds) + ("pq_engine_state", "pq_controls")
-        physical_names = names + ("sq_financial_ledger", "sq_schema_versions", "sq_research_retention_meta")
+        physical_names = names + ("sq_financial_ledger", "sq_schema_versions", "sq_research_retention_meta",
+                                  "sq_pipeline_summary", "sq_llm_attempt_index")
         placeholders = ",".join(["%s"] * len(physical_names))
         rows = self._execute("SELECT TABLE_NAME,TABLE_ROWS,DATA_LENGTH,INDEX_LENGTH FROM information_schema.TABLES "
             f"WHERE TABLE_SCHEMA=%s AND TABLE_NAME IN ({placeholders}) ORDER BY TABLE_NAME",

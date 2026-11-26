@@ -5,6 +5,11 @@ exec 8>/run/sessionquant-backup.lock
 flock -n 8 || { echo '다른 백업이 실행 중입니다.' >&2; exit 1; }
 cd /opt/sessionquant
 status_file=/etc/sessionquant/backup-status
+if [[ -e /etc/sessionquant/projection-preparation-blocked ]]; then
+    printf 'FAILED %s phase=PROJECTION_WORKER exit_code=1\n' "$(date -u +%FT%TZ)" > "$status_file"
+    echo '조회 요약 준비 작업의 종료가 확인되지 않아 백업을 시작하지 않습니다.' >&2
+    exit 1
+fi
 if app_services=$(docker compose -f deploy/gcp/compose.yaml ps --status running --services app); then
     :
 else

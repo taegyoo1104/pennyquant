@@ -112,4 +112,4 @@ jobs:
           PQ_MYSQL_DATABASE: sessionquant_ci
           PQ_MYSQL_USER: sessionquant_ci
           PQ_MYSQL_PASSWORD: ci-only-fixture
-        run: python -m pytest -q tests/test_mysql_integration.py tests/test_retention_mysql.py tests/test_retention_metadata_mysql.py tests/test_maintenance_mysql.py
+        run: python -m pytest -q tests/test_mysql_integration.py tests/test_retention_mysql.py tests/test_retention_metadata_mysql.py tests/test_maintenance_mysql.py tests/test_llm_attempt_index_mysql.py

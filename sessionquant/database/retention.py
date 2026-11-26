@@ -357,6 +357,31 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
             raise ObservationBudgetExhausted("TIME_LIMIT")
         return rows
 
+    def research_rows(phase, keys, condition, *, protection_fields=True):
+        """Reuse validated retention metadata within the observation's own budget.
+
+        Never call the maintenance reader here: its 3s allowance and optional
+        backfill writes do not belong to these read-only 250ms observations.
+        """
+        from . import retention_metadata
+        sql, params = retention_metadata.read_query(repo, keys, condition)
+        rows = list(read(phase + "_METADATA", sql, params, len(keys)))
+        found = {row[0] for row in rows}
+        observation['metadata_hits'] = observation.get('metadata_hits', 0) + len(rows)
+        if not protection_fields:
+            rows = [(row[0], row[5]) for row in rows]
+        missing = [key[0] for key in keys if key[0] not in found]
+        if missing:
+            placeholders = ','.join('%s' for _ in missing)
+            fields = ("seq,captured_at,created_at,updated_at,"
+                      f"({_projection('research_events')}),({condition})"
+                      if protection_fields else f"seq,({condition})")
+            rows += read(phase + "_PAYLOAD",
+                         f"{fields} FROM pq_research_events FORCE INDEX (PRIMARY) "
+                         f"WHERE namespace=%s AND seq IN ({placeholders})",
+                         (repo.namespace, *missing), len(missing))
+        return rows
+
     rules = retention_rules(RetentionPolicy(**report["policy"]))
     for index, (kind, age, condition) in enumerate(rules):
         observation = {"backlog_status": "UNKNOWN", "eligible_rows_min": None, "backlog_exact": False,
@@ -380,11 +405,28 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
                              baseline[0] if baseline else 0)
             generation = observation["generation"]
             generation.update(high_water_seq=high_water, measured_at=now.isoformat())
-            backlog_limit = (quota - 1) // 2 if baseline else quota - 1
-            rows = read("BACKLOG", f"seq,captured_at,created_at,updated_at,({_projection(kind)}),({condition}) "
-                        f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
-                        "WHERE namespace=%s AND captured_at<%s ORDER BY captured_at,seq LIMIT %s",
-                        (repo.namespace, cutoff.replace(tzinfo=None), backlog_limit), backlog_limit)
+            from . import retention_metadata
+            use_metadata = retention_metadata.supports(repo, kind)
+            backlog_quota = (quota - 1) // 2 if baseline else quota - 1
+            backlog_limit = backlog_quota // 2 if use_metadata else backlog_quota
+            if use_metadata:
+                # Covering keys first; only missing/stale metadata may touch a
+                # bounded set of legacy JSON bodies. Charge keys and rows alike.
+                keys = read("BACKLOG_KEYS", "seq,captured_at FROM pq_research_events "
+                            "FORCE INDEX (ix_namespace_captured) WHERE namespace=%s "
+                            "AND captured_at<%s ORDER BY captured_at,seq LIMIT %s",
+                            (repo.namespace, cutoff.replace(tzinfo=None), backlog_limit), backlog_limit)
+                rows = []
+                for offset in range(0, len(keys), 10):
+                    rows.extend(research_rows("BACKLOG", keys[offset:offset + 10], condition))
+                rows.sort(key=lambda row: (row[1], row[0]))
+                if [(row[0], row[1]) for row in rows] != list(keys):
+                    raise RuntimeError("자료 집계 중 기록이 변경됐습니다.")
+            else:
+                rows = read("BACKLOG", f"seq,captured_at,created_at,updated_at,({_projection(kind)}),({condition}) "
+                            f"FROM pq_{kind} FORCE INDEX (ix_namespace_captured) "
+                            "WHERE namespace=%s AND captured_at<%s ORDER BY captured_at,seq LIMIT %s",
+                            (repo.namespace, cutoff.replace(tzinfo=None), backlog_limit), backlog_limit)
             stage = "BACKLOG_VALIDATION"
             eligible = [captured for _, captured, created, updated, data, allowed in rows
                         if allowed and max(created, updated) < cutoff.replace(tzinfo=None)
@@ -397,7 +439,7 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
                 observation.update(oldest_eligible_at=oldest.isoformat(),
                                    oldest_eligible_age_days=round((now - oldest).total_seconds() / 86400, 3))
             if baseline:
-                generation_limit = quota - 1 - backlog_limit
+                generation_limit = quota - 1 - backlog_quota
                 # Read a covering index first. Evaluating JSON while walking a
                 # secondary index needlessly loads many large replay payloads.
                 if condition != "1=1":
@@ -414,10 +456,14 @@ def _observe_retention(repo, report, previous, protected, removed_sequences, dea
                         observation["read_batch"] = {"count": len(batch), "first_seq": batch[0], "last_seq": batch[-1]}
                         placeholders = ",".join(["%s"] * len(batch))
                         try:
-                            arrivals = read("GENERATION_PAYLOAD",
-                                f"seq,({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
-                                f"WHERE namespace=%s AND seq IN ({placeholders}) ORDER BY seq",
-                                (repo.namespace, *batch), len(batch))
+                            if use_metadata:
+                                arrivals = research_rows("GENERATION", [(seq,) for seq in batch],
+                                                         condition, protection_fields=False)
+                            else:
+                                arrivals = read("GENERATION_PAYLOAD",
+                                    f"seq,({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
+                                    f"WHERE namespace=%s AND seq IN ({placeholders}) ORDER BY seq",
+                                    (repo.namespace, *batch), len(batch))
                         except Exception as exc:
                             from .mysql_repository import MySQLRepositoryError
                             if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or len(batch) == 1:
