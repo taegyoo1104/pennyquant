@@ -23,8 +23,9 @@ def checkpoint(tmp_path, monkeypatch):
     for key, value in {'ETC':etc, 'DATA':data, 'PROOF':etc/'nightly-checkpoint.json',
                        'SEAL':etc/'nightly-seal.json'}.items():
         monkeypatch.setattr(m, key, value)
-    state = {'container_started':'one', 'server_uuid':'uuid', 'readonly':False,
-             'writes':{'Com_insert':5, 'Com_update':3}, 'boot_epoch':1000., 'flush_epoch':1000.}
+    state = {'clock_version':2, 'container_started':'one', 'server_uuid':'uuid', 'readonly':False,
+             'writes':{'Com_insert':5, 'Com_update':3, 'Com_flush':0},
+             'process':{'boot_id':'host-boot', 'start_ticks':12345}, 'flush_offset':0}
     monkeypatch.setattr(m, 'snapshot', lambda:deepcopy(state))
     monkeypatch.setattr(m, 'stopped', lambda:None)
     def sql(query):
@@ -56,13 +57,16 @@ def test_reuse_after_cleanup_and_final_backup_until_runtime_opens(checkpoint):
     with pytest.raises(FileNotFoundError):m.verify()
 
 
-@pytest.mark.parametrize('change', ['write', 'restart', 'flush', 'readonly', 'file', 'new_file',
+@pytest.mark.parametrize('change', ['write', 'restart', 'flush', 'flush_count', 'process', 'host_boot', 'readonly', 'file', 'new_file',
     'configuration', 'archive', 'missing_archive', 'receipt', 'expired', 'seal'])
 def test_changed_or_unverifiable_snapshot_never_reuses_backup(checkpoint, change):
     m, state, backup = completed(checkpoint)
     if change == 'write':state['writes']['Com_update'] += 1
     elif change == 'restart':state['container_started'] = 'two'
-    elif change == 'flush':state['flush_epoch'] += 60
+    elif change == 'flush':state['flush_offset'] += 60
+    elif change == 'flush_count':state['writes']['Com_flush'] += 1
+    elif change == 'process':state['process']['start_ticks'] += 1
+    elif change == 'host_boot':state['process']['boot_id'] = 'rebooted'
     elif change == 'readonly':state['readonly'] = False
     elif change == 'file':(m.DATA/'app/retention-last.json').write_text('{}')
     elif change == 'new_file':(m.DATA/'app/new-record').write_text('changed')
@@ -110,10 +114,83 @@ def test_failed_unseal_invalidates_proof_first_and_keeps_recovery_marker(checkpo
 def test_dml_and_ddl_counters_include_privileged_writes_but_not_reads(checkpoint):
     m, _, _ = checkpoint
     for name in ('Com_insert', 'Com_insert_select', 'Com_update_multi', 'Com_delete_multi',
-                 'Com_truncate', 'Com_drop_db', 'Com_alter_table', 'Com_create_trigger', 'Com_load'):
+                 'Com_truncate', 'Com_drop_db', 'Com_alter_table', 'Com_create_trigger', 'Com_load', 'Com_flush'):
         assert m.WRITE.match(name)
     for name in ('Com_select', 'Com_show_status', 'Com_show_tables', 'Com_commit', 'Com_begin'):
         assert not m.WRITE.match(name)
+
+
+def test_old_wall_clock_seal_cannot_be_recertified_after_the_fact(checkpoint):
+    m, state, backup = checkpoint
+    m.seal(); backup(2)
+    sealed = json.loads(m.SEAL.read_text())
+    sealed['database'].pop('clock_version')
+    sealed['database'].pop('process')
+    sealed['database'].update(boot_epoch=1000., flush_epoch=1000.)
+    m.SEAL.write_text(json.dumps(sealed))
+    with pytest.raises(ValueError, match='백업 도중'):
+        m.record()
+    assert not m.PROOF.exists()
+
+
+def test_failure_identifies_changed_check_without_exposing_private_values(checkpoint):
+    m, state, backup = checkpoint
+    m.seal(); backup(2)
+    (m.DATA/'app/retention-last.json').write_text('private file body')
+    state['writes']['Com_insert'] += 1
+    with pytest.raises(ValueError) as error:
+        m.record()
+    assert 'DB 변경 횟수' in str(error.value) and '앱·설정 파일' in str(error.value)
+    assert 'private' not in str(error.value) and not m.PROOF.exists()
+
+
+@pytest.mark.parametrize('jump', [-3600., -4.454, 4.454, 3600.])
+def test_snapshot_ignores_host_wall_clock_corrections(checkpoint, monkeypatch, jump):
+    import time
+    m, _, _ = checkpoint
+    # Restore the real reader, because the main fixture mocks snapshot().
+    spec = importlib.util.spec_from_file_location('real_checkpoint', DEPLOY/'nightly_checkpoint.py')
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    elapsed = [0]
+    monkeypatch.setattr(m, 'run', lambda *a, **k: json.dumps({'Status':'running', 'StartedAt':'same'}))
+    monkeypatch.setattr(m, 'process_identity', lambda: {'boot_id':'same', 'start_ticks':120})
+    def sql(query):
+        if query.startswith('SELECT'):return 'same-uuid\t1'
+        stats = {'Uptime':10000+elapsed[0], 'Uptime_since_flush_status':9000+elapsed[0],
+                 'Com_insert':1, 'Com_update':2, 'Com_delete':3, 'Com_truncate':0, 'Com_flush':1}
+        return '\n'.join(f'{key}\t{value}' for key,value in stats.items())
+    monkeypatch.setattr(m, 'sql', sql)
+    monkeypatch.setattr(time, 'time', lambda: 100000.)
+    before = m.snapshot()
+    elapsed[0] = 1028
+    monkeypatch.setattr(time, 'time', lambda: 101028. + jump)
+    after = m.snapshot()
+    assert m.unchanged(before, after)
+    assert before == after
+
+
+def test_process_identity_uses_kernel_ticks_and_rejects_unknown_process(checkpoint, monkeypatch):
+    m, _, _ = checkpoint
+    boot = '01234567-0123-4567-89ab-0123456789ab'
+    fields = ['S'] + ['0'] * 18 + ['123456'] + ['0'] * 10
+    stat = '1 (mysqld) ' + ' '.join(fields)
+    monkeypatch.setattr(m, 'run', lambda *a, **k: '\n'.join([stat, 'mysqld', boot]))
+    assert m.process_identity() == {'boot_id':boot, 'start_ticks':123456}
+    monkeypatch.setattr(m, 'run', lambda *a, **k: '\n'.join([stat, 'sh', boot]))
+    with pytest.raises(ValueError, match='프로세스'):
+        m.process_identity()
+
+
+def test_restart_during_snapshot_fails_closed(monkeypatch):
+    spec = importlib.util.spec_from_file_location('real_checkpoint', DEPLOY/'nightly_checkpoint.py')
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    monkeypatch.setattr(m, 'run', lambda *a, **k: json.dumps({'Status':'running', 'StartedAt':'same'}))
+    identities = iter([{'start_ticks':1}, {'start_ticks':2}])
+    monkeypatch.setattr(m, 'process_identity', lambda: next(identities))
+    monkeypatch.setattr(m, 'sql', lambda q: 'uuid\t1' if q.startswith('SELECT') else
+        'Uptime\t10\nUptime_since_flush_status\t10\nCom_insert\t0\nCom_update\t0\nCom_delete\t0\nCom_truncate\t0\nCom_flush\t0')
+    with pytest.raises(ValueError, match='재시작'):
+        m.snapshot()
 
 
 @pytest.mark.parametrize('failure', ['', 'stop', 'pre_backup', 'cleanup', 'seal', 'final_backup', 'record'])
