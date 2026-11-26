@@ -29,6 +29,8 @@ def main():
     if os.geteuid() != 0 or Path('/etc/hostname').read_text().strip().split('.')[0] != 'sessionquant-paper':
         raise SystemExit('sessionquant-paper에서 sudo python3로 실행하세요.')
     os.umask(0o077)
+    if not os.isatty(0):
+        raise SystemExit('비밀번호를 안전하게 입력할 수 있도록 PuTTY 터미널에서 직접 실행하세요.')
     # Fail before rotating any credentials if a trading runtime is running.
     running = subprocess.check_output(COMPOSE+['ps', '--status', 'running', '--services', 'app'], text=True).strip()
     if running:

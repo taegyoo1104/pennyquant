@@ -126,3 +126,33 @@ def test_readiness_deferral_creates_no_attempt_or_backup(tmp_path, monkeypatch):
     assert 'DEFERRED' in (tmp_path/'status.json').read_text()
     assert 'MAINTENANCE_RUNNING' in (tmp_path/'status.json').read_text()
     deploy.assert_not_called()
+
+
+def test_successful_deployment_checks_revision_health_and_clears_marker(tmp_path, monkeypatch):
+    cd = module()
+    monkeypatch.setattr(cd, 'STATE', tmp_path)
+    original = Path.is_file
+    monkeypatch.setattr(Path, 'is_file', lambda p: True if str(p).endswith('cd-enabled') else original(p))
+    monkeypatch.setattr(cd, 'api', lambda path: {'sha': 'a'*40} if path == 'commits/main' else {'workflow_runs': [run_record()]})
+    monkeypatch.setattr(cd, 'readiness', lambda: None)
+    heads = iter(['b'*40, 'a'*40])
+    def run(args, **kwargs):
+        if args == ['git', 'rev-parse', 'HEAD']:
+            return next(heads)
+        if args == ['git', 'rev-parse', 'origin/main']:
+            return 'a'*40
+        if args[:2] == ['docker', 'inspect']:
+            return '["python","-m","sessionquant.inspection_dashboard"]'
+        return '#!/bin/bash\nexit 0' if 'show' in args else ''
+    monkeypatch.setattr(cd, 'run', run)
+    def deploy(args, **kwargs):
+        assert (tmp_path/'attempt.json').is_file()
+        assert args[-2:] == ['a'*40, '--off-hours']
+    monkeypatch.setattr(cd.subprocess, 'run', deploy)
+    from contextlib import nullcontext
+    response = Mock(status=200)
+    response.read.return_value = b'ok'
+    monkeypatch.setattr(cd, 'urlopen', lambda *a, **kw: nullcontext(response))
+    cd.deliver()
+    assert not (tmp_path/'attempt.json').exists()
+    assert 'COMPLETE' in (tmp_path/'status.json').read_text()

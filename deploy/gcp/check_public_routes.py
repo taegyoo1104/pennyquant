@@ -20,7 +20,8 @@ def validate(config, *, ready=False):
         if len(public) != 1:
             raise ValueError('8443 공개 주소를 확인하지 못했습니다.')
         handlers = web.get(public[0], {}).get('Handlers', {})
-        if handlers != {'/': {'Proxy': 'http://127.0.0.1:8502'}}:
+        if (set(handlers) != {'/'} or set(handlers['/']) != {'Proxy'}
+                or handlers['/']['Proxy'] not in {'http://127.0.0.1:8502', 'http://127.0.0.1:8502/'}):
             raise ValueError('공개 경로는 조회 전용 8502 포트만 연결해야 합니다.')
 
 
