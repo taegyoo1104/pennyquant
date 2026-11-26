@@ -338,8 +338,8 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                      panel=None, styled=False) -> None:
     import streamlit as st
     from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
-    from sessionquant.dashboard.access import is_admin
-    if not is_admin():
+    from sessionquant.dashboard.access import can_browse
+    if not can_browse():
         from sessionquant.dashboard.public_view import render_public
         render_public(path)
         return
@@ -357,14 +357,15 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
     if page == '뉴스·LLM':
         from sessionquant.dashboard.load_plan import NEWS_SECTIONS
         news_section = st.radio('뉴스 상세', tuple(NEWS_SECTIONS), horizontal=True, key='news_detail')
-    data=load_database(path,page=page,news_section=news_section,panel=panel)
+    from sessionquant.dashboard.shared_read import read_page
+    data=read_page(path,page=page,news_section=news_section,panel=panel)
     view=build_view(data)
     show_benchmarks = data.context.get('benchmark_collection_enabled') is not False
     if page == '대시보드' and panel == 'news' and not data.error and view['environment'] != 'PAPER_LOCAL':
         return
     if page == '대시보드' and panel == 'live' and not data.error and view['environment'] != 'PAPER_LOCAL':
         # 실계좌 조회 홈은 기존 표시 범위를 유지한다.
-        data=load_database(path,page=page)
+        data=read_page(path,page=page)
         view=build_view(data)
     account=view['account']
     from sessionquant.dashboard.labels import label
@@ -636,10 +637,10 @@ def main() -> None:
     parser.add_argument("--db", default=os.getenv("SQ_DB", "data/sessionquant-paper-local.db"))
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
-    from sessionquant.dashboard.access import render_login, is_admin
+    from sessionquant.dashboard.access import render_login, can_browse
     with st.sidebar:
         render_login()
-    if not is_admin():
+    if not can_browse():
         from sessionquant.dashboard.public_view import render_public
         render_public(Path(args.db))
         return

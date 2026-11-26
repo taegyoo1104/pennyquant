@@ -20,6 +20,15 @@ def protected():
     return os.environ.get('SQ_DASHBOARD_ACCESS', 'local') != 'local'
 
 
+def shared_dashboard():
+    return os.environ.get('SQ_DASHBOARD_ACCESS') == 'shared'
+
+
+def can_browse():
+    """Reading pages never grants permission to send commands or save settings."""
+    return shared_dashboard() or is_admin()
+
+
 def password_hash(password):
     if not 16 <= len(password) <= 256:
         raise ValueError('관리자 비밀번호는 16~256자로 설정하세요.')
@@ -74,7 +83,7 @@ def login(state, password, *, now=None):
 
 
 def is_admin():
-    if os.environ.get('SQ_DASHBOARD_ACCESS', 'local') not in {'local', 'admin'}:
+    if os.environ.get('SQ_DASHBOARD_ACCESS', 'local') not in {'local', 'admin', 'shared'}:
         return False
     if not protected():
         return True
@@ -92,7 +101,7 @@ def require_admin():
 
 def render_login():
     import streamlit as st
-    if os.environ.get('SQ_DASHBOARD_ACCESS') != 'admin':
+    if os.environ.get('SQ_DASHBOARD_ACCESS') not in {'admin', 'shared'}:
         return
     if is_admin():
         st.caption('관리자 · 로그인 유효시간 1시간')

@@ -36,7 +36,7 @@ def test_login_limit_is_shared_between_sessions(monkeypatch):
     assert access.login({}, 'a long test password 123', now=70)
 
 
-@pytest.mark.parametrize('role', ['viewer', 'admin', 'typo'])
+@pytest.mark.parametrize('role', ['viewer', 'admin', 'shared', 'typo'])
 def test_direct_command_rejected_before_database(monkeypatch, role):
     from sessionquant.trading_controls import request_command, enqueue
     monkeypatch.setenv('SQ_DASHBOARD_ACCESS', role)
@@ -62,8 +62,9 @@ def login_fixture():
             st.error('denied')
 
 
-def test_admin_login_logout_and_viewer_cannot_login(monkeypatch):
-    monkeypatch.setenv('SQ_DASHBOARD_ACCESS', 'admin')
+@pytest.mark.parametrize('role', ['admin', 'shared'])
+def test_admin_login_logout_and_viewer_cannot_login(monkeypatch, role):
+    monkeypatch.setenv('SQ_DASHBOARD_ACCESS', role)
     monkeypatch.setenv('SQ_DASHBOARD_ADMIN_HASH', access.password_hash('a long test password 123'))
     app = AppTest.from_function(login_fixture).run()
     app.button[-1].click().run()

@@ -69,7 +69,7 @@ flowchart LR
 | MySQL · SQLite | 운영 기록 저장 / 외부 연결 없는 테스트·재현 |
 | Streamlit | PC·모바일에서 보는 대시보드 |
 | Docker Compose · GCP · Cloud Storage | 앱·DB 실행, 서버 운영, 백업 |
-| Tailscale | 같은 사설 네트워크에 연결한 기기의 대시보드 접속 |
+| Tailscale | Funnel 공개 대시보드·사설 관리 접속 |
 | pytest · GitHub Actions | 변경 후 자동 검사(CI) · 선택적으로 안전 조건 확인 후 자동 배포(CD) |
 
 **시세·뉴스 수집 → 전략·모의매매 엔진 → DB 기록 → 대시보드** 구조입니다. LLM은 뉴스와 기록을 읽어 분석·설명하고, 주문은 정해 둔 코드가 결정합니다. 웹소켓으로 호가를 받아도 매매용 분봉은 REST 조회가 필요합니다. 코드의 폴더별 역할은 [개발 안내](docs/DEVELOPMENT.md#코드의-흐름과-위치)에 있습니다.
