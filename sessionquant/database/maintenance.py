@@ -50,6 +50,9 @@ class ContinuousBackup:
         self.identity = repo._execute('SELECT CONNECTION_ID(),@@server_uuid', fetch='one')
         self.control = self._control()
         self.active = True
+        # Adaptive read sizes belong to this connection/lease, not a persisted
+        # permission grant. Do not reset them at each 90-second pass.
+        self.read_sizes = {}
         self.verify(repo, policy, self.now)
 
     def _control(self):
@@ -110,6 +113,8 @@ def run(repo, policy, receipt, *, seconds=2700, now=None, clock=monotonic, progr
                 for key in totals:
                     totals[key] += last[key]
                 for kind, row in last['tables'].items():
+                    if 'payload_batch_size' in row:
+                        grant.read_sizes[kind] = row['payload_batch_size']
                     cumulative = table_totals.setdefault(kind, {key: 0 for key in ('scanned','eligible','deleted','protected')})
                     for key in cumulative:
                         cumulative[key] += row.get(key, 0)

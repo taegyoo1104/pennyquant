@@ -139,8 +139,7 @@ def _protected_ids(repo, deadline, clock):
     return protected
 
 
-def _projection(kind):
-    # Full article bodies, quotes and engine batches never leave MySQL here.
+def _projection_paths(kind):
     root = "$.data" if kind == "research_events" else "$"
     paths = {"id": root + ".id", "news_id": root + ".news_id", "article_id": root + ".article_id",
              "event_id": root + ".event.id"}
@@ -150,7 +149,21 @@ def _projection(kind):
         paths["_record_kind"] = "$.kind"
         paths.update({"journal_" + field: "$." + field for field in ("received_at", "available_at", "ingested_at")})
         paths["journal_run_id"] = "$.run_id"
-    return "JSON_OBJECT(" + ",".join(f"'{key}',JSON_EXTRACT(payload,'{path}')" for key, path in paths.items()) + ")"
+    return paths
+
+
+def _projection(kind, source="payload"):
+    # Express all protection paths as one document projection instead of an
+    # independent JSON_EXTRACT expression per field. Legacy disk pages still
+    # have to be read; this does not guarantee a particular I/O speedup.
+    # JSON columns (not VARCHAR/DATETIME) preserve malformed values so the
+    # Python protection checks still reject them instead of coercing them.
+    paths = _projection_paths(kind)
+    columns = ",".join(f"`{key}` JSON PATH '{path}' NULL ON EMPTY ERROR ON ERROR"
+                       for key, path in paths.items())
+    values = ",".join(f"'{key}',retention_fields.`{key}`" for key in paths)
+    return (f"(SELECT JSON_OBJECT({values}) FROM JSON_TABLE({source}, '$' "
+            f"COLUMNS({columns})) AS retention_fields)")
 
 
 @contextmanager
@@ -184,8 +197,20 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, c
     from . import retention_metadata
     if use_metadata and retention_metadata.supports(repo, kind):
         table['read_phase'] = 'METADATA_READ'
-        with _stage_timing(table, 'METADATA_READ', batch=table['read_batch']):
-            cached = retention_metadata.read(repo, keys, condition)
+        try:
+            with _stage_timing(table, 'METADATA_READ', batch=table['read_batch']):
+                cached = retention_metadata.read(repo, keys, condition)
+        except Exception as exc:
+            from .mysql_repository import MySQLRepositoryError
+            if not isinstance(exc, MySQLRepositoryError) or exc.code != 3024 or len(keys) == 1:
+                raise
+            table['read_splits'] = table.get('read_splits', 0) + 1
+            half = len(keys) // 2
+            table['payload_batch_size'] = min(table.get('payload_batch_size', 10), half)
+            return (_read_payload_page(repo, kind, condition, keys[:half], table, deadline, clock,
+                                       cache_writes=cache_writes, cache_filter=cache_filter)
+                    + _read_payload_page(repo, kind, condition, keys[half:], table, deadline, clock,
+                                         cache_writes=cache_writes, cache_filter=cache_filter))
         found = {row[0] for row in cached}
         table['metadata_hits'] = table.get('metadata_hits', 0) + len(cached)
         missing = [key for key in keys if key[0] not in found]
@@ -197,12 +222,21 @@ def _read_payload_page(repo, kind, condition, keys, table, deadline, clock, *, c
     placeholders = ",".join("%s" for _ in keys)
 
     def read(limit_ms):
+        timings = table.get('timings', {}).get('PAYLOAD', {})
+        before_seconds = timings.get('seconds', 0)
         with _stage_timing(table, "PAYLOAD", batch={**table["read_batch"], "query_limit_ms": limit_ms}):
-            return repo._execute(
+            result = repo._execute(
                 f"SELECT /*+ MAX_EXECUTION_TIME({limit_ms}) */ seq,captured_at,created_at,updated_at,"
                 f"({_projection(kind)}),({condition}) FROM pq_{kind} FORCE INDEX (PRIMARY) "
                 f"WHERE namespace=%s AND seq IN ({placeholders})",
                 (repo.namespace, *(key[0] for key in keys)), fetch="all")
+        elapsed = table['timings']['PAYLOAD']['seconds'] - before_seconds
+        # Leave headroom below the unchanged 3s query cap. Learn from successful
+        # slow pages instead of repeatedly timing out on large legacy records.
+        if elapsed > .75 and len(keys) > 1:
+            size = max(1, int(len(keys) * .75 / elapsed))
+            table['payload_batch_size'] = min(table.get('payload_batch_size', 10), size)
+        return result
 
     try:
         rows = read(3000)
@@ -481,6 +515,8 @@ def prune_expired(repo, policy: RetentionPolicy, *, apply=False, receipt=None, n
         for kind, age, _ in rules:
             report["tables"][kind] = {"before": retention_cutoff(report["policy"], age, now).isoformat(),
                 "scanned": 0, "eligible": 0, "deleted": 0, "protected": 0, "complete": kind in completed}
+            if _continuation is not None and kind in _continuation.read_sizes:
+                report['tables'][kind]['payload_batch_size'] = _continuation.read_sizes[kind]
         # Protect shutdown against unexpected lock contention. This connection is
         # dedicated to maintenance; the engine uses another connection/lease.
         previous_wait = repo._execute("SELECT @@SESSION.innodb_lock_wait_timeout", fetch="one")[0]

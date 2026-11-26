@@ -182,10 +182,16 @@ class SessionEngine:
                        'force_liquidation':False, 'llm_role':'candidate_priority_only'}
         if self.record_inputs:
             try:
-                evidence = self.risk_provider.recorded_evidence(now,symbol) if self.risk_provider and hasattr(self.risk_provider,'recorded_evidence') else {}
+                provider_method = ('diagnostic_evidence' if self.auxiliary_storage.bounded
+                                   and hasattr(self.risk_provider, 'diagnostic_evidence') else 'recorded_evidence')
+                evidence = getattr(self.risk_provider, provider_method)(now, symbol) if self.risk_provider and hasattr(self.risk_provider, provider_method) else {}
             except Exception as error:
                 evidence = {'error_type':type(error).__name__,'analyses':[],'economic_events':[]}
-            self._batch_news_contexts[symbol] = {'context':context,'evidence':evidence,'available_at':now.isoformat()}
+            if self.auxiliary_storage.bounded:
+                from .research.news_diagnostics import summarize
+                self._batch_news_contexts[symbol] = {**summarize(context, evidence), 'available_at': now.isoformat()}
+            else:
+                self._batch_news_contexts[symbol] = {'context':context,'evidence':evidence,'available_at':now.isoformat()}
         return context
 
     def _risk_context(self, now: datetime, symbol: str) -> dict:

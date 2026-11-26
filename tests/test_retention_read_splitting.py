@@ -103,6 +103,38 @@ def test_non_timeout_error_is_measured_and_propagated(monkeypatch):
     assert 'last_read_timeout' not in table
 
 
+def test_successful_slow_page_reduces_next_batch_before_timeout(monkeypatch):
+    from sessionquant.database import retention
+    ticks = iter([0., 2.5])
+    monkeypatch.setattr(retention, 'monotonic', lambda: next(ticks))
+    table = {}
+    repo = Repo(size=10)
+    assert _read_payload_page(repo, 'research_events', '1=1',
+        [(i, None) for i in range(10)], table, 90, lambda: 0) == list(range(10))
+    assert table['payload_batch_size'] == 3
+    assert table['timings']['PAYLOAD']['timeouts'] == 0
+    assert repo.limits == [3000]
+
+
+def test_metadata_timeout_splits_without_skipping_or_reading_cached_bodies(monkeypatch):
+    from sessionquant.database import retention_metadata as meta
+    monkeypatch.setattr(meta, 'supports', lambda repo, kind: True)
+    calls = []
+    def read(repo, keys, condition):
+        calls.append([key[0] for key in keys])
+        if len(keys) > 2:
+            raise MySQLRepositoryError(pymysql.err.OperationalError(3024, 'fixture'), 'SELECT')
+        return [(key[0],) for key in keys]
+    monkeypatch.setattr(meta, 'read', read)
+    table = {}
+    repo = Repo()
+    assert _read_payload_page(repo, 'research_events', '1=1',
+        [(i, None) for i in range(4)], table, 90, lambda: 0) == [(i,) for i in range(4)]
+    assert calls == [[0, 1, 2, 3], [0, 1], [2, 3]]
+    assert not repo.calls
+    assert table['timings']['METADATA_READ']['timeouts'] == 1
+
+
 @pytest.mark.parametrize('remaining,limit', [(90, 10000), (4.5, 4500)])
 def test_single_record_retry_is_bounded_and_reads_the_same_key(remaining, limit):
     class SlowRecord(Repo):

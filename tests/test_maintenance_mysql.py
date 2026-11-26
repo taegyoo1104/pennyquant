@@ -24,6 +24,35 @@ def prepare(repo, tmp_path, *, age=0):
     return now, receipt(tmp_path, uploaded)
 
 
+def test_reduced_payload_batches_survive_continuous_pass_boundaries(mysql_repositories, tmp_path, monkeypatch):
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    now, proof = prepare(repo, tmp_path)
+    for i in range(30):
+        seed(repo, 'research_events', str(i), now, kind='engine_batch', run_id='closed', data={})
+    execute, prune = repo._execute, maintenance.prune_expired
+    calls, pass_number = [], [0]
+    def limited(sql, params=(), **kwargs):
+        if (sql.startswith('SELECT /*+') and 'JSON_OBJECT' in sql
+                and 'FROM pq_research_events FORCE INDEX (PRIMARY)' in sql):
+            size = len(params) - 1
+            calls.append((pass_number[0], size))
+            if size > 2:
+                from pymysql.err import OperationalError
+                raise MySQLRepositoryError(OperationalError(3024, 'fixture'), 'SELECT')
+        return execute(sql, params, **kwargs)
+    def counted(*args, **kwargs):
+        pass_number[0] += 1
+        return prune(*args, **kwargs)
+    monkeypatch.setattr(repo, '_execute', limited)
+    monkeypatch.setattr(maintenance, 'prune_expired', counted)
+    result = maintenance.run(repo, replace(POLICY, intraday_auxiliary=True, batch_size=10, max_rows=10),
+                             proof, now=now)
+    assert result['status'] == 'COMPLETE' and result['deleted'] == 30
+    assert any(p == 1 and size > 2 for p, size in calls)
+    assert any(p > 1 for p, size in calls)
+    assert all(size <= 2 for p, size in calls if p > 1)
+
+
 def test_continuous_cleanup_crosses_receipt_hour_under_one_lease_and_preserves_finance(mysql_repositories, tmp_path, monkeypatch):
     repo = mysql_repositories(environment='PAPER_LOCAL')
     competitor = mysql_repositories(repo.config.namespace, environment='PAPER_LOCAL')
