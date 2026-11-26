@@ -1,0 +1,11 @@
+[Unit]
+Description=Check tested main every five minutes, defer active trading/maintenance
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30
+Unit=sessionquant-cd.service
+
+[Install]
+WantedBy=timers.target

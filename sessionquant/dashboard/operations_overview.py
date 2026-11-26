@@ -140,7 +140,10 @@ def render_operations(data, view, path, *, panel=None):
     st.markdown('<div class="sq-hero"><div><h1>SESSIONQUANT</h1>'
         '<p>'+escape(market_hours_label(now))+'</p></div>'
         '<span class="sq-pill">모의매매</span></div>', unsafe_allow_html=True)
-    if data.connected:
+    from .access import is_admin
+    if not is_admin():
+        st.caption('공개 조회 · 실제 시세 기반 모의매매')
+    elif data.connected:
         try:
             with closing(Repository(path, initialize=False)) as repo:
                 positions = (data.state.get('broker') or {}).get('positions') or {}
@@ -226,6 +229,10 @@ def render_operations(data, view, path, *, panel=None):
         st.caption('조회 범위에 모의 체결 기록이 없습니다.')
     from .trade_cards import render_trade_history
     render_trade_history(data)
+    if not is_admin():
+        if panel is None:
+            render_home_news(data)
+        return
     footer = st.columns(2)
     with footer[0]:
         link('매매 전체 보기','매매 내역')
@@ -241,6 +248,10 @@ def render_home_news(data):
     from .explanation_panel import render_explanation_summary
     from .overview import link
     from .news_queue_panel import render_news_queue
+    from .access import is_admin
+    if not is_admin():
+        render_explanation_summary(data.strategy_explanation)
+        return
     render_news_queue(data.news_status)
     render_explanation_summary(data.strategy_explanation)
     with st.expander('뉴스·AI 수집 현황'):

@@ -1,0 +1,14 @@
+[Unit]
+Description=SessionQuant tested-main deployment (off-hours inspection only)
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/sessionquant/cd-enabled
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sessionquant
+ExecStart=/usr/bin/python3 /opt/sessionquant/deploy/gcp/continuous_delivery.py
+UMask=0077
+TimeoutStartSec=10800
+TimeoutStopSec=240
+KillMode=control-group

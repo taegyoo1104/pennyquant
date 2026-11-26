@@ -70,7 +70,7 @@ flowchart LR
 | Streamlit | PC·모바일에서 보는 대시보드 |
 | Docker Compose · GCP · Cloud Storage | 앱·DB 실행, 서버 운영, 백업 |
 | Tailscale | 같은 사설 네트워크에 연결한 기기의 대시보드 접속 |
-| pytest · GitHub Actions | 변경 후 자동 검사(CI). 서버 배포는 수동으로 진행 |
+| pytest · GitHub Actions | 변경 후 자동 검사(CI) · 선택적으로 안전 조건 확인 후 자동 배포(CD) |
 
 **시세·뉴스 수집 → 전략·모의매매 엔진 → DB 기록 → 대시보드** 구조입니다. LLM은 뉴스와 기록을 읽어 분석·설명하고, 주문은 정해 둔 코드가 결정합니다. 웹소켓으로 호가를 받아도 매매용 분봉은 REST 조회가 필요합니다. 코드의 폴더별 역할은 [개발 안내](docs/DEVELOPMENT.md#코드의-흐름과-위치)에 있습니다.
 
@@ -117,5 +117,7 @@ python -m sessionquant run --config config/sessionquant.strategy-lab-websocket.e
 실제 시세를 이용한 모의 매수·매도 기록과 자동 검사를 통해 동작을 점검하고 있습니다. 현재 안내하는 실행에서는 실제 증권사 주문을 보내지 않습니다. 수익성이나 장기 안정성을 검증했다는 의미는 아닙니다.
 
 분봉 갱신 지연은 다음 장중에 계속 확인할 과제입니다. 최신 봉이 늦게 도착하면 제한된 재확인을 하고, 지연 시각·API·DB·계산 시간을 작은 진단 기록으로 보관합니다. **정상 수집에는 진단용 DB 작업을 추가하지 않고, 지연 기록은 전 종목 합산 5분에 최대 1건·최근 96건·256KiB로 제한**합니다. 저장된 자료 이상으로 과거 흐름을 만들어 내지는 않습니다.
+
+**공개 화면과 관리자 접속:** [공개 대시보드·자동 배포 설정](docs/PUBLIC_DASHBOARD_CD.md)
 
 **더 읽기:** [문서 목록](docs/README.md) · [매매 과정](docs/TRADING_PROCESS.md) · [기획과 문제 해결](docs/PROJECT_STORY.md) · [Windows CMD부터 GCP 접속](docs/GCP_PAPER.md#windows-cmd에서-시작하기) · [개발·검사](docs/DEVELOPMENT.md)

@@ -110,7 +110,7 @@ def load_database(path: str | Path, *, page=None, news_section=None, panel=None)
     """선택한 화면의 기록만 읽는다. 중간 실패는 이미 읽은 자료를 지우지 않는다."""
     from sessionquant.dashboard.load_plan import CONTROLS, SOURCE_LABELS, read_plan
     controls, tables = read_plan(page, news_section=news_section, panel=panel)
-    include_state = panel is None or panel == 'live'
+    include_state = panel is None or panel in {'live', 'public'}
     include_fred = page is None or (page == '시장·종목' and panel in {None, '시장 참고'})
     include_news = page is None or page == '뉴스·LLM' or (page == '대시보드' and panel in {None, 'news'})
     pending = {*controls, *tables}
@@ -338,6 +338,11 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                      panel=None, styled=False) -> None:
     import streamlit as st
     from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
+    from sessionquant.dashboard.access import is_admin
+    if not is_admin():
+        from sessionquant.dashboard.public_view import render_public
+        render_public(path)
+        return
     if not styled:
         style()
     from sessionquant.dashboard_mode import inspection_mode
@@ -631,6 +636,13 @@ def main() -> None:
     parser.add_argument("--db", default=os.getenv("SQ_DB", "data/sessionquant-paper-local.db"))
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
+    from sessionquant.dashboard.access import render_login, is_admin
+    with st.sidebar:
+        render_login()
+    if not is_admin():
+        from sessionquant.dashboard.public_view import render_public
+        render_public(Path(args.db))
+        return
     from sessionquant.dashboard.navigation import restore_navigation, remember_navigation
     restore_navigation(st.query_params, st.session_state)
     from sessionquant.dashboard.overview import PAGES, style

@@ -12,12 +12,14 @@ def dashboard_environment(*, database: bool = False) -> dict[str, str]:
     result = {name: value for name, value in os.environ.items()
             if not any(part in name.upper() for part in ("SECRET", "TOKEN", "PASSWORD", "CREDENTIAL"))
             and not name.upper().endswith("_KEY")
-            and name.upper() not in {"TOSS_CLIENT_ID", "TOSS_ACCOUNT_SEQ", "APCA_API_KEY_ID", "SSH_AUTH_SOCK"}}
+            and name.upper() not in {"TOSS_CLIENT_ID", "TOSS_ACCOUNT_SEQ", "APCA_API_KEY_ID", "SSH_AUTH_SOCK", "SQ_DASHBOARD_ADMIN_HASH"}}
 
     if database and os.getenv("SQ_DB_BACKEND", os.getenv("PQ_DB_BACKEND", "sqlite")).lower() == "mysql":
         for name in ("SQ_MYSQL_PASSWORD", "PQ_MYSQL_PASSWORD"):
             if name in os.environ:
                 result[name] = os.environ[name]
+    if database and "SQ_DASHBOARD_ADMIN_HASH" in os.environ:
+        result["SQ_DASHBOARD_ADMIN_HASH"] = os.environ["SQ_DASHBOARD_ADMIN_HASH"]
     return result
 
 
