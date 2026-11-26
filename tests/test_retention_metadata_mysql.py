@@ -10,9 +10,25 @@ import pytest
 from test_mysql_integration import mysql_repositories  # noqa: F401
 from test_retention_mysql import seed, receipt, POLICY
 from sessionquant.database import retention_metadata as meta
-from sessionquant.database.retention import _projection, _read_payload_page, prune_expired
+from sessionquant.database.retention import _projection, _projection_paths, _read_payload_page, prune_expired
 
 pytestmark = pytest.mark.skipif(os.getenv('PQ_TEST_MYSQL') != '1', reason='requires disposable MySQL 8')
+
+
+@pytest.mark.parametrize('kind', ['research_events', 'pipeline_status'])
+@pytest.mark.parametrize('value', [None, False, 17, '', 'null', ['bad'], {'bad': 'time'},
+                                 '2026-11-26T16:00:00+00:00', 'x' * 20000])
+def test_single_parse_projection_matches_old_json_types_on_large_documents(mysql_repositories, kind, value):
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    data = {key: value for key in ('id', 'news_id', 'received_at', 'valid_until')}
+    data['news_contexts'] = {'AAPL': {'body': 'x' * 2200000}}
+    body = {'kind': 'engine_batch', 'run_id': 'closed', 'data': data} if kind == 'research_events' else data
+    paths = _projection_paths(kind)
+    old = 'JSON_OBJECT(' + ','.join(f"'{k}',JSON_EXTRACT(payload,'{p}')" for k, p in paths.items()) + ')'
+    new = _projection(kind)
+    row = repo._execute(f'SELECT {old},{new} FROM (SELECT CAST(%s AS JSON) AS payload) fixture',
+                        (json.dumps(body),), fetch='one')
+    assert json.loads(row[0]) == json.loads(row[1])
 
 
 def source(repo, key):

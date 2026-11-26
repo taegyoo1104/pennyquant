@@ -311,18 +311,26 @@ class NewsPipeline:
         except (ValueError, TypeError, KeyError, AttributeError):
             return False
 
-    def recorded_evidence(self,now,symbol):
+    def diagnostic_evidence(self, now, symbol):
+        from ..research.news_diagnostics import REFERENCE_LIMIT
+        return self.recorded_evidence(now, symbol, limit=REFERENCE_LIMIT)
+
+    def recorded_evidence(self,now,symbol, *, limit=None):
         """당시 위험 조회에 사용 가능한 분석 버전만 기록하며 재분석하지 않는다."""
         from ..portfolio.models import serialize
         rows = [row for row in self._analyses.values() if self._recent(row,now)
                 and (row.get('category') != 'company' or row.get('ticker') == symbol)]
         analyses = []
-        for row in rows:
+        for row in rows if limit is None else rows[:limit]:
             event = row.get('event') or {}
             analyses.append({key:row.get(key) for key in ('id','model','prompt_version','analyzed_at','error')} | {
                 'published_at':row.get('published_at') or event.get('published_at'),
                 'received_at':row.get('received_at') or event.get('received_at')})
-        return serialize({'analyses':analyses,'economic_events':[event for event in self.economic_events_at(now) if event.blackout(now)]})
+        calendars = [event for event in self.economic_events_at(now) if event.blackout(now)]
+        value = {'analyses': analyses, 'economic_events': calendars if limit is None else calendars[:limit]}
+        if limit is not None:
+            value.update(analyses_count=len(rows), economic_events_count=len(calendars))
+        return serialize(value)
 
     def risk_context(self, now: datetime, symbol: str | None = None) -> dict:
         now = utc(now)
