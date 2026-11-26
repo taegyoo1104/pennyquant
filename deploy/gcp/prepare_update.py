@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 
@@ -16,6 +17,17 @@ def git(repo,*args):
 
 
 def digest(data):return hashlib.sha256(data).hexdigest()
+
+
+def deployment_mode_only(repo, name, path, current):
+    """Older updaters chmod'ed every GCP shell script, including tracked 0644 files."""
+    if Path(name).parent != Path('deploy/gcp') or Path(name).suffix != '.sh':
+        return False
+    if stat.S_IMODE(path.stat().st_mode) != 0o755:
+        return False
+    entry = git(repo, 'ls-tree', 'HEAD', '--', name)
+    return (entry.startswith(b'100644 blob ') and
+            current == digest(git(repo, 'show', 'HEAD:'+name)))
 
 
 def known_recovery(repo,target):
@@ -54,9 +66,11 @@ def plan(repo,target):
             raise ValueError('직접 확인할 변경 파일: '+name)
         current=digest(path.read_bytes())
         expected=digest(git(repo,'show',target+':'+name))
-        if current not in {expected,known.get(name)}:
+        if current not in {expected,known.get(name)} and not (
+                name in tracked and deployment_mode_only(repo,name,path,current)):
             raise ValueError('알려진 복구 수정과 다른 파일이므로 보존하고 중단합니다: '+name)
-        verified[name]={'sha256':current,'untracked':name in collisions}
+        verified[name]={'sha256':current,'untracked':name in collisions,
+                        'mode':stat.S_IMODE(path.stat().st_mode)}
     return {'head':git(repo,'rev-parse','HEAD').decode().strip(),'target':target,'files':verified}
 
 

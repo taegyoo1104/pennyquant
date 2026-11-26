@@ -125,7 +125,9 @@ if ! docker image inspect "sessionquant:before-${sq_target:0:12}" >/dev/null 2>&
     docker tag sessionquant:local "sessionquant:before-${sq_target:0:12}"
 fi
 docker tag "$sq_image" sessionquant:local
-chmod 755 deploy/gcp/*.sh
+# Preserve Git's file modes. Entry points invoked directly by systemd are
+# tracked executable; helpers are invoked with bash. Blanket chmod makes the
+# next update mistake an unchanged 0644 script for a local content edit.
 for path in deploy/gcp/sessionquant*.service deploy/gcp/sessionquant*.timer; do
     [[ $(systemctl is-enabled "$(basename "$path")" 2>/dev/null || true) != masked ]] || { echo '서비스가 점검용으로 차단돼 있습니다.' >&2; exit 1; }
     install -m 644 "$path" "/etc/systemd/system/$(basename "$path")"
