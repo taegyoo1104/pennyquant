@@ -10,7 +10,7 @@ import tarfile
 
 import pytest
 
-from test_gcp_deployment import DEPLOY, executable, install_lifecycle_lock
+from test_gcp_deployment import DEPLOY, executable, install_lifecycle_lock, install_backup_capacity_fixture
 
 
 def packager():
@@ -262,8 +262,7 @@ def test_failed_verification_never_uploads_or_removes_previous_archive(tmp_path,
     (deploy / "upload_backup.py").write_text('raise AssertionError("must never upload")')
     shutil.copyfile(DEPLOY / "package_backup.py", deploy / "package_backup.py")
     (data/'mysql').mkdir(exist_ok=True)
-    (deploy/'backup_capacity.py').write_text((DEPLOY/'backup_capacity.py').read_text().replace(
-        '/var/lib/sessionquant',str(data)).replace('/etc/sessionquant',str(etc)))
+    install_backup_capacity_fixture(deploy, data, etc)
     if invalid == "package_failure":
         (deploy / "package_backup.py").write_text("raise SystemExit(2)")
     script = tmp_path / "backup.sh"
