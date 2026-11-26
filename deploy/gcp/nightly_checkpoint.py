@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import time
 
 ROOT = Path('/opt/sessionquant')
 ETC = Path('/etc/sessionquant')
@@ -20,7 +19,7 @@ DATA = Path('/var/lib/sessionquant')
 PROOF = ETC / 'nightly-checkpoint.json'
 SEAL = ETC / 'nightly-seal.json'
 COMPOSE = ['docker', 'compose', '-f', str(ROOT / 'deploy/gcp/compose.yaml')]
-WRITE = re.compile(r'Com_(insert|update|delete|replace|load|truncate|create|alter|drop|rename|grant|revoke|install|uninstall|reset|purge|repair|optimize|analyze)(_|$)', re.I)
+WRITE = re.compile(r'Com_(insert|update|delete|replace|load|truncate|create|alter|drop|rename|grant|revoke|install|uninstall|reset|purge|repair|optimize|analyze|flush)(_|$)', re.I)
 
 
 def run(args, *, input=None):
@@ -49,27 +48,65 @@ def stopped():
         raise ValueError('프로그램을 종료한 뒤 백업 재사용을 확인하세요.')
 
 
+def process_identity():
+    # Linux process start ticks and the kernel boot ID do not use wall time.
+    # The supported mysql:8.4 image execs mysqld as PID 1. Unknown layouts fail
+    # closed rather than treating a shell/supervisor as the database process.
+    lines = run(['docker', 'exec', 'sessionquant-db-1', 'cat',
+                 '/proc/1/stat', '/proc/1/comm', '/proc/sys/kernel/random/boot_id']).splitlines()
+    if len(lines) != 3 or lines[1].strip() != 'mysqld':
+        raise ValueError('DB 프로세스 시작 정보 확인 실패')
+    stat, _, boot = lines
+    fields = stat.rsplit(')', 1)[-1].split()
+    if (not stat.startswith('1 (mysqld) ') or len(fields) < 20
+            or not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', boot)):
+        raise ValueError('DB 프로세스 시작 정보 형식 확인 실패')
+    ticks = int(fields[19])  # proc(5): field 22; suffix starts at field 3.
+    if ticks <= 0:
+        raise ValueError('DB 프로세스 시작 시각 확인 실패')
+    return {'boot_id': boot, 'start_ticks': ticks}
+
+
 def snapshot():
     identity = json.loads(run(['docker', 'inspect', 'sessionquant-db-1', '--format',
                               '{{json .State}}']))
     if identity.get('Status') != 'running':
         raise ValueError('DB 실행 상태 확인 실패')
+    process = process_identity()
     server, readonly = sql('SELECT @@server_uuid, @@GLOBAL.super_read_only').split('\t')
     stats = dict(line.split('\t', 1) for line in sql('SHOW GLOBAL STATUS').splitlines())
     writes = {key: int(value) for key, value in stats.items()
               if WRITE.match(key) or key in {'Innodb_rows_inserted', 'Innodb_rows_updated', 'Innodb_rows_deleted'}}
-    if not {'Com_insert', 'Com_update', 'Com_delete', 'Com_truncate'} <= writes.keys():
+    if not {'Com_insert', 'Com_update', 'Com_delete', 'Com_truncate', 'Com_flush'} <= writes.keys():
         raise ValueError('DB 변경 횟수 확인 실패')
     uptime, flush = int(stats['Uptime']), int(stats['Uptime_since_flush_status'])
-    return {'container_started': identity['StartedAt'], 'server_uuid': server,
+    if uptime < 0 or not 0 <= flush <= uptime or process_identity() != process:
+        raise ValueError('DB 상태 확인 도중 재시작 또는 상태 초기화가 발생했습니다.')
+    return {'clock_version': 2, 'container_started': identity['StartedAt'], 'server_uuid': server,
             'readonly': readonly == '1', 'writes': writes,
-            'boot_epoch': time.time()-uptime, 'flush_epoch': time.time()-flush}
+            'process': process, 'flush_offset': uptime-flush}
+
+
+def differences(before, after):
+    # Old wall-clock-only seals cannot be upgraded retrospectively: they did
+    # not capture a process identity before the backup. Require a new seal.
+    if before.get('clock_version') != 2 or after.get('clock_version') != 2:
+        return ['비교 형식 변경: 새 백업 필요']
+    changed = []
+    if before.get('readonly') is not True or after.get('readonly') is not True:
+        changed.append('DB 쓰기 금지 상태')
+    for key, label in (('container_started', 'DB 컨테이너 시작'), ('server_uuid', 'DB 서버 식별자'),
+                       ('writes', 'DB 변경 횟수'), ('process', 'DB 프로세스·시스템 부팅')):
+        if key not in before or key not in after or before[key] != after[key]:
+            changed.append(label)
+    offsets = [value.get('flush_offset') for value in (before, after)]
+    if any(type(value) is not int or value < 0 for value in offsets) or abs(offsets[0]-offsets[1]) > 2:
+        changed.append('DB 상태 초기화 시점')
+    return changed
 
 
 def unchanged(before, after):
-    return (before['readonly'] is True and after['readonly'] is True
-            and all(before[key] == after[key] for key in ('container_started', 'server_uuid', 'writes'))
-            and all(abs(before[key]-after[key]) <= 2 for key in ('boot_epoch', 'flush_epoch')))
+    return not differences(before, after)
 
 
 def files():
@@ -136,8 +173,11 @@ def record():
     sealed = json.loads(SEAL.read_text())
     before = sealed['database']
     current_files = files()
-    if sealed['files'] != current_files or not unchanged(before, snapshot()):
-        raise ValueError('최종 백업 도중 자료가 변경됐습니다.')
+    changed = differences(before, snapshot())
+    if sealed['files'] != current_files:
+        changed.append('앱·설정 파일')
+    if changed:
+        raise ValueError('최종 백업 도중 자료가 변경됐습니다. 확인 항목: ' + ', '.join(changed))
     report = json.loads((DATA/'app/retention-last.json').read_text())
     if (report.get('dry_run') is not False or report.get('status') not in {'COMPLETE', 'DISABLED'}
             or report.get('errors') or report.get('observability', {}).get('backlog_status') == 'PRESENT'):
