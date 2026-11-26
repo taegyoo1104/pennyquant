@@ -16,6 +16,45 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+def test_mysql_explicit_projection_preparation_preserves_sources_and_reuses_proof(mysql_repositories, monkeypatch):
+    from test_projection_preparation import prep, NOW
+    from sessionquant.database import pipeline_summary as pipeline, llm_attempt_index as llm
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    repo.set_control('trade_control_state', {'mode': 'paper', 'running': False, 'status': 'OFFLINE', 'armed': False})
+    repo.save_state({'environment': 'PAPER_LOCAL', 'broker': {'positions': {}, 'orders': {}, 'exit_intents': {}}})
+    repo.record('pipeline_status', {'id': 'old', 'status': 'READY', 'items': [{'body': 'x' * 1500000}]})
+    for index in range(3):
+        repo.record('llm_calls', {'id': str(index), 'network_attempted': index == 1})
+    sources = {kind: repo.all(kind) for kind in ('pipeline_status', 'llm_calls')}
+    for table in (pipeline.TABLE, llm.TABLE):
+        repo._execute(f'DELETE FROM {table} WHERE namespace=%s', (repo.namespace,))
+    result = prep.prepare(repo, now=NOW, bounds=())
+    assert result['status'] == 'COMPLETE'
+    assert result['pipeline']['backfilled'] == 1 and result['llm']['backfilled'] == 3
+    assert repo.recent_pipeline_summary() == [{'id': 'old', 'status': 'READY', 'items_count': 1}]
+    assert [row['id'] for row in repo.recent_llm_attempts()] == ['1']
+    assert {kind: repo.all(kind) for kind in sources} == sources
+    def unnecessary(*args, **kwargs):
+        raise AssertionError('a valid coverage proof must skip LLM backfill')
+    monkeypatch.setattr(llm, 'backfill_page', unnecessary)
+    again = prep.prepare(repo, now=NOW, bounds=())
+    assert again['status'] == 'COMPLETE' and again['llm']['reused_proof']
+    assert again['pipeline']['backfilled'] == 0
+
+
+def test_mysql_pipeline_backfill_rejects_foreign_namespace_and_reads_only_missing_rows(mysql_repositories):
+    from sessionquant.database import pipeline_summary as pipeline
+    repo, other = mysql_repositories(), mysql_repositories()
+    repo.record('pipeline_status', {'id': 'own', 'status': 'READY'})
+    other.record('pipeline_status', {'id': 'other', 'status': 'PRIVATE'})
+    key = repo._execute('SELECT seq FROM pq_pipeline_status WHERE namespace=%s', (repo.namespace,), fetch='one')[0]
+    foreign = repo._execute('SELECT seq FROM pq_pipeline_status WHERE namespace=%s', (other.namespace,), fetch='one')[0]
+    assert pipeline.backfill_page(repo, [key, foreign]) == 0
+    repo._execute(f'DELETE FROM {pipeline.TABLE} WHERE namespace=%s', (repo.namespace,))
+    assert pipeline.backfill_page(repo, [key, foreign]) == 1
+    assert repo.recent_pipeline_summary() == [{'id': 'own', 'status': 'READY'}]
+
+
 def test_mysql_pipeline_materialized_summary_preserves_large_payloads_and_old_writers(mysql_repositories, monkeypatch):
     import json
     from sessionquant.database import pipeline_summary as cached

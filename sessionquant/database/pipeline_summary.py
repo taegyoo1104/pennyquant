@@ -108,3 +108,32 @@ def recent(repo, limit):
             f"SELECT seq,{expression('mysql')} FROM pq_pipeline_status FORCE INDEX (PRIMARY) "
             f'WHERE namespace=%s AND seq IN ({placeholders})', (repo.namespace, *missing), fetch='all'))
     return [summary(found[seq]) for seq in reversed(ids) if seq in found]
+
+
+def backfill_page(repo, ids):
+    """Explicit maintenance only: derive at most ten missing summaries.
+
+    Source locks keep direct SQL/old writers consistent with this projection;
+    already current summaries are never projected from the large source body.
+    """
+    ids = list(dict.fromkeys(ids))
+    if not ids or len(ids) > 10 or any(type(seq) is not int or seq < 1 for seq in ids):
+        raise ValueError('처리 요약 보충 범위를 확인하세요.')
+    if not available(repo):
+        raise ValueError('처리 요약 트리거를 확인할 수 없습니다.')
+    placeholders = ','.join('%s' for _ in ids)
+    with repo.transaction():
+        repo._execute('SELECT /*+ MAX_EXECUTION_TIME(3000) */ seq FROM pq_pipeline_status FORCE INDEX (PRIMARY) '
+            f'WHERE namespace=%s AND seq IN ({placeholders}) FOR UPDATE', (repo.namespace, *ids), fetch='all')
+        rows = repo._execute('SELECT /*+ MAX_EXECUTION_TIME(3000) */ r.seq,r.namespace,r.updated_at,'
+            f'{expression("mysql", "r.payload")} FROM pq_pipeline_status r FORCE INDEX (PRIMARY) '
+            f'WHERE r.namespace=%s AND r.seq IN ({placeholders}) AND NOT EXISTS '
+            f'(SELECT 1 FROM {TABLE} m WHERE m.source_seq=r.seq AND m.namespace=r.namespace '
+            'AND m.source_updated_at=r.updated_at AND m.version=1)', (repo.namespace, *ids), fetch='all')
+        if rows:
+            values = ','.join('(%s,%s,%s,1,%s)' for _ in rows)
+            repo._execute(f'INSERT INTO {TABLE}(source_seq,namespace,source_updated_at,version,summary) '
+                f'VALUES {values} ON DUPLICATE KEY UPDATE namespace=VALUES(namespace),'
+                'source_updated_at=VALUES(source_updated_at),version=1,summary=VALUES(summary)',
+                tuple(value for row in rows for value in row))
+        return len(rows)

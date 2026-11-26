@@ -49,7 +49,8 @@ def record(status, **extra):
 
 
 def readiness():
-    if any((Path('/etc/sessionquant')/name).exists() for name in ('maintenance', 'storage-blocked')):
+    if any((Path('/etc/sessionquant')/name).exists() for name in (
+            'maintenance', 'storage-blocked', 'projection-preparation-blocked')):
         return 'MAINTENANCE_BLOCKED'
     for unit in UNITS:
         if subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode == 0:

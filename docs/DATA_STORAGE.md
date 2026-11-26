@@ -24,6 +24,8 @@
 
 시스템·설정의 처리 기록은 최근 최대 100건의 결과 요약만 DB에서 조회합니다. 종목별 상세 근거가 담긴 전체 JSON은 접힌 창에서도 브라우저에 전송하지 않습니다. 원본 기록과 주문 연결 근거는 DB에 그대로 보존합니다.
 
+MySQL에서는 별도 처리 요약과 AI 요청 색인을 사용해 반복 본문 조회를 줄입니다. 과거 자료 준비·완전성 확인과 적용 범위는 [DB 조회 개선](DB_QUERY_OPTIMIZATION.md)을 참고합니다. 보관 대상·삭제 기준은 이 색인 준비와 별개입니다.
+
 ## 연구용 완전 기록과의 차이
 
 `config/sessionquant.strategy-lab-websocket.example.yaml`에는 `auxiliary_storage.mode: bounded_diagnostics`가 적용됩니다. 별도 설정 파일을 사용한다면 이 항목도 명시해야 합니다. `full`이 기본값이며 기존 연구용 프로필은 완전 기록을 유지합니다.

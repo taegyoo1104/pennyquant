@@ -169,3 +169,12 @@ def test_standalone_backup_lock_defers_cd(tmp_path, monkeypatch):
     with original(tmp_path/'sessionquant-backup.lock', 'a') as backup:
         fcntl.flock(backup, fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert cd.readiness() == 'LIFECYCLE_BUSY'
+
+
+def test_uncertain_projection_worker_defers_before_starting_deployment(monkeypatch):
+    cd = module()
+    monkeypatch.setattr(Path, 'exists', lambda p: p.name == 'projection-preparation-blocked')
+    commands = Mock(side_effect=AssertionError('must not start deployment or inspect runtime'))
+    monkeypatch.setattr(cd.subprocess, 'run', commands)
+    assert cd.readiness() == 'MAINTENANCE_BLOCKED'
+    commands.assert_not_called()
