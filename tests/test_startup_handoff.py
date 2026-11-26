@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -86,6 +87,18 @@ def test_current_update_handoff_is_private_and_consumed_exactly_once(handoff, st
     assert status in capsys.readouterr().out
     assert not module.MARKER.exists()
     assert not module.consume()
+
+
+@pytest.mark.parametrize("origin", [1.0, 1000000.0])
+@pytest.mark.parametrize("age,allowed", [(-1, False), (0, True), (120, True), (121, False)])
+def test_handoff_expiry_depends_on_elapsed_time_not_clock_origin(handoff, monkeypatch, origin, age, allowed):
+    module, _, _ = handoff
+    clock = [origin]
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    module.create()
+    clock[0] += age
+    assert module.consume() is allowed
+    assert not module.MARKER.exists()
 
 
 @pytest.mark.parametrize("status", ["FAILED", "COMPLETE", "PARTIAL", None])
