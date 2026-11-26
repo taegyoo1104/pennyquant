@@ -23,7 +23,7 @@ import os
 from sessionquant.dashboard.session_app import load_database
 from sessionquant.dashboard.access import is_admin
 assert not is_admin()
-d=load_database("data/sessionquant-paper-local.db",page="대시보드")
+d=load_database("data/sessionquant-paper-local.db",page="대시보드",panel="public")
 assert d.connected and not d.error, "조회 전용 DB 연결 확인 실패"
 '
 # Explicit port-scoped commands; never expose localhost:8501 via Funnel.

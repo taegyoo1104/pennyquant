@@ -176,7 +176,7 @@ if [[ -f /etc/sessionquant/public-enabled ]]; then
     docker compose -f deploy/gcp/compose.public.yaml exec -T viewer python -c '
 from sessionquant.dashboard.session_app import load_database
 from sessionquant.dashboard.access import is_admin
-d=load_database("data/sessionquant-paper-local.db",page="대시보드")
+d=load_database("data/sessionquant-paper-local.db",page="대시보드",panel="public")
 assert not is_admin() and d.connected and not d.error, "공개 화면 DB 조회 확인 실패"
 ' < /dev/null
     python3 deploy/gcp/check_public_routes.py --ready
