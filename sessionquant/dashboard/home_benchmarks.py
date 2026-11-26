@@ -280,10 +280,10 @@ def render_benchmarks(view, context, *, now=None, stream=None, closing=None):
 def render_live_benchmarks(path, *, refresh=True):
     """Independent, small DB read; a chart tick does not rerun controls/news."""
     import streamlit as st
-    from .session_app import load_database
+    from .shared_read import read_page
     @st.fragment(run_every=2 if refresh else None)
     def chart():
-        data=load_database(path,page='대시보드',panel='benchmarks')
+        data=read_page(path,page='대시보드',panel='benchmarks')
         if data.error:
             st.caption('시장 흐름 연결을 확인하고 있어요. 다음 갱신 때 다시 확인합니다.')
         render_benchmarks(data.market_reference,data.context,stream=data.benchmark_stream,closing=data.close_display)

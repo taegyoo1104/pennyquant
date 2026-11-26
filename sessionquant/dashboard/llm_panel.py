@@ -55,7 +55,10 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
             ' · 이후 자체 비용 '+usd(summary['local_cost_since_check_usd'])+' · 추정 잔액 '+usd(summary['estimated_credit_usd']))
         st.caption('실시간 선불 잔액 API는 연결하지 않았습니다. 다른 앱 사용량·조정액은 추정에 포함되지 않습니다.')
         from ..dashboard_mode import inspection_mode
-        if inspection_mode():
+        from .access import is_admin
+        if not is_admin():
+            st.caption('비용 기록은 공개 조회할 수 있습니다. 메모 저장은 관리자 로그인 후 가능합니다.')
+        elif inspection_mode():
             st.caption('점검 모드에서는 저장된 비용 기록만 조회합니다.')
         else:
             with st.expander('수동 잔액·충전 메모'):
@@ -67,6 +70,7 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
                         amount=decimal(value,nonnegative=True)
                         repo.set_control('openai_funding_note',{'total_usd':str(amount),'updated_at':datetime.now(timezone.utc).isoformat(),'source':'user_entered'})
                         st.success('수동 충전 메모를 저장했습니다. 실제 결제는 하지 않았습니다.');st.rerun()
+                    except PermissionError as exc:st.error(str(exc))
                     except ValueError:st.error('0 이상의 금액을 입력하세요.')
                 balance=st.text_input('마지막 확인 크레딧 잔액 USD',key='manual-credit-balance')
                 checked=st.text_input('확인 시각 ISO 8601 · 시간대 필수',key='manual-credit-at')
@@ -76,6 +80,7 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
                         require_writable_dashboard()
                         set_manual_credit(repo,balance,checked)
                         st.success('수동 확인 기준만 저장했습니다.');st.rerun()
+                    except PermissionError as exc:st.error(str(exc))
                     except (ValueError,TypeError,AttributeError):st.error('금액과 과거의 시간대 포함 확인 시각을 입력하세요.')
         rows=repo.recent('llm_calls',limit=500)
         st.caption('최근 최대 500개 감사 기록 기준입니다. 전체 집계는 진단 SQL을 사용하세요.')

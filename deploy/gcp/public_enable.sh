@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 [[ $EUID == 0 ]] || exit 1
 cd /opt/sessionquant
+[[ ! -e /etc/sessionquant/public-shared ]] || { echo '통합 공개 화면이 설정되어 있습니다. public_shared_enable.sh를 사용하세요.' >&2; exit 1; }
 source deploy/gcp/lifecycle_lock.sh
 exec 7>/run/sessionquant-backup.lock
 flock -n 7 || { echo '백업이 끝난 뒤 공개 설정을 진행하세요.' >&2; exit 1; }

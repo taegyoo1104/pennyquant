@@ -124,7 +124,8 @@ def deliver():
         command = run(['docker', 'inspect', 'sessionquant-app-1', '--format', '{{json .Config.Cmd}}'])
         if command != '["python","-m","sessionquant.inspection_dashboard"]':
             raise ValueError('Expected inspection dashboard')
-        for port in ([8501, 8502] if Path('/etc/sessionquant/public-enabled').is_file() else [8501]):
+        legacy_public = Path('/etc/sessionquant/public-enabled').is_file() and not Path('/etc/sessionquant/public-shared').is_file()
+        for port in ([8501, 8502] if legacy_public else [8501]):
             with urlopen(f'http://127.0.0.1:{port}/_stcore/health', timeout=5) as response:
                 if response.status != 200 or response.read(16).strip() != b'ok':
                     raise ValueError('Dashboard health failed')
