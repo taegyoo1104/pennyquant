@@ -22,5 +22,7 @@ def inspection_start_message(now=None):
 
 
 def require_writable_dashboard():
+    from .dashboard.access import require_admin
+    require_admin()
     if inspection_mode():
         raise ValueError(inspection_start_message())

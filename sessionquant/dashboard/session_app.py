@@ -338,6 +338,11 @@ def render_dashboard(path: str | Path, *, usage_path=None, usage_environment=Non
                      panel=None, styled=False) -> None:
     import streamlit as st
     from sessionquant.dashboard.overview import PAGES, render_overview, render_system, render_strategies, style
+    from sessionquant.dashboard.access import is_admin
+    if not is_admin():
+        from sessionquant.dashboard.public_view import render_public
+        render_public(path)
+        return
     if not styled:
         style()
     from sessionquant.dashboard_mode import inspection_mode
@@ -631,6 +636,13 @@ def main() -> None:
     parser.add_argument("--db", default=os.getenv("SQ_DB", "data/sessionquant-paper-local.db"))
     args, _ = parser.parse_known_args()
     st.set_page_config(page_title="SessionQuant · S&P 500 장중매매", page_icon="◈", layout="wide")
+    from sessionquant.dashboard.access import render_login, is_admin
+    with st.sidebar:
+        render_login()
+    if not is_admin():
+        from sessionquant.dashboard.public_view import render_public
+        render_public(Path(args.db))
+        return
     from sessionquant.dashboard.navigation import restore_navigation, remember_navigation
     restore_navigation(st.query_params, st.session_state)
     from sessionquant.dashboard.overview import PAGES, style

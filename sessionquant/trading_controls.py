@@ -29,6 +29,13 @@ def begin_session(repo,*,mode,account_seq=None,now=None,armed=True):
 def enqueue(repo,action,*,run_id,account_seq=None,symbol=None,now=None,command_id=None):
     from .dashboard_mode import require_writable_dashboard
     require_writable_dashboard()
+    from .dashboard.access import protected
+    if action == 'start' and protected():
+        from .market.bars import session_bounds
+        clock = utc(now or datetime.now(timezone.utc))
+        bounds = session_bounds(clock)
+        if not bounds or not bounds[0] <= clock < bounds[1]:
+            raise ValueError('정규장 운영 시간이 아닙니다. 매매를 시작할 수 없습니다.')
     if action not in ACTIONS: raise ValueError('지원하지 않는 거래 제어 요청입니다.')
     if action=='sell_symbol': symbol_valid(symbol)
     now=utc(now or datetime.now(timezone.utc))
@@ -42,6 +49,7 @@ def enqueue(repo,action,*,run_id,account_seq=None,symbol=None,now=None,command_i
     if previous: return previous
     value={'id':cid,'kind':'dashboard_command','action':action,'run_id':run_id,
         'account_seq':account_seq,'symbol':symbol,'requested_at':now.isoformat(),'status':'pending'}
+    value['requested_by'] = 'dashboard_admin' if protected() else 'local_operator'
     repo.record('order_intents',value)
     return value
 
@@ -117,6 +125,10 @@ def request_command(repo,action,*,run_id,environment,symbol=None,now=None):
 def render_controls(repo,*,positions,now=None,environment=None,readonly=False,compact=False,ledger_state=None):
     """실행별 확인 상태를 보존하고 최종 버튼 클릭에서만 기존 큐를 사용한다."""
     import streamlit as st
+    from .dashboard.access import is_admin
+    if not is_admin():
+        st.caption('공개 조회 · 매매 조작은 관리자만 할 수 있습니다.')
+        return
     from .dashboard_mode import inspection_mode, inspection_start_message
     if inspection_mode():
         st.markdown('**자동매매 꺼짐 · 기록 조회 중**')

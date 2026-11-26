@@ -62,6 +62,8 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
                 value=st.text_input('OpenAI에 충전한 총 달러 금액',value=str(summary['deposited']) if summary['deposited'] is not None else '',key='openai-deposit')
                 if st.button('충전 누계 저장',key='save-openai-deposit'):
                     try:
+                        from ..dashboard_mode import require_writable_dashboard
+                        require_writable_dashboard()
                         amount=decimal(value,nonnegative=True)
                         repo.set_control('openai_funding_note',{'total_usd':str(amount),'updated_at':datetime.now(timezone.utc).isoformat(),'source':'user_entered'})
                         st.success('수동 충전 메모를 저장했습니다. 실제 결제는 하지 않았습니다.');st.rerun()
@@ -69,7 +71,11 @@ def render_llm_details(path,*,usage_path=None,usage_environment=None):
                 balance=st.text_input('마지막 확인 크레딧 잔액 USD',key='manual-credit-balance')
                 checked=st.text_input('확인 시각 ISO 8601 · 시간대 필수',key='manual-credit-at')
                 if st.button('수동 확인 잔액 저장',key='manual-credit-save'):
-                    try:set_manual_credit(repo,balance,checked);st.success('수동 확인 기준만 저장했습니다.');st.rerun()
+                    try:
+                        from ..dashboard_mode import require_writable_dashboard
+                        require_writable_dashboard()
+                        set_manual_credit(repo,balance,checked)
+                        st.success('수동 확인 기준만 저장했습니다.');st.rerun()
                     except (ValueError,TypeError,AttributeError):st.error('금액과 과거의 시간대 포함 확인 시각을 입력하세요.')
         rows=repo.recent('llm_calls',limit=500)
         st.caption('최근 최대 500개 감사 기록 기준입니다. 전체 집계는 진단 SQL을 사용하세요.')

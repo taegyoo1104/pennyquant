@@ -171,6 +171,16 @@ else
     systemctl is-active --quiet sessionquant-run-limit.timer
     systemctl is-active --quiet sessionquant-storage-guard.timer
 fi
+if [[ -f /etc/sessionquant/public-enabled ]]; then
+    docker compose -f deploy/gcp/compose.public.yaml up -d --wait --wait-timeout 180 < /dev/null
+    docker compose -f deploy/gcp/compose.public.yaml exec -T viewer python -c '
+from sessionquant.dashboard.session_app import load_database
+from sessionquant.dashboard.access import is_admin
+d=load_database("data/sessionquant-paper-local.db",page="대시보드")
+assert not is_admin() and d.connected and not d.error, "공개 화면 DB 조회 확인 실패"
+' < /dev/null
+    python3 deploy/gcp/check_public_routes.py --ready
+fi
 systemctl list-timers --all 'sessionquant-*' --no-pager
 "${compose[@]}" ps
 if [[ "$sq_mode" == --off-hours ]]; then
