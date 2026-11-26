@@ -188,3 +188,49 @@ def test_expired_legacy_rows_are_not_cached_just_before_deletion(mysql_repositor
     table = result['tables']['research_events']
     assert table.get('metadata_backfill_checked', 0) == 0
     assert 'METADATA_WRITE' not in table['timings'] and not cached(repo)
+
+
+@pytest.mark.parametrize('mixed', [False, True])
+def test_optional_observations_reuse_valid_metadata_and_fallback_only_for_missing_keys(mysql_repositories, monkeypatch, mixed):
+    from dataclasses import asdict
+    from datetime import timedelta
+    from sessionquant.database import retention
+    repo = mysql_repositories(environment='PAPER_LOCAL')
+    other = mysql_repositories(environment='PAPER_LOCAL')
+    now = datetime.now(timezone.utc)
+    for key in ('valid', 'missing', 'stale', 'wrong-namespace'):
+        seed(repo, 'research_events', key, now, legacy=False, kind='engine_batch', run_id='closed',
+             data={'bulk': 'x' * 1700000, **({'news_id': 'protected'} if key in {'stale', 'wrong-namespace'} else {})})
+    seed(other, 'research_events', 'other', now, legacy=False, kind='engine_batch', run_id='closed', data={})
+    ids = {key: source(repo, key)[0] for key in ('valid', 'missing', 'stale', 'wrong-namespace')}
+    if mixed:
+        repo._execute(f'DELETE FROM {meta.TABLE} WHERE source_seq=%s', (ids['missing'],))
+        repo._execute(f'UPDATE {meta.TABLE} SET source_updated_at=source_updated_at + INTERVAL 1 SECOND WHERE source_seq=%s',
+                      (ids['stale'],))
+        repo._execute(f'UPDATE {meta.TABLE} SET namespace=%s WHERE source_seq=%s', (other.namespace, ids['wrong-namespace']))
+    monkeypatch.setattr(retention, 'retention_rules', lambda _: (
+        ('research_events', 'diagnostics_days', "payload->>'$.kind'='engine_batch'"),))
+    report = {'policy': asdict(POLICY), 'status': 'COMPLETE', 'scanned': 0,
+              'deleted': 0, 'errors': [], 'tables': {'research_events': {'deleted': 0}}}
+    previous = {'tables': {'research_events': {'observation': {'generation': {
+        'high_water_seq': 0, 'measured_at': (now - timedelta(minutes=1)).isoformat()}}}}}
+    execute, fallback_keys = repo._execute, []
+    def observe_only(sql, params=(), **kwargs):
+        assert sql.startswith('SELECT') and kwargs.get('optional_observation')
+        assert 'MAX_EXECUTION_TIME(' in sql and params[0] == repo.namespace
+        if 'payload' in sql:
+            assert mixed and 'FORCE INDEX (PRIMARY)' in sql and 'seq IN (' in sql
+            fallback_keys.extend(params[1:])
+            assert ids['valid'] not in params[1:]
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', observe_only)
+    retention._observe_retention(repo, report, previous, {'news': {'protected'}, 'selection': set()},
+        {'research_events': {'highest': 0, 'new_min': 0, 'exact': True}}, monotonic()+30, monotonic, now)
+    obs = report['tables']['research_events']['observation']
+    assert obs['status'] == 'COMPLETE' and obs['backlog_status'] == 'PRESENT'
+    assert obs['eligible_rows_min'] == 2 and obs['backlog_exact']
+    assert obs['generation']['rows_min'] == 4 and obs['generation']['exact']
+    assert obs['metadata_hits'] == (2 if mixed else 8)
+    assert report['observability']['observation_scanned'] == 17  # endpoint + both key/row samples
+    assert set(fallback_keys) == ({ids[x] for x in ('missing', 'stale', 'wrong-namespace')} if mixed else set())
+    assert len(fallback_keys) == (6 if mixed else 0)  # backlog and generation both use only missing keys

@@ -16,6 +16,81 @@ import pytest
 pytestmark = pytest.mark.skipif(os.getenv("PQ_TEST_MYSQL") != "1", reason="requires opt-in real MySQL 8")
 
 
+def test_mysql_pipeline_materialized_summary_preserves_large_payloads_and_old_writers(mysql_repositories, monkeypatch):
+    import json
+    from sessionquant.database import pipeline_summary as cached
+    from sessionquant.database.mysql_repository import MySQLRepository
+    from sessionquant.database.pipeline_projection import expression, summary
+    from test_pipeline_projection import assert_projection
+
+    repo = mysql_repositories()
+    assert cached.available(repo), 'integration fixture must enable summary triggers'
+    repo._execute('INSERT INTO pq_pipeline_status(namespace,payload,captured_at) VALUES(%s,%s,CURRENT_TIMESTAMP(6))',
+                  (repo.namespace, json.dumps({'id': 'raw-insert', 'approved': False})))
+    assert repo.recent_pipeline_summary(1) == [{'id': 'raw-insert', 'approved': False}]
+    repo._execute('DELETE FROM pq_pipeline_status WHERE namespace=%s', (repo.namespace,))
+    assert_projection(repo)
+    repo.record('pipeline_status', {'id': 'large', 'kind': 'legacy', 'reason': '한' * 1000,
+        'approved': False, 'included_count': 0, 'status': None, 'items': [{'body': 'x' * 2200000}]})
+    expected = summary(repo._execute(f"SELECT {expression('mysql')} FROM pq_pipeline_status "
+        'WHERE namespace=%s ORDER BY seq DESC LIMIT 1', (repo.namespace,), fetch='one')[0])
+    seq, stamp = repo._execute('SELECT seq,updated_at FROM pq_pipeline_status WHERE namespace=%s '
+        'ORDER BY seq DESC LIMIT 1', (repo.namespace,), fetch='one')
+    other = mysql_repositories()
+    other.record('pipeline_status', {'id': 'private', 'status': 'other namespace'})
+    reader = MySQLRepository('integration.db', repo.config, initialize=False)
+    try:
+        calls = []
+        execute = reader._execute
+        def tracked(sql, *args, **kwargs):
+            calls.append(sql)
+            return execute(sql, *args, **kwargs)
+        monkeypatch.setattr(reader, '_execute', tracked)
+        assert reader.recent_pipeline_summary(1) == [expected]
+        assert not any('JSON_EXTRACT(' in sql or 'SELECT payload' in sql for sql in calls)
+        # An old writer using raw SQL, even with unchanged updated_at, must
+        # update the small summary in the same transaction.
+        repo._execute("UPDATE pq_pipeline_status SET payload=JSON_SET(payload,'$.status','changed'),updated_at=%s "
+                      'WHERE seq=%s', (stamp, seq))
+        assert reader.recent_pipeline_summary(1)[0]['status'] == 'changed'
+        with pytest.raises(RuntimeError):
+            with repo.transaction():
+                repo._execute("UPDATE pq_pipeline_status SET payload=JSON_SET(payload,'$.status','rollback') WHERE seq=%s", (seq,))
+                assert repo.recent_pipeline_summary(1)[0]['status'] == 'rollback'
+                raise RuntimeError('rollback')
+        assert reader.recent_pipeline_summary(1)[0]['status'] == 'changed'
+        repo.record('pipeline_status', {'id': 'large', 'kind': 'legacy', 'approved': True})
+        assert reader.recent_pipeline_summary(1) == [{'id': 'large', 'kind': 'legacy', 'approved': True}]
+        raw = repo._execute(f'SELECT summary FROM {cached.TABLE} WHERE source_seq=%s', (seq,), fetch='one')[0]
+        assert len(json.dumps(json.loads(raw))) < 5000
+        repo._execute('DELETE FROM pq_pipeline_status WHERE namespace=%s AND seq=%s', (repo.namespace, seq))
+        assert repo._execute(f'SELECT 1 FROM {cached.TABLE} WHERE source_seq=%s', (seq,), fetch='one') is None
+        assert other.recent_pipeline_summary(1)[0]['id'] == 'private'
+    finally:
+        reader.close()
+
+
+def test_mysql_pipeline_missing_stale_and_wrong_version_summaries_use_recent_window(mysql_repositories, monkeypatch):
+    from sessionquant.database import pipeline_summary as cached
+    repo = mysql_repositories()
+    for index in range(6):
+        repo.record('pipeline_status', {'id': str(index), 'approved': bool(index % 2), 'rows': ['x' * 10000]})
+    keys = repo._execute('SELECT seq FROM pq_pipeline_status WHERE namespace=%s ORDER BY seq DESC LIMIT 3',
+                         (repo.namespace,), fetch='all')
+    repo._execute(f'DELETE FROM {cached.TABLE} WHERE source_seq=%s', (keys[0][0],))
+    repo._execute(f'UPDATE {cached.TABLE} SET source_updated_at=source_updated_at-INTERVAL 1 SECOND WHERE source_seq=%s', (keys[1][0],))
+    repo._execute(f'UPDATE {cached.TABLE} SET version=999 WHERE source_seq=%s', (keys[2][0],))
+    execute = repo._execute
+    fallback_ids = []
+    def tracked(sql, params=(), **kwargs):
+        if sql.startswith('SELECT seq,JSON_ARRAY('):
+            fallback_ids.extend(params[1:])
+        return execute(sql, params, **kwargs)
+    monkeypatch.setattr(repo, '_execute', tracked)
+    assert [r['id'] for r in repo.recent_pipeline_summary(3)] == ['3', '4', '5']
+    assert fallback_ids == [row[0] for row in keys]
+
+
 def test_mysql_credit_projection_matches_sqlite_legacy_time_semantics(mysql_repositories,tmp_path):
     from decimal import Decimal
     from sessionquant.database.repository import Repository
