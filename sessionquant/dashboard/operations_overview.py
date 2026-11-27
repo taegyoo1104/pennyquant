@@ -140,6 +140,8 @@ def render_operations(data, view, path, *, panel=None):
     st.markdown('<div class="sq-hero"><div><h1>SESSIONQUANT</h1>'
         '<p>'+escape(market_hours_label(now))+'</p></div>'
         '<span class="sq-pill">모의매매</span></div>', unsafe_allow_html=True)
+    from .session_hours import session_hours_html
+    st.markdown(session_hours_html(now), unsafe_allow_html=True)
     from .access import is_admin, can_browse, shared_dashboard
     if not is_admin():
         st.caption('공개 조회 · 실제 시세 기반 모의매매')

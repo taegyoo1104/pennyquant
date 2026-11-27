@@ -26,6 +26,15 @@ def style():
     .sq-eyebrow {font-size:.73rem;letter-spacing:.16em;color:var(--sq-accent);font-weight:650}
     .sq-hero h1 {font-size:clamp(1.65rem,3vw,2.35rem);letter-spacing:-.055em;margin:8px 0;color:var(--sq-text);padding:0}
     .sq-hero p {color:var(--sq-muted);font-size:.9rem;margin:0}
+    .sq-session-hours {border:1px solid var(--sq-card-border);border-radius:16px;
+      background:var(--sq-card-bg);padding:16px 20px;margin:0 0 16px}
+    .sq-session-heading {display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .sq-session-heading span {font-size:.85rem;color:var(--sq-accent)}
+    .sq-session-hours p {font-size:.8rem;color:var(--sq-muted);margin:6px 0 0;overflow-wrap:anywhere}
+    .sq-session-times {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0}
+    .sq-session-times span {display:block;font-size:.8rem;color:var(--sq-muted)}
+    .sq-session-times strong {display:block;font-size:1.05rem;color:var(--sq-text)}
+    .sq-session-hours .sq-session-warning {color:#f3cb78}
     .sq-pill {display:inline-block;padding:7px 12px;border-radius:100px;background:#183d39;
       border:1px solid #285a50;color:#8eead8;font-size:.8rem;white-space:nowrap}
     .sq-section {display:flex;justify-content:space-between;gap:12px;align-items:baseline;margin:22px 0 10px}
