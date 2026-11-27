@@ -320,6 +320,7 @@ def market_hours_label(now):
         times=schedule_times(now)
         if times is None:return '정규장 아님 · 뉴스 확인 가능'
         if now < times['opens_at'] or now >= times['closes_at']:return '장외 시간 · 뉴스 확인 가능'
+        if times['entry_start'] >= times['entry_end']:return '오늘 신규 매수 없음 · 보유 종목 관리'
         if now < times['entry_start']:
             from zoneinfo import ZoneInfo
             starts = times['entry_start'].astimezone(ZoneInfo('Asia/Seoul')).strftime('%H:%M')
